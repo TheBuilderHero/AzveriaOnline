@@ -1,1 +1,112 @@
-Online Game
+# Azveria Online
+
+Azveria Online is a Laravel-based strategy web app with role-based screens for players and admins.
+
+## Core Stack
+- Backend API/Auth/Business Rules: Laravel (PHP 8.3)
+- Real-time: Ratchet WebSocket server (chat + announcements only)
+- Database: MySQL 8
+- Containers: Docker Compose on one internal bridge network
+
+## Why WebSocket Is Limited
+WebSocket is only used where real-time value is high:
+- Global announcements stream
+- Group chat / direct message live delivery
+
+Everything else uses REST:
+- Nation stats pages
+- Map layer metadata and terrain summaries
+- Shop listings and purchases
+- Settings and help/meta
+
+## Player Navigation
+
+### Player
+- Full nation dashboard with:
+  - Resources
+  - Leader
+  - Alliances
+  - Terrain percentages (grassland, mountain, fresh water bodies, hills, desert)
+  - Units owned and units in training (separated)
+  - Buildings and buildings in construction/upgrade (separated)
+  - Editable About field with save action
+
+### Announcements
+- Read-only global feed for players.
+- Admins are the only senders.
+
+### Map
+- Center map with zoom + pan interaction.
+- Right panel toggle for:
+  - Main map
+  - Terrain map
+  - Political alignment map
+- Terrain square mileage summary for current player under the toggle list.
+
+### Chat
+- Right side chat list (group + direct).
+- Center active conversation.
+- Chat creation flow with member selection and custom chat name.
+
+### Other Nations
+- Dynamic page based on logged-in user.
+- Right panel nation selector.
+- Search box with partial substring match on nation name and player name format:
+  - NationName (PlayerName)
+
+### Shop
+- Right side categories:
+  - Refinement
+  - Upgrades
+  - Recruitment
+  - Crafting
+- Center list of items with costs and buy action.
+- Cost model supports easy expansion beyond Cow, Wood, Ore, Food.
+
+### Settings
+- Light / dark mode.
+- Color blindness modes.
+- Optional dog bark sound on user actions.
+
+### Help Dropdown
+- About
+- Documentation (opens repository README)
+- Logout
+
+## Persistent Top Bar Resource Display
+Every player screen includes current:
+- Cow
+- Wood
+- Ore
+- Food
+
+## Data Foundations
+Source content has been mapped from your Azveria files into the backend design:
+- Rules and resources
+- Structures and terrain
+- War and army behavior
+- Dakotians unit examples
+
+## Project Files
+- Docker stack: `docker-compose.yml`
+- SQL schema: `database/init/001_schema.sql`
+- Backend architecture: `docs/backend-blueprint.md`
+- Ratchet service: `backend/websocket/server.php`
+
+## Quick Start
+1. Start services:
+	- `docker compose up -d --build`
+2. Create Laravel app folder (first run only):
+	- `docker compose exec app composer create-project laravel/laravel .`
+3. Copy env:
+	- `cp backend/.env.example backend/laravel/.env`
+4. Generate app key:
+	- `docker compose exec app php artisan key:generate`
+5. Run migrations (if moving schema from SQL into Laravel migrations):
+	- `docker compose exec app php artisan migrate`
+
+## Next Implementation Milestones
+1. Implement Laravel models/policies/controllers for all endpoints in the blueprint.
+2. Add Sanctum/JWT auth and role middleware.
+3. Wire frontend shell with left menu, top resource bar, and role-specific navigation.
+4. Integrate chat and announcements with Ratchet channels.

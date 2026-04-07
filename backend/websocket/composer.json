@@ -1,0 +1,12 @@
+{
+  "name": "azveria/websocket",
+  "type": "project",
+  "require": {
+    "cboden/ratchet": "^0.4"
+  },
+  "autoload": {
+    "psr-4": {
+      "Azveria\\Ws\\": "src/"
+    }
+  }
+}

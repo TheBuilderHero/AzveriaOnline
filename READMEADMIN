@@ -1,0 +1,71 @@
+# Azveria Online Admin Guide
+
+This document defines admin-only behavior in the Azveria Online web app.
+
+## Admin Navigation
+
+### Announcements
+- View global announcement history.
+- Send new global announcements.
+- Player accounts can read but cannot post.
+
+### All Nations
+- Right panel nation selector + search.
+- Center panel editable nation state.
+- Save: commits changes to selected nation.
+- Cancel: reverts unsaved values to snapshot from select-time.
+- Supports creating placeholder (dummy) nations with full editable stats.
+
+### Map
+- View and pan/zoom all map layers.
+- Upload replacement images for:
+	- Main map
+	- Terrain map
+	- Political map
+- Changes are global and instantly visible to all users.
+
+### Chat
+- Access all chats.
+- Create/delete group chats.
+- Add/remove members in group chats.
+- Direct message any player.
+
+### Shop
+- Manage categories:
+	- Refinement
+	- Upgrades
+	- Recruitment
+	- Crafting
+- Edit item cost/effect definitions.
+- Save persists changes globally for all players.
+
+### Help Dropdown
+- About (website version + game version + metadata)
+- Documentation (opens admin readme)
+- Logout
+
+## API Permission Boundaries
+- Admin has full CRUD on nations, map layers, shop catalog, and chat membership.
+- Player has self-scope write access only (nation about/settings and player actions).
+
+## Realtime
+WebSocket channels are used for:
+- Announcements broadcast
+- Chat messages/presence
+
+Admin mutation endpoints still go through Laravel REST APIs, then broadcast via websocket where relevant.
+
+## Audit and Safety Notes
+- Every admin save operation should produce an audit record with:
+	- actor user id
+	- target table/entity
+	- before/after payload diff
+	- timestamp
+- Use optimistic locking for nation/shop edits to avoid overwriting concurrent admin updates.
+
+## Source Rule Mapping
+Admin tools are designed around the attached Azveria data sets:
+- Azveria rules/resources
+- Structures/terrain
+- War system and unit semantics
+- Dakotians sample statline
