@@ -23,6 +23,10 @@ class UpdateNationRequest extends FormRequest
             'resources.wood' => ['nullable', 'numeric'],
             'resources.ore' => ['nullable', 'numeric'],
             'resources.food' => ['nullable', 'numeric'],
+            'refined_resources' => ['sometimes', 'nullable', 'array'],
+            'refined_resources.*' => ['numeric'],
+            'currencies' => ['sometimes', 'nullable', 'array'],
+            'currencies.*' => ['numeric'],
         ];
     }
 }

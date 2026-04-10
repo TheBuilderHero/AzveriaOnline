@@ -168,6 +168,7 @@ CREATE TABLE IF NOT EXISTS shop_items (
   cost_json JSON NOT NULL,
   effect_json JSON NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
+  visibility_json JSON NULL COMMENT 'null = global; ["all"] = global; [1,2,3] = only those user IDs',
   CONSTRAINT fk_shop_items_category FOREIGN KEY (category_id) REFERENCES shop_categories(id) ON DELETE CASCADE
 );
 
@@ -185,7 +186,8 @@ INSERT INTO shop_categories (code, display_name) VALUES
   ('refinement', 'Refinement'),
   ('upgrades', 'Upgrades'),
   ('recruitment', 'Recruitment'),
-  ('crafting', 'Crafting')
+  ('crafting', 'Crafting'),
+  ('currency_exchange', 'Currency Exchange')
 ON DUPLICATE KEY UPDATE display_name = VALUES(display_name);
 
 INSERT INTO map_layers (layer_type, image_path, updated_at) VALUES

@@ -79,25 +79,73 @@ class AdminController extends Controller
 
         if (isset($data['resources'])) {
             $res = DB::table('nation_resources')->where('nation_id', $nationId)->first();
+            $extra = json_decode($res->extra_json ?? '{}', true) ?: [];
+            if (isset($data['refined_resources'])) {
+                $extra['refined'] = array_merge($extra['refined'] ?? [], $data['refined_resources']);
+            }
+            if (isset($data['currencies'])) {
+                $extra['currencies'] = array_merge($extra['currencies'] ?? [], $data['currencies']);
+            }
             DB::table('nation_resources')->where('nation_id', $nationId)->update([
                 'cow' => $data['resources']['cow'] ?? ($res->cow ?? 0),
                 'wood' => $data['resources']['wood'] ?? ($res->wood ?? 0),
                 'ore' => $data['resources']['ore'] ?? ($res->ore ?? 0),
                 'food' => $data['resources']['food'] ?? ($res->food ?? 0),
+                'extra_json' => json_encode($extra),
+                'updated_at' => now(),
+            ]);
+        } elseif (isset($data['refined_resources']) || isset($data['currencies'])) {
+            $res = DB::table('nation_resources')->where('nation_id', $nationId)->first();
+            $extra = json_decode($res->extra_json ?? '{}', true) ?: [];
+            if (isset($data['refined_resources'])) {
+                $extra['refined'] = array_merge($extra['refined'] ?? [], $data['refined_resources']);
+            }
+            if (isset($data['currencies'])) {
+                $extra['currencies'] = array_merge($extra['currencies'] ?? [], $data['currencies']);
+            }
+            DB::table('nation_resources')->where('nation_id', $nationId)->update([
+                'extra_json' => json_encode($extra),
                 'updated_at' => now(),
             ]);
         }
 
-        DB::table('audit_logs')->insert([
-            'actor_user_id' => $request->user()->id,
-            'entity_type' => 'nation',
-            'entity_id' => $nationId,
-            'before_json' => json_encode($nation),
-            'after_json' => json_encode(DB::table('nations')->where('id', $nationId)->first()),
-            'created_at' => now(),
+        return response()->json(['message' => 'Nation updated']);
+    }
+
+    public function addUnitToNation(Request $request, int $nationId)
+    {
+        $data = $request->validate([
+            'unit_catalog_id' => ['required', 'integer', 'exists:unit_catalog,id'],
+            'qty' => ['required', 'integer', 'min:1'],
+            'status' => ['sometimes', 'in:owned,training'],
         ]);
 
-        return response()->json(['message' => 'Nation updated']);
+        $nation = DB::table('nations')->where('id', $nationId)->first();
+        if (!$nation) {
+            return response()->json(['message' => 'Nation not found'], 404);
+        }
+
+        $existing = DB::table('nation_units')
+            ->where('nation_id', $nationId)
+            ->where('unit_catalog_id', $data['unit_catalog_id'])
+            ->where('status', $data['status'] ?? 'owned')
+            ->first();
+
+        if ($existing) {
+            DB::table('nation_units')->where('id', $existing->id)
+                ->update(['qty' => $existing->qty + $data['qty'], 'updated_at' => now()]);
+        } else {
+            DB::table('nation_units')->insert([
+                'nation_id' => $nationId,
+                'unit_catalog_id' => $data['unit_catalog_id'],
+                'qty' => $data['qty'],
+                'status' => $data['status'] ?? 'owned',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        return response()->json(['message' => 'Unit added']);
     }
 
     public function createChat(StoreChatRequest $request)
@@ -148,18 +196,12 @@ class AdminController extends Controller
             'cost_json' => array_key_exists('cost_json', $data) ? json_encode($data['cost_json']) : $item->cost_json,
             'effect_json' => array_key_exists('effect_json', $data) ? json_encode($data['effect_json']) : $item->effect_json,
             'is_active' => array_key_exists('is_active', $data) ? (int) $data['is_active'] : $item->is_active,
+            'visibility_json' => array_key_exists('visibility_json', $data)
+                ? ($data['visibility_json'] === null ? null : json_encode(array_values(array_map('intval', $data['visibility_json']))))
+                : $item->visibility_json,
         ];
 
         DB::table('shop_items')->where('id', $itemId)->update($updated);
-
-        DB::table('audit_logs')->insert([
-            'actor_user_id' => $request->user()->id,
-            'entity_type' => 'shop_item',
-            'entity_id' => $itemId,
-            'before_json' => json_encode($item),
-            'after_json' => json_encode(DB::table('shop_items')->where('id', $itemId)->first()),
-            'created_at' => now(),
-        ]);
 
         return response()->json(['message' => 'Shop item updated']);
     }

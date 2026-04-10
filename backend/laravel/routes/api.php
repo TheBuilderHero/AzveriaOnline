@@ -63,6 +63,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/nations', [AdminController::class, 'nations']);
         Route::post('/nations', [AdminController::class, 'createPlaceholderNation']);
         Route::put('/nations/{nationId}', [AdminController::class, 'updateNation']);
+        Route::post('/nations/{nationId}/units', [AdminController::class, 'addUnitToNation']);
         Route::post('/maps/layers/{layerType}', [MapController::class, 'uploadLayer']);
         Route::post('/chats', [AdminController::class, 'createChat']);
         Route::delete('/chats/{chatId}', [AdminController::class, 'deleteChat']);

@@ -44,10 +44,22 @@ class MeController extends Controller
             ->select('nb.*', 'bc.display_name', 'bc.code')
             ->get();
 
+        $extra = json_decode($resources->extra_json ?? '{}', true) ?: [];
+        $structuredResources = [
+            'base' => [
+                'cow'  => (float) $resources->cow,
+                'wood' => (float) $resources->wood,
+                'ore'  => (float) $resources->ore,
+                'food' => (float) $resources->food,
+            ],
+            'refined'    => $extra['refined']    ?? [],
+            'currencies' => $extra['currencies'] ?? [],
+        ];
+
         return response()->json([
             'user' => $request->user(),
             'nation' => $nation,
-            'resources' => $resources,
+            'resources' => $structuredResources,
             'terrain' => $terrain,
             'units' => [
                 'owned' => $unitsOwned,
@@ -67,7 +79,21 @@ class MeController extends Controller
             return response()->json(['message' => 'No nation assigned'], 404);
         }
 
-        return response()->json(DB::table('nation_resources')->where('nation_id', $nation->id)->first());
+        $row = DB::table('nation_resources')->where('nation_id', $nation->id)->first();
+        if (!$row) {
+            return response()->json(['message' => 'No resources found'], 404);
+        }
+        $extra = json_decode($row->extra_json ?? '{}', true) ?: [];
+        return response()->json([
+            'base' => [
+                'cow'  => (float) $row->cow,
+                'wood' => (float) $row->wood,
+                'ore'  => (float) $row->ore,
+                'food' => (float) $row->food,
+            ],
+            'refined'    => $extra['refined']    ?? [],
+            'currencies' => $extra['currencies'] ?? [],
+        ]);
     }
 
     public function updateAbout(UpdateAboutRequest $request)

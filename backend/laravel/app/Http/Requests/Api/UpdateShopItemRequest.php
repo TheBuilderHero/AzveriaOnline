@@ -16,8 +16,10 @@ class UpdateShopItemRequest extends FormRequest
         return [
             'display_name' => ['sometimes', 'string', 'max:160'],
             'cost_json' => ['sometimes', 'array'],
-            'effect_json' => ['sometimes', 'array'],
+            'effect_json' => ['sometimes', 'nullable', 'array'],
             'is_active' => ['sometimes', 'boolean'],
+            'visibility_json' => ['sometimes', 'nullable', 'array'],
+            'visibility_json.*' => ['integer', 'exists:users,id'],
         ];
     }
 }
