@@ -1,0 +1,9 @@
+laravel/public/storage
+laravel/vendor
+laravel/node_modules
+laravel/storage/logs
+laravel/storage/framework/cache
+laravel/storage/framework/sessions
+laravel/storage/framework/views
+laravel/.git
+laravel/bootstrap/cache/*.php

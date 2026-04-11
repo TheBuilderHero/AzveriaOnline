@@ -115,11 +115,14 @@ Source content has been mapped from your Azveria files into the backend design:
 
 ## Docker compose
 
+MySQL init scripts are baked into the MySQL image via `database/mysql/Dockerfile` (not mounted at runtime).
+App and Nginx are also image-contained (no host bind mounts for source code), so compose works in SSH remote context.
+
 - Create remote context:
   - docker context create remote --docker "host=ssh://kotaadmin@192.168.0.15"
 - Use remote context:
   - docker context use remote
-  - docker compose up -d
+  - docker compose up -d --build
 - Switch back to local Docker Desktop (important for local Windows bind mounts):
   - docker context use default
   - docker compose up -d --build
