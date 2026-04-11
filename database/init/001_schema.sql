@@ -201,8 +201,12 @@ CREATE TABLE IF NOT EXISTS admin_notifications (
 CREATE TABLE IF NOT EXISTS game_time (
   id TINYINT UNSIGNED PRIMARY KEY,
   started_at TIMESTAMP NOT NULL,
-  seconds_per_year INT UNSIGNED NOT NULL DEFAULT 1209600,
+  year_started_at TIMESTAMP NULL,
+  seconds_per_year INT UNSIGNED NOT NULL DEFAULT 172800,
   processed_years INT UNSIGNED NOT NULL DEFAULT 0,
+  elapsed_hours_in_year DECIMAL(10,2) NOT NULL DEFAULT 0,
+  auto_increment_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  year_label_offset INT NOT NULL DEFAULT 0,
   updated_at TIMESTAMP NULL
 );
 
@@ -218,6 +222,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
 
 INSERT INTO shop_categories (code, display_name) VALUES
   ('refinement', 'Refinement'),
+  ('structures', 'Structures'),
   ('upgrades', 'Upgrades'),
   ('recruitment', 'Recruitment'),
   ('crafting', 'Crafting'),
@@ -230,6 +235,6 @@ INSERT INTO map_layers (layer_type, image_path, updated_at) VALUES
   ('political', 'maps/political-map.png', NOW())
 ON DUPLICATE KEY UPDATE image_path = VALUES(image_path), updated_at = VALUES(updated_at);
 
-INSERT INTO game_time (id, started_at, seconds_per_year, processed_years, updated_at) VALUES
-  (1, NOW(), 1209600, 0, NOW())
+INSERT INTO game_time (id, started_at, year_started_at, seconds_per_year, processed_years, elapsed_hours_in_year, auto_increment_enabled, year_label_offset, updated_at) VALUES
+  (1, NOW(), NOW(), 172800, 0, 0, 1, 0, NOW())
 ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at);

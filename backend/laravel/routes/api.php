@@ -70,6 +70,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('/new-account-defaults', [AdminController::class, 'updateNewAccountDefaults']);
         Route::patch('/users/{userId}/password', [AuthController::class, 'adminResetPassword']);
         Route::get('/time-tracker', [AdminController::class, 'timeTracker']);
+        Route::patch('/time-tracker', [AdminController::class, 'updateTimeTracker']);
+        Route::post('/time-tracker/next-year', [AdminController::class, 'advanceYear']);
         Route::get('/notifications', [AdminController::class, 'notifications']);
         Route::delete('/notifications/{notificationId}', [AdminController::class, 'deleteNotification']);
         Route::post('/maps/layers/{layerType}', [MapController::class, 'uploadLayer']);

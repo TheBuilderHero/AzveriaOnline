@@ -10,6 +10,7 @@ use App\Http\Requests\Api\UpdateShopItemRequest;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class AdminController extends Controller
 {
@@ -317,14 +318,20 @@ class AdminController extends Controller
 
         DB::table('shop_items')->where('id', $itemId)->update($updated);
 
-        return response()->json(['message' => 'Shop item updated']);
+        $fresh = DB::table('shop_items as si')
+            ->join('shop_categories as sc', 'si.category_id', '=', 'sc.id')
+            ->where('si.id', $itemId)
+            ->select('si.*', 'sc.code as category_code', 'sc.display_name as category_name')
+            ->first();
+
+        return response()->json(['message' => 'Shop item updated', 'item' => $fresh]);
     }
 
     public function createShopItem(Request $request)
     {
         $data = $request->validate([
             'category_id' => ['required', 'integer', 'exists:shop_categories,id'],
-            'code' => ['required', 'string', 'max:64', 'unique:shop_items,code'],
+            'code' => ['sometimes', 'nullable', 'string', 'max:64', 'unique:shop_items,code'],
             'display_name' => ['required', 'string', 'max:160'],
             'description_text' => ['sometimes', 'nullable', 'string', 'max:20000'],
             'cost_json' => ['sometimes', 'array'],
@@ -336,9 +343,25 @@ class AdminController extends Controller
             'visibility_json.*' => ['integer', 'exists:users,id'],
         ]);
 
+        $categoryCode = DB::table('shop_categories')->where('id', $data['category_id'])->value('code') ?? 'item';
+        $baseCode = $data['code']
+            ? Str::slug((string) $data['code'], '_')
+            : Str::slug($categoryCode . '_' . $data['display_name'], '_');
+        $baseCode = trim($baseCode, '_');
+        if ($baseCode === '') {
+            $baseCode = 'item';
+        }
+
+        $generatedCode = $baseCode;
+        $suffix = 2;
+        while (DB::table('shop_items')->where('code', $generatedCode)->exists()) {
+            $generatedCode = $baseCode . '_' . $suffix;
+            $suffix++;
+        }
+
         $itemId = DB::table('shop_items')->insertGetId([
             'category_id' => $data['category_id'],
-            'code' => $data['code'],
+            'code' => $generatedCode,
             'display_name' => $data['display_name'],
             'description_text' => $data['description_text'] ?? null,
             'cost_json' => json_encode($data['cost_json'] ?? new \stdClass()),
@@ -351,7 +374,13 @@ class AdminController extends Controller
                 : null,
         ]);
 
-        return response()->json(['message' => 'Shop item created', 'id' => $itemId], 201);
+        $fresh = DB::table('shop_items as si')
+            ->join('shop_categories as sc', 'si.category_id', '=', 'sc.id')
+            ->where('si.id', $itemId)
+            ->select('si.*', 'sc.code as category_code', 'sc.display_name as category_name')
+            ->first();
+
+        return response()->json(['message' => 'Shop item created', 'id' => $itemId, 'item' => $fresh], 201);
     }
 
     public function deleteShopItem(int $itemId)
@@ -363,7 +392,27 @@ class AdminController extends Controller
 
     public function notifications()
     {
-        $rows = DB::table('admin_notifications')->orderByDesc('created_at')->get();
+        $query = DB::table('admin_notifications')->orderByDesc('created_at');
+
+        $type = request()->query('type');
+        if (is_string($type) && $type !== '') {
+            $query->where('type', $type);
+        }
+
+        $nationId = request()->query('nation_id');
+        if ($nationId !== null && $nationId !== '') {
+            $query->whereRaw('JSON_EXTRACT(meta_json, "$.nation_id") = ?', [(int) $nationId]);
+        }
+
+        $userId = request()->query('user_id');
+        if ($userId !== null && $userId !== '') {
+            $query->where(function ($q) use ($userId) {
+                $q->whereRaw('JSON_EXTRACT(meta_json, "$.actor_user_id") = ?', [(int) $userId])
+                  ->orWhereRaw('JSON_EXTRACT(meta_json, "$.target_user_id") = ?', [(int) $userId]);
+            });
+        }
+
+        $rows = $query->get();
         DB::table('admin_notifications')->where('is_read', 0)->update(['is_read' => 1, 'read_at' => now()]);
         return response()->json($rows);
     }
@@ -376,18 +425,112 @@ class AdminController extends Controller
 
     public function timeTracker()
     {
-        $processed = $this->processElapsedYears();
+        $processed = $this->syncTimeProgress();
         $state = $this->getGameTimeState();
-        $elapsedYears = (int) floor(max(0, now()->timestamp - strtotime($state->started_at)) / max(1, (int) $state->seconds_per_year));
+        $hoursPerYear = max(0.01, (float) $state->seconds_per_year / 3600);
+        $elapsedHours = $state->auto_increment_enabled
+            ? max(0, (now()->timestamp - strtotime($state->year_started_at ?? $state->started_at)) / 3600)
+            : (float) $state->elapsed_hours_in_year;
+        $currentGameYear = ((int) $state->processed_years + 1) + (int) ($state->year_label_offset ?? 0);
 
         return response()->json([
             'started_at' => $state->started_at,
+            'year_started_at' => $state->year_started_at,
             'seconds_per_year' => (int) $state->seconds_per_year,
+            'hours_per_year' => $hoursPerYear,
+            'elapsed_hours_in_year' => round($elapsedHours, 2),
+            'auto_increment_enabled' => (bool) $state->auto_increment_enabled,
+            'year_label_offset' => (int) ($state->year_label_offset ?? 0),
             'processed_years' => (int) $state->processed_years,
-            'elapsed_years' => $elapsedYears,
-            'current_game_year' => $elapsedYears + 1,
+            'current_game_year' => $currentGameYear,
             'processed_now' => $processed,
         ]);
+    }
+
+    public function updateTimeTracker(Request $request)
+    {
+        $data = $request->validate([
+            'seconds_per_year' => ['sometimes', 'numeric', 'min:1'],
+            'hours_per_year' => ['sometimes', 'numeric', 'min:0.01'],
+            'elapsed_hours_in_year' => ['sometimes', 'numeric', 'min:0'],
+            'auto_increment_enabled' => ['sometimes', 'boolean'],
+            'current_game_year' => ['sometimes', 'integer', 'min:1'],
+            'apply_year_change_effects' => ['sometimes', 'boolean'],
+        ]);
+
+        $this->syncTimeProgress();
+        $state = $this->getGameTimeState();
+
+        $secondsPerYear = (int) $state->seconds_per_year;
+        if (array_key_exists('hours_per_year', $data)) {
+            $secondsPerYear = max(1, (int) round(((float) $data['hours_per_year']) * 3600));
+        }
+        if (array_key_exists('seconds_per_year', $data)) {
+            $secondsPerYear = max(1, (int) round((float) $data['seconds_per_year']));
+        }
+
+        $autoIncrementEnabled = array_key_exists('auto_increment_enabled', $data)
+            ? (int) ((bool) $data['auto_increment_enabled'])
+            : (int) $state->auto_increment_enabled;
+
+        $elapsedHours = (float) $state->elapsed_hours_in_year;
+        if ($state->auto_increment_enabled) {
+            $elapsedHours = max(0, (now()->timestamp - strtotime($state->year_started_at ?? $state->started_at)) / 3600);
+        }
+        if (array_key_exists('elapsed_hours_in_year', $data)) {
+            $elapsedHours = (float) $data['elapsed_hours_in_year'];
+        }
+        $hoursPerYear = max(0.01, $secondsPerYear / 3600);
+        $elapsedHours = min($elapsedHours, $hoursPerYear);
+
+        $yearOffset = (int) ($state->year_label_offset ?? 0);
+        $currentDisplayYear = ((int) $state->processed_years + 1) + $yearOffset;
+        if (array_key_exists('current_game_year', $data)) {
+            $targetYear = (int) $data['current_game_year'];
+            $delta = $targetYear - $currentDisplayYear;
+            if ($delta > 0 && (bool) ($data['apply_year_change_effects'] ?? false)) {
+                $this->processYears($delta);
+                $state = $this->getGameTimeState();
+                $yearOffset = (int) ($state->year_label_offset ?? 0);
+            } else {
+                $yearOffset += $delta;
+            }
+        }
+
+        $yearStartedAt = now()->subSeconds((int) round($elapsedHours * 3600));
+
+        DB::table('game_time')->where('id', 1)->update([
+            'seconds_per_year' => $secondsPerYear,
+            'elapsed_hours_in_year' => $elapsedHours,
+            'auto_increment_enabled' => $autoIncrementEnabled,
+            'year_started_at' => $yearStartedAt,
+            'year_label_offset' => $yearOffset,
+            'updated_at' => now(),
+        ]);
+
+        return $this->timeTracker();
+    }
+
+    public function advanceYear(Request $request)
+    {
+        $data = $request->validate([
+            'apply_effects' => ['sometimes', 'boolean'],
+        ]);
+
+        $applyEffects = (bool) ($data['apply_effects'] ?? true);
+        if ($applyEffects) {
+            $this->processYears(1);
+        } else {
+            $state = $this->getGameTimeState();
+            DB::table('game_time')->where('id', 1)->update([
+                'year_label_offset' => (int) ($state->year_label_offset ?? 0) + 1,
+                'elapsed_hours_in_year' => 0,
+                'year_started_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        return response()->json(['message' => 'Year advanced', 'apply_effects' => $applyEffects]);
     }
 
     private function getGameTimeState(): object
@@ -400,24 +543,53 @@ class AdminController extends Controller
         DB::table('game_time')->insert([
             'id' => 1,
             'started_at' => now(),
-            'seconds_per_year' => 1209600,
+            'year_started_at' => now(),
+            'seconds_per_year' => 48 * 3600,
             'processed_years' => 0,
+            'elapsed_hours_in_year' => 0,
+            'auto_increment_enabled' => 1,
+            'year_label_offset' => 0,
             'updated_at' => now(),
         ]);
 
         return DB::table('game_time')->where('id', 1)->first();
     }
 
-    private function processElapsedYears(): int
+    private function syncTimeProgress(): int
     {
         $state = $this->getGameTimeState();
-        $elapsedYears = (int) floor(max(0, now()->timestamp - strtotime($state->started_at)) / max(1, (int) $state->seconds_per_year));
-        $pendingYears = max(0, $elapsedYears - (int) $state->processed_years);
-        if ($pendingYears === 0) {
+        if (!(int) $state->auto_increment_enabled) {
             return 0;
         }
 
-        for ($yearOffset = 1; $yearOffset <= $pendingYears; $yearOffset++) {
+        $hoursPerYear = max(0.01, (float) $state->seconds_per_year / 3600);
+        $elapsedHours = max(0, (now()->timestamp - strtotime($state->year_started_at ?? $state->started_at)) / 3600);
+        $pendingYears = (int) floor($elapsedHours / $hoursPerYear);
+        $remainderHours = $elapsedHours - ($pendingYears * $hoursPerYear);
+
+        $updatedYearStartedAt = now()->subSeconds((int) round($remainderHours * 3600));
+        DB::table('game_time')->where('id', 1)->update([
+            'elapsed_hours_in_year' => $remainderHours,
+            'year_started_at' => $updatedYearStartedAt,
+            'updated_at' => now(),
+        ]);
+
+        if ($pendingYears > 0) {
+            $this->processYears($pendingYears);
+        }
+
+        return $pendingYears;
+    }
+
+    private function processYears(int $yearsToProcess): void
+    {
+        if ($yearsToProcess <= 0) {
+            return;
+        }
+
+        $state = $this->getGameTimeState();
+
+        for ($yearOffset = 1; $yearOffset <= $yearsToProcess; $yearOffset++) {
             $yearNumber = (int) $state->processed_years + $yearOffset;
             $nations = DB::table('nations')->where('is_placeholder', 0)->get();
             foreach ($nations as $nation) {
@@ -490,14 +662,23 @@ class AdminController extends Controller
                     );
                 }
             }
+
+            $authorId = DB::table('users')->where('role', 'admin')->value('id');
+            if ($authorId) {
+                DB::table('announcements')->insert([
+                    'author_user_id' => $authorId,
+                    'body' => 'Year ' . $yearNumber . ' has been processed. Nation income and maintenance were applied.',
+                    'created_at' => now(),
+                ]);
+            }
         }
 
         DB::table('game_time')->where('id', 1)->update([
-            'processed_years' => $elapsedYears,
+            'processed_years' => (int) $state->processed_years + $yearsToProcess,
+            'elapsed_hours_in_year' => 0,
+            'year_started_at' => now(),
             'updated_at' => now(),
         ]);
-
-        return $pendingYears;
     }
 
     private function applyNationDelta(int $nationId, array $delta): array

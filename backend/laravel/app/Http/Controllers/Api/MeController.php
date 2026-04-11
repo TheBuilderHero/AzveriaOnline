@@ -107,6 +107,7 @@ class MeController extends Controller
 
         DB::table('nations')->where('id', $nation->id)->update([
             'about_text' => $data['about_text'] ?? null,
+            'alliance_name' => $data['alliance_name'] ?? $nation->alliance_name,
             'updated_at' => now(),
         ]);
 
@@ -117,7 +118,10 @@ class MeController extends Controller
     {
         $settings = DB::table('user_settings')->where('user_id', $request->user()->id)->first();
         if ($settings) {
-            return response()->json($settings);
+            $extra = json_decode($settings->extra_json ?? '{}', true) ?: [];
+            $payload = (array) $settings;
+            $payload['font_mode'] = $extra['font_mode'] ?? 'normal';
+            return response()->json($payload);
         }
 
         DB::table('user_settings')->insert([
@@ -125,10 +129,13 @@ class MeController extends Controller
             'theme' => 'light',
             'color_blind_mode' => 'none',
             'dog_bark_enabled' => 0,
+            'extra_json' => json_encode(['font_mode' => 'normal']),
             'updated_at' => now(),
         ]);
-
-        return response()->json(DB::table('user_settings')->where('user_id', $request->user()->id)->first());
+        $created = DB::table('user_settings')->where('user_id', $request->user()->id)->first();
+        $payload = (array) $created;
+        $payload['font_mode'] = 'normal';
+        return response()->json($payload);
     }
 
     public function updateSettings(UpdateSettingsRequest $request)
@@ -136,11 +143,14 @@ class MeController extends Controller
         $data = $request->validated();
 
         $current = $this->settings($request)->getData(true);
+        $extra = json_decode($current['extra_json'] ?? '{}', true) ?: [];
+        $extra['font_mode'] = $data['font_mode'] ?? ($current['font_mode'] ?? 'normal');
 
         DB::table('user_settings')->where('user_id', $request->user()->id)->update([
             'theme' => $data['theme'] ?? $current['theme'],
             'color_blind_mode' => $data['color_blind_mode'] ?? $current['color_blind_mode'],
             'dog_bark_enabled' => array_key_exists('dog_bark_enabled', $data) ? (int) $data['dog_bark_enabled'] : (int) $current['dog_bark_enabled'],
+            'extra_json' => json_encode($extra),
             'updated_at' => now(),
         ]);
 

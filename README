@@ -57,6 +57,7 @@ Everything else uses REST:
 ### Shop
 - Right side categories:
   - Refinement
+  - Structures
   - Upgrades
   - Recruitment
   - Crafting
@@ -66,7 +67,8 @@ Everything else uses REST:
 ### Settings
 - Light / dark mode.
 - Color blindness modes.
-- Optional dog bark sound on user actions.
+- Optional goofy sound on user actions.
+- Separate Font Mode selector (normal / fun / cool person).
 
 ### Help Dropdown
 - About
@@ -110,3 +112,20 @@ Source content has been mapped from your Azveria files into the backend design:
 2. Add Sanctum/JWT auth and role middleware.
 3. Wire frontend shell with left menu, top resource bar, and role-specific navigation.
 4. Integrate chat and announcements with Ratchet channels.
+
+## Docker compose
+
+- Create remote context:
+  - docker context create remote --docker "host=ssh://kotaadmin@192.168.0.15"
+- Use remote context:
+  - docker context use remote
+  - docker compose up -d
+- Switch back to local Docker Desktop (important for local Windows bind mounts):
+  - docker context use default
+  - docker compose up -d --build
+
+if password keeps being requested use the following to fix credentials:
+docker logout
+docker login
+
+

@@ -15,6 +15,7 @@ class UpdateAboutRequest extends FormRequest
     {
         return [
             'about_text' => ['nullable', 'string', 'max:5000'],
+            'alliance_name' => ['nullable', 'string', 'max:120'],
         ];
     }
 }

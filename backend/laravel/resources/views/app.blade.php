@@ -64,6 +64,36 @@
     .msg-wrap.other .msg-sender { color:#3a72b5; }
     .res-kv { display:flex; justify-content:space-between; padding:2px 6px; font-size:13px; }
     .res-kv:nth-child(even) { background:var(--bg-alt); border-radius:4px; }
+    body.font-fun { font-family: "Comic Sans MS", "Trebuchet MS", cursive; }
+    body.font-cool-person { font-family: "Papyrus", "Brush Script MT", fantasy; letter-spacing: 0.02em; }
+    .announcement-card {
+      border: 1px solid #c9d1db;
+      border-radius: 12px;
+      padding: 10px;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, var(--panel), var(--bg-alt));
+    }
+    .announcement-author { font-weight: 700; font-size: 13px; }
+    .announcement-body { margin-top: 6px; white-space: pre-wrap; line-height: 1.5; }
+    .zoom-control {
+      position: absolute;
+      right: 10px;
+      top: 48px;
+      z-index: 2;
+      background: rgba(255,255,255,0.85);
+      border-radius: 8px;
+      padding: 6px;
+      border: 1px solid #bfc8d2;
+      width: 42px;
+      display: flex;
+      justify-content: center;
+    }
+    .zoom-control input { writing-mode: vertical-lr; direction: rtl; width: 24px; height: 160px; }
+    .notify-panel { border: 1px solid #c9d1db; border-radius: 10px; padding: 10px; background: linear-gradient(180deg, var(--panel), var(--bg-alt)); }
+    .notify-item { border: 1px solid #d7dee7; border-radius: 10px; padding: 10px; margin-bottom: 8px; background: var(--panel); }
+    .notify-head { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+    .notify-type { font-size:11px; background:#314f72; color:#fff; border-radius:999px; padding:2px 8px; }
+    .setting-group { border: 1px solid #c9d1db; border-radius: 10px; padding: 10px; margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -84,8 +114,6 @@
     <section id="view"></section>
   </main>
 </div>
-
-<audio id="barkAudio" preload="auto" src="https://www.soundjay.com/animal/dog-bark-1.mp3"></audio>
 
 <script>
 const token = localStorage.getItem('azveria_token');
@@ -110,7 +138,7 @@ const api = async (url, opts = {}) => {
   return res;
 };
 
-let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none' };
+let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal' };
 let ws = null;
 let wsAuthToken = null;
 let wsAuthTokenExpiresAt = 0;
@@ -121,14 +149,29 @@ const resourcesBar = document.getElementById('resourcesBar');
 const playerMenu = ['Player', 'Announcements', 'Map', 'Chat', 'Other Nations', 'Shop', 'Settings'];
 const adminMenu = ['Announcements', 'All Nations', 'New Accounts', 'Time Tracker', 'Map', 'Chat', 'Shop', 'Settings'];
 
+const goofyAudio = new Audio('https://actions.google.com/sounds/v1/cartoon/boing.ogg');
+goofyAudio.preload = 'auto';
+
 function barkIfEnabled() {
-  if (settings.dog_bark_enabled) {
-    document.getElementById('barkAudio').play().catch(() => {});
-  }
+  if (!settings.dog_bark_enabled) return;
+  try {
+    goofyAudio.currentTime = 0;
+    goofyAudio.play().catch(() => {});
+  } catch {}
 }
 
 function setTheme(theme) {
   document.body.classList.toggle('dark', theme === 'dark');
+}
+
+function setFontMode(mode) {
+  document.body.classList.remove('font-fun', 'font-cool-person');
+  if (mode === 'fun') {
+    document.body.classList.add('font-fun');
+  }
+  if (mode === 'cool_person') {
+    document.body.classList.add('font-cool-person');
+  }
 }
 
 function applyColorBlindMode(mode) {
@@ -287,7 +330,8 @@ async function loadPlayer() {
         <div>
           <p><strong>Nation:</strong> ${data.nation.name}</p>
           <p><strong>Leader:</strong> ${data.nation.leader_name || '-'}</p>
-          <p><strong>Alliance:</strong> ${data.nation.alliance_name || '-'}</p>
+          <label>Alliance</label>
+          <input id="allianceField" value="${data.nation.alliance_name || ''}">
           <p><strong>Terrain (sq miles):</strong> ${terrainRows}</p>
 
           <details style="margin-top:12px;">
@@ -333,7 +377,8 @@ async function loadPlayer() {
   `;
   document.getElementById('saveAbout').onclick = async () => {
     const aboutText = document.getElementById('aboutField').value;
-    const save = await api('/api/me/about', { method: 'PATCH', body: JSON.stringify({ about_text: aboutText }) });
+    const allianceName = document.getElementById('allianceField').value;
+    const save = await api('/api/me/about', { method: 'PATCH', body: JSON.stringify({ about_text: aboutText, alliance_name: allianceName }) });
     document.getElementById('aboutMsg').textContent = save.ok ? 'Saved' : 'Failed';
     barkIfEnabled();
   };
@@ -349,7 +394,7 @@ async function loadAnnouncements() {
     <div class="card">
       <h2>Announcements</h2>
       ${canPost ? '<textarea id="annText" rows="3" placeholder="Write announcement..."></textarea><div class="row"><button class="primary" id="sendAnn">Send</button></div>' : '<p class="muted">Read-only for players.</p>'}
-      <div class="list" id="annList">${list.map(a => `<div><strong>${a.author_name}</strong>: ${a.body}</div>`).join('')}</div>
+      <div class="list" id="annList">${list.map(a => `<div class="announcement-card"><div class="announcement-author">${a.author_name}</div><div class="muted" style="font-size:12px;">${a.created_at || ''}</div><div class="announcement-body">${a.body}</div></div>`).join('')}</div>
     </div>
   `;
   if (canPost) {
@@ -381,6 +426,7 @@ async function loadMap() {
           <div id="mapViewport" style="position:relative;overflow:hidden;border:1px solid #ccc;border-radius:8px;max-height:70vh;height:70vh;background:#111;">
             <img id="mapImage" src="/storage/${initial.image_path}" alt="Map" style="position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;transform-origin:center center;user-select:none;cursor:grab;" />
             <button id="resetMapBtn" class="primary" style="display:none;position:absolute;right:8px;top:8px;z-index:2;">Reset View</button>
+            <div class="zoom-control"><input id="mapZoomSlider" type="range" min="1" max="6" step="0.1" value="1"></div>
           </div>
         </div>
         <div>
@@ -434,6 +480,8 @@ async function loadMap() {
   const mapViewport = document.getElementById('mapViewport');
   const mapImage = document.getElementById('mapImage');
   const resetMapBtn = document.getElementById('resetMapBtn');
+  const mapZoomSlider = document.getElementById('mapZoomSlider');
+  const zoomControl = mapViewport.querySelector('.zoom-control');
   let mapScale = 1;
   let mapX = 0;
   let mapY = 0;
@@ -445,12 +493,15 @@ async function loadMap() {
   const applyMapTransform = () => {
     mapImage.style.transform = `translate(${mapX}px, ${mapY}px) scale(${mapScale})`;
     resetMapBtn.style.display = (mapScale !== 1 || mapX !== 0 || mapY !== 0) ? 'inline-block' : 'none';
+    mapZoomSlider.value = String(mapScale.toFixed(1));
   };
 
   const resetMapView = () => {
+    releaseMapPointer();
     mapScale = 1;
     mapX = 0;
     mapY = 0;
+    mapImage.style.transform = 'translate(0px, 0px) scale(1)';
     applyMapTransform();
   };
 
@@ -459,7 +510,7 @@ async function loadMap() {
   mapViewport.addEventListener('wheel', (e) => {
     e.preventDefault();
     const delta = e.deltaY < 0 ? 0.1 : -0.1;
-    mapScale = Math.max(1, Math.min(6, mapScale + delta));
+    mapScale = Number(Math.max(1, Math.min(6, mapScale + delta)).toFixed(1));
     if (mapScale === 1) {
       mapX = 0;
       mapY = 0;
@@ -468,6 +519,9 @@ async function loadMap() {
   }, { passive: false });
 
   mapViewport.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.zoom-control')) {
+      return;
+    }
     if (mapScale <= 1) {
       return;
     }
@@ -507,6 +561,22 @@ async function loadMap() {
   });
 
   resetMapBtn.onclick = resetMapView;
+  mapZoomSlider.oninput = (e) => {
+    mapScale = Number(e.target.value);
+    if (mapScale === 1) {
+      mapX = 0;
+      mapY = 0;
+    }
+    applyMapTransform();
+  };
+
+  ['pointerdown', 'pointermove', 'pointerup', 'click', 'wheel', 'mousedown'].forEach(evt => {
+    zoomControl.addEventListener(evt, (e) => {
+      e.stopPropagation();
+    }, { passive: false });
+  });
+
+  applyMapTransform();
 
   if (user.role === 'admin') {
     document.getElementById('saveLayer').onclick = async () => {
@@ -651,25 +721,63 @@ async function loadOtherNations() {
 
 async function loadShop() {
   const isAdmin = user.role === 'admin';
-  const calls = [api('/api/shop/categories'), api('/api/shop/items?per_page=300')];
+  const calls = [api('/api/shop/categories'), api('/api/shop/items?per_page=300'), api('/api/me/buildings?status=built')];
   if (isAdmin) calls.push(api('/api/players'));
-  const [catRes, itemRes, playersRes] = await Promise.all(calls);
+  const [catRes, itemRes, buildingsRes, playersRes] = await Promise.all(calls);
   const cats = await catRes.json();
   const itemsPayload = await itemRes.json();
   const allItems = extractList(itemsPayload);
+  const myBuildings = await buildingsRes.json();
   const allPlayers = playersRes ? await playersRes.json() : [];
+
+  const buildingCounts = {};
+  (Array.isArray(myBuildings) ? myBuildings : []).forEach(b => {
+    const family = String(b.code || '').toLowerCase();
+    const level = Number(b.level || 1);
+    const key = `${family}:l${level}`;
+    buildingCounts[key] = (buildingCounts[key] || 0) + Number(b.qty || 1);
+  });
+
+  const parseStructCode = (code) => {
+    const match = String(code || '').match(/^struct_([a-z0-9_]+)_l([0-9]+)$/);
+    if (!match) return null;
+    return { family: match[1], level: Number(match[2]) };
+  };
+
+  const canBuyUpgrade = (item) => {
+    const effectObj = (() => { try { return JSON.parse(item.effect_json || '{}'); } catch { return {}; } })();
+    if (effectObj.requires_building_code) {
+      const reqLevel = Number(effectObj.requires_building_level || 1);
+      const reqKey = `${String(effectObj.requires_building_code).toLowerCase()}:l${reqLevel}`;
+      if ((buildingCounts[reqKey] || 0) <= 0) {
+        return false;
+      }
+      if (effectObj.requires_building_code_2) {
+        const reqLevel2 = Number(effectObj.requires_building_level_2 || 1);
+        const reqKey2 = `${String(effectObj.requires_building_code_2).toLowerCase()}:l${reqLevel2}`;
+        if ((buildingCounts[reqKey2] || 0) <= 0) {
+          return false;
+        }
+      }
+    }
+
+    const meta = parseStructCode(item.code);
+    if (!meta || meta.level <= 1 || item.category_code !== 'upgrades') return true;
+    const requiredKey = `${meta.family}:l${meta.level - 1}`;
+    return (buildingCounts[requiredKey] || 0) > 0;
+  };
 
   view.innerHTML = `
     <div class="card">
       <h2>Shop</h2>
       <div id="shopSelectedCategory" class="chip" style="margin-bottom:10px;display:inline-flex;">No category selected</div>
+      <div id="shopPurchaseMsg" class="muted" style="margin:6px 0 10px 0;"></div>
       <div class="twocol">
         <div id="shopItems" class="list">Select a category.</div>
         <div id="shopCats" class="list">${cats.map(c => `<button class="primary catBtn" data-code="${c.code}" style="display:block; width:100%; margin-bottom:8px; opacity:0.7;">${c.display_name}</button>`).join('')}
           ${isAdmin ? `<hr><h3 style="margin:8px 0;">Add Item</h3>
             <label style="font-size:12px;">Category</label>
             <select id="newShopCategory">${cats.map(c => `<option value="${c.id}">${c.display_name}</option>`).join('')}</select>
-            <label style="font-size:12px;">Code</label><input id="newShopCode" placeholder="unique_code">
             <label style="font-size:12px;">Name</label><input id="newShopName" placeholder="Display name">
             <label style="font-size:12px;">Description / Effects</label><textarea id="newShopDescription" rows="4"></textarea>
             <div class="row"><button class="primary" id="createShopItemBtn" style="width:100%;">Create Item</button></div>
@@ -678,6 +786,8 @@ async function loadShop() {
       </div>
     </div>
   `;
+
+  let activeCategory = null;
 
   // All valid cost key options for the dropdown
   const ALL_COST_KEYS = ['cow','wood','ore','food',
@@ -766,7 +876,11 @@ async function loadShop() {
   }
 
   const renderItems = (category) => {
+    activeCategory = category;
     const items = allItems.filter(i => i.category_code === category);
+    if (category === 'upgrades') {
+      items.sort((a, b) => Number(canBuyUpgrade(b)) - Number(canBuyUpgrade(a)));
+    }
     const selectedCategory = cats.find(c => c.code === category);
     document.getElementById('shopSelectedCategory').textContent = selectedCategory ? `Selected: ${selectedCategory.display_name}` : 'No category selected';
     document.querySelectorAll('.catBtn').forEach(btn => {
@@ -822,20 +936,33 @@ async function loadShop() {
             </details>
           </div>`;
       } else {
+        const isUpgradeAvailable = canBuyUpgrade(i);
         return `
           <div class="card">
             <div><strong>${i.display_name}</strong></div>
             <div class="muted" style="font-size:12px;">${i.description_text || ''}</div>
             <div class="muted" style="font-size:13px;">Cost: ${formatCost(costObj)}</div>
             ${Object.keys(maintenanceObj).length ? `<div class="muted" style="font-size:12px;">Yearly maintenance: ${formatCost(maintenanceObj)}</div>` : ''}
-            <button class="primary buyItem" data-id="${i.id}" style="margin-top:6px;">Buy</button>
+            ${(!isUpgradeAvailable && i.category_code === 'upgrades') ? '<div class="muted" style="font-size:12px;margin-top:6px;">Need a lower-level structure to upgrade.</div>' : ''}
+            <button class="primary buyItem" data-id="${i.id}" ${(!isUpgradeAvailable && i.category_code === 'upgrades') ? 'disabled style="margin-top:6px;opacity:0.45;cursor:not-allowed;"' : 'style="margin-top:6px;"'}>Buy</button>
           </div>`;
       }
     }).join('') || '<div class="muted">No items</div>';
 
     document.querySelectorAll('.buyItem').forEach(btn => btn.onclick = async () => {
       const r = await api('/api/shop/buy', { method: 'POST', body: JSON.stringify({ item_id: Number(btn.dataset.id), quantity: 1 }) });
-      if (r.ok) loadResources();
+      if (r.ok) {
+        document.getElementById('shopPurchaseMsg').textContent = 'Purchase successful.';
+        loadResources();
+        loadShop();
+      } else {
+        let reason = 'Purchase failed.';
+        try {
+          const payload = await r.json();
+          reason = payload.message ? `Purchase failed: ${payload.message}` : reason;
+        } catch {}
+        document.getElementById('shopPurchaseMsg').textContent = reason;
+      }
       barkIfEnabled();
     });
 
@@ -853,6 +980,12 @@ async function loadShop() {
       const r = await api(`/api/admin/shop/items/${id}`, { method: 'PUT', body: JSON.stringify({ cost_json, maintenance_json, yearly_effect_json, description_text, visibility_json }) });
       const msgEl = document.getElementById(`edit-msg-${id}`);
       if (msgEl) msgEl.textContent = r.ok ? 'Saved' : 'Failed';
+      if (r.ok) {
+        const reload = await api('/api/shop/items?per_page=300');
+        const refreshed = extractList(await reload.json());
+        allItems.splice(0, allItems.length, ...refreshed);
+        renderItems(category);
+      }
       barkIfEnabled();
     });
 
@@ -872,7 +1005,6 @@ async function loadShop() {
   document.getElementById('createShopItemBtn')?.addEventListener('click', async () => {
     const payload = {
       category_id: Number(document.getElementById('newShopCategory').value),
-      code: document.getElementById('newShopCode').value.trim(),
       display_name: document.getElementById('newShopName').value.trim(),
       description_text: document.getElementById('newShopDescription').value,
       cost_json: {},
@@ -883,6 +1015,12 @@ async function loadShop() {
       const reload = await api('/api/shop/items?per_page=300');
       const refreshed = extractList(await reload.json());
       allItems.splice(0, allItems.length, ...refreshed);
+      const categoryCode = cats.find(c => Number(c.id) === payload.category_id)?.code;
+      if (categoryCode) {
+        renderItems(categoryCode);
+      } else if (activeCategory) {
+        renderItems(activeCategory);
+      }
     }
     barkIfEnabled();
   });
@@ -1087,33 +1225,45 @@ async function loadSettings() {
   settings = await res.json();
   setTheme(settings.theme);
   applyColorBlindMode(settings.color_blind_mode);
+  setFontMode(settings.font_mode || 'normal');
 
   view.innerHTML = `
     <div class="card">
       <h2>Settings</h2>
-      <label>Theme</label>
-      <select id="theme"><option value="light">Light</option><option value="dark">Dark</option></select>
-      <label>Color Blind Mode</label>
-      <select id="cb"><option value="none">None</option><option value="protanopia">Protanopia</option><option value="deuteranopia">Deuteranopia</option><option value="tritanopia">Tritanopia</option></select>
-      <label><input type="checkbox" id="dog"> Dog Bark on actions</label>
+      <div class="setting-group">
+        <h3 style="margin:0 0 8px 0;">Display</h3>
+        <label>Theme</label>
+        <select id="theme"><option value="light">Light</option><option value="dark">Dark</option></select>
+        <label>Color Blind Mode</label>
+        <select id="cb"><option value="none">None</option><option value="protanopia">Protanopia</option><option value="deuteranopia">Deuteranopia</option><option value="tritanopia">Tritanopia</option></select>
+        <label>Font Mode</label>
+        <select id="fontMode"><option value="normal">Normal Mode</option><option value="fun">Fun Mode</option><option value="cool_person">Cool Person Mode</option></select>
+      </div>
+      <div class="setting-group">
+        <h3 style="margin:0 0 8px 0;">Sound</h3>
+        <label><input type="checkbox" id="goofySound"> Goofy Sound on actions</label>
+      </div>
       <div class="row"><button class="primary" id="saveSettings">Save</button></div>
     </div>
   `;
 
   document.getElementById('theme').value = settings.theme;
   document.getElementById('cb').value = settings.color_blind_mode;
-  document.getElementById('dog').checked = !!settings.dog_bark_enabled;
+  document.getElementById('goofySound').checked = !!settings.dog_bark_enabled;
+  document.getElementById('fontMode').value = settings.font_mode || 'normal';
 
   document.getElementById('saveSettings').onclick = async () => {
     const payload = {
       theme: document.getElementById('theme').value,
       color_blind_mode: document.getElementById('cb').value,
-      dog_bark_enabled: document.getElementById('dog').checked,
+      dog_bark_enabled: document.getElementById('goofySound').checked,
+      font_mode: document.getElementById('fontMode').value,
     };
     await api('/api/me/settings', { method: 'PATCH', body: JSON.stringify(payload) });
     settings = payload;
     setTheme(settings.theme);
     applyColorBlindMode(settings.color_blind_mode);
+    setFontMode(settings.font_mode);
     barkIfEnabled();
   };
 }
@@ -1146,38 +1296,178 @@ function loadForcedPasswordReset() {
   };
 }
 
+async function loadResetPasswordPage() {
+  const isAdmin = user.role === 'admin';
+  const playersRes = isAdmin ? await api('/api/players') : null;
+  const players = playersRes ? await playersRes.json() : [];
+
+  view.innerHTML = `
+    <div class="card" style="max-width:720px;">
+      <h2>Reset Password</h2>
+      <p class="muted">Use this page to safely reset passwords with clear options.</p>
+      <h3>My Password</h3>
+      <label>Current Password</label>
+      <input id="rpCurrent" type="password">
+      <label>New Password</label>
+      <input id="rpNew" type="password">
+      <label>Confirm New Password</label>
+      <input id="rpConfirm" type="password">
+      <div class="row"><button class="primary" id="rpSelfBtn">Update My Password</button><span class="muted" id="rpSelfMsg"></span></div>
+      ${isAdmin ? `
+        <hr style="margin:12px 0;">
+        <h3>Admin: Reset Another User</h3>
+        <label>Player</label>
+        <select id="rpUserId">${players.map(p => `<option value="${p.id}">${p.name} (#${p.id})</option>`).join('')}</select>
+        <label>Temporary Password</label>
+        <input id="rpOtherNew" type="password" value="password123">
+        <label><input id="rpShowTemp" type="checkbox"> Show temporary password</label>
+        <label><input id="rpForce" type="checkbox" checked> Require reset on next login</label>
+        <div class="row"><button class="primary" id="rpOtherBtn">Reset Selected User</button><span class="muted" id="rpOtherMsg"></span></div>
+      ` : ''}
+    </div>
+  `;
+
+  document.getElementById('rpSelfBtn').onclick = async () => {
+    const current_password = document.getElementById('rpCurrent').value;
+    const new_password = document.getElementById('rpNew').value;
+    const confirm_password = document.getElementById('rpConfirm').value;
+    if (new_password !== confirm_password) {
+      document.getElementById('rpSelfMsg').textContent = 'New password and confirmation do not match.';
+      return;
+    }
+    const r = await api('/api/auth/password', { method: 'PATCH', body: JSON.stringify({ current_password, new_password }) });
+    if (r.ok) {
+      document.getElementById('rpSelfMsg').textContent = 'Password updated';
+    } else {
+      let msg = 'Failed';
+      try {
+        const payload = await r.json();
+        msg = payload.message || msg;
+      } catch {}
+      document.getElementById('rpSelfMsg').textContent = msg;
+    }
+    barkIfEnabled();
+  };
+
+  if (isAdmin) {
+    document.getElementById('rpShowTemp').onchange = (e) => {
+      document.getElementById('rpOtherNew').type = e.target.checked ? 'text' : 'password';
+    };
+
+    document.getElementById('rpOtherBtn').onclick = async () => {
+      const userId = Number(document.getElementById('rpUserId').value);
+      const new_password = document.getElementById('rpOtherNew').value;
+      const force_password_reset = document.getElementById('rpForce').checked;
+      const r = await api('/api/admin/users/' + userId + '/password', { method: 'PATCH', body: JSON.stringify({ new_password, force_password_reset }) });
+      if (r.ok) {
+        document.getElementById('rpOtherMsg').textContent = 'User password reset';
+      } else {
+        let msg = 'Failed';
+        try {
+          const payload = await r.json();
+          msg = payload.message || msg;
+        } catch {}
+        document.getElementById('rpOtherMsg').textContent = msg;
+      }
+      barkIfEnabled();
+    };
+  }
+}
+
 async function loadAllNations() {
   const [res, notificationsRes] = await Promise.all([api('/api/admin/nations'), api('/api/admin/notifications')]);
   const payload = await res.json();
   const nations = extractList(payload);
   const notifications = await notificationsRes.json();
+  const nationOwnerById = Object.fromEntries(nations.map(n => [Number(n.id), Number(n.owner_user_id || 0)]));
+
+  const parseMeta = (n) => {
+    try { return typeof n.meta_json === 'string' ? JSON.parse(n.meta_json) : (n.meta_json || {}); } catch { return {}; }
+  };
+  const notificationRows = (notifications || []).map(n => ({ ...n, _meta: parseMeta(n) }));
+  const types = Array.from(new Set(notificationRows.map(n => n.type).filter(Boolean))).sort();
+
+  const playerIds = Array.from(new Set(notificationRows.map(n => Number(n._meta.actor_user_id || n._meta.target_user_id || nationOwnerById[Number(n._meta.nation_id)] || 0)).filter(v => v > 0))).sort((a, b) => a - b);
 
   view.innerHTML = `
     <div class="card">
       <h2>All Nations (Admin)</h2>
       <div class="twocol">
         <div>
-          <div id="adminNationEditor" class="list" style="margin-bottom:12px;">Select nation to edit.</div>
-          <div class="list" id="adminNotifications">
-            <h3 style="margin-top:0;">Notifications</h3>
-            ${notifications.map(n => `<div style="border-bottom:1px solid #ddd;padding:8px 0;">
-              <div style="display:flex;justify-content:space-between;gap:8px;">
-                <strong>${n.is_read ? 'Read' : 'Unread'}: ${n.title}</strong>
-                <button class="primary deleteNotif" data-id="${n.id}" style="background:#8a1a1a;">Delete</button>
-              </div>
-              <div class="muted" style="font-size:12px;">${n.created_at || ''}</div>
-              <div style="font-size:13px;white-space:pre-wrap;">${n.body}</div>
-            </div>`).join('') || '<div class="muted">No notifications</div>'}
+          <div class="card" style="margin-top:0;">
+            <h3 style="margin-top:0;">Nation Stats Editor</h3>
+            <div id="adminNationEditor" class="list" style="margin-bottom:12px;">Select nation to edit.</div>
           </div>
         </div>
         <div>
-          <input id="newPlaceholder" placeholder="New placeholder nation name">
-          <button class="primary" id="createPlaceholder" style="margin-top:8px; width:100%;">Create Placeholder Nation</button>
-          <div class="list" id="adminNationList" style="margin-top:8px;">${nations.map(n => `<button class="primary editNationBtn" data-id="${n.id}" style="display:block; width:100%; margin-bottom:8px;">${n.name}</button>`).join('')}</div>
+          <div class="notify-panel" id="adminNotificationsPanel">
+            <h3 style="margin-top:0;">Notifications</h3>
+            <div class="row">
+              <select id="notifTypeFilter" style="max-width:220px;">
+                <option value="">All Types</option>
+                ${types.map(t => `<option value="${t}">${t}</option>`).join('')}
+              </select>
+              <select id="notifPlayerFilter" style="max-width:220px;">
+                <option value="">All Players</option>
+                ${playerIds.map(id => `<option value="${id}">Player #${id}</option>`).join('')}
+              </select>
+            </div>
+            <div class="list" id="adminNotifications" style="margin-top:8px;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Nation Management</h3>
+        <div class="twocol">
+          <div>
+            <input id="newPlaceholder" placeholder="New placeholder nation name">
+            <button class="primary" id="createPlaceholder" style="margin-top:8px; width:100%;">Create Placeholder Nation</button>
+          </div>
+          <div>
+            <div class="list" id="adminNationList">${nations.map(n => `<button class="primary editNationBtn" data-id="${n.id}" style="display:block; width:100%; margin-bottom:8px;">${n.name}</button>`).join('')}</div>
+          </div>
         </div>
       </div>
     </div>
   `;
+
+  const renderNotifications = () => {
+    const typeFilter = document.getElementById('notifTypeFilter').value;
+    const playerFilter = Number(document.getElementById('notifPlayerFilter').value || 0);
+    const filtered = notificationRows.filter(n => {
+      if (typeFilter && n.type !== typeFilter) return false;
+      if (playerFilter) {
+        const actor = Number(n._meta.actor_user_id || 0);
+        const target = Number(n._meta.target_user_id || 0);
+        const nationOwner = Number(nationOwnerById[Number(n._meta.nation_id || 0)] || 0);
+        if (actor !== playerFilter && target !== playerFilter && nationOwner !== playerFilter) return false;
+      }
+      return true;
+    });
+
+    document.getElementById('adminNotifications').innerHTML = filtered.map(n => `<div class="notify-item">
+      <div class="notify-head">
+        <div>
+          <div style="font-weight:700;">${n.title}</div>
+          <div class="muted" style="font-size:12px;">${n.created_at || ''}</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span class="notify-type">${n.type}</span>
+          <button class="primary deleteNotif" data-id="${n.id}" style="background:#8a1a1a;">Delete</button>
+        </div>
+      </div>
+      <div style="font-size:13px;white-space:pre-wrap;margin-top:8px;">${n.body}</div>
+    </div>`).join('') || '<div class="muted">No notifications</div>';
+
+    document.querySelectorAll('.deleteNotif').forEach(btn => btn.onclick = async () => {
+      const del = await api('/api/admin/notifications/' + btn.dataset.id, { method: 'DELETE' });
+      if (del.ok) loadAllNations();
+    });
+  };
+
+  document.getElementById('notifTypeFilter').onchange = renderNotifications;
+  document.getElementById('notifPlayerFilter').onchange = renderNotifications;
+  renderNotifications();
 
   const openEditor = async (id) => {
     const detailRes = await api('/api/nations/' + id);
@@ -1312,10 +1602,6 @@ async function loadAllNations() {
   };
 
   document.querySelectorAll('.editNationBtn').forEach(btn => btn.onclick = () => openEditor(btn.dataset.id));
-  document.querySelectorAll('.deleteNotif').forEach(btn => btn.onclick = async () => {
-    const del = await api('/api/admin/notifications/' + btn.dataset.id, { method: 'DELETE' });
-    if (del.ok) loadAllNations();
-  });
   document.getElementById('createPlaceholder').onclick = async () => {
     const name = document.getElementById('newPlaceholder').value;
     await api('/api/admin/nations', { method: 'POST', body: JSON.stringify({ name }) });
@@ -1332,15 +1618,70 @@ async function loadTimeTracker() {
       <h2>Time Tracker</h2>
       <div class="list">
         <div><strong>Started:</strong> ${d.started_at}</div>
-        <div><strong>Seconds Per In-Game Year:</strong> ${d.seconds_per_year}</div>
-        <div><strong>Elapsed Years:</strong> ${d.elapsed_years}</div>
-        <div><strong>Processed Years:</strong> ${d.processed_years}</div>
         <div><strong>Current Game Year:</strong> ${d.current_game_year}</div>
+        <div><strong>Elapsed Hours This Year:</strong> ${d.elapsed_hours_in_year} / ${Number(d.hours_per_year || 0).toFixed(2)} hours</div>
+        <div><strong>Seconds Per In-Game Year:</strong> ${d.seconds_per_year}</div>
+        <div><strong>Processed Years:</strong> ${d.processed_years}</div>
         <div><strong>Processed This Load:</strong> ${d.processed_now}</div>
-        <div class="muted" style="margin-top:8px;">Every real-world two weeks equals one in-game year. Opening this page processes any elapsed unprocessed years.</div>
+        <div class="muted" style="margin-top:8px;">Auto increment uses real time. Manual mode lets admins advance years explicitly.</div>
+      </div>
+      <div class="row">
+        <label style="min-width:220px;">Auto Increment Time</label>
+        <input id="ttAuto" type="checkbox" ${d.auto_increment_enabled ? 'checked' : ''}>
+      </div>
+      <div class="row">
+        <label style="min-width:220px;">Hours Per In-Game Year</label>
+        <input id="ttHoursPerYear" type="number" min="0.01" step="0.01" value="${Number(d.hours_per_year || 48).toFixed(2)}">
+      </div>
+      <div class="row">
+        <label style="min-width:220px;">Elapsed Hours (Current Year)</label>
+        <input id="ttElapsedHours" type="number" min="0" step="0.01" value="${Number(d.elapsed_hours_in_year || 0).toFixed(2)}">
+      </div>
+      <div class="row">
+        <label style="min-width:220px;">Current Game Year (Display)</label>
+        <input id="ttCurrentYear" type="number" min="1" step="1" value="${d.current_game_year}">
+      </div>
+      <div class="row">
+        <label><input id="ttApplyYearEffects" type="checkbox"> Apply income/maintenance when changing year</label>
+      </div>
+      <div class="row">
+        <button class="primary" id="ttSave">Save Time Settings</button>
+        <button class="primary" id="ttNextYear" style="background:#314f72;">Next Year</button>
+        <button class="primary" id="ttSkipYear" style="background:#676767;">Skip Year (No Effects)</button>
+        <span class="muted" id="ttMsg"></span>
       </div>
     </div>
   `;
+
+  document.getElementById('ttSave').onclick = async () => {
+    const payload = {
+      auto_increment_enabled: document.getElementById('ttAuto').checked,
+      hours_per_year: Number(document.getElementById('ttHoursPerYear').value || 48),
+      elapsed_hours_in_year: Number(document.getElementById('ttElapsedHours').value || 0),
+      current_game_year: Number(document.getElementById('ttCurrentYear').value || 1),
+      apply_year_change_effects: document.getElementById('ttApplyYearEffects').checked,
+    };
+    const save = await api('/api/admin/time-tracker', { method: 'PATCH', body: JSON.stringify(payload) });
+    document.getElementById('ttMsg').textContent = save.ok ? 'Saved' : 'Failed';
+    if (save.ok) loadTimeTracker();
+    barkIfEnabled();
+  };
+
+  document.getElementById('ttNextYear').onclick = async () => {
+    if (!window.confirm('Advance to the next year and apply income/maintenance once?')) return;
+    const r = await api('/api/admin/time-tracker/next-year', { method: 'POST', body: JSON.stringify({ apply_effects: true }) });
+    document.getElementById('ttMsg').textContent = r.ok ? 'Year advanced' : 'Failed';
+    if (r.ok) loadTimeTracker();
+    barkIfEnabled();
+  };
+
+  document.getElementById('ttSkipYear').onclick = async () => {
+    if (!window.confirm('Skip to the next year without applying nation income/maintenance?')) return;
+    const r = await api('/api/admin/time-tracker/next-year', { method: 'POST', body: JSON.stringify({ apply_effects: false }) });
+    document.getElementById('ttMsg').textContent = r.ok ? 'Year skipped' : 'Failed';
+    if (r.ok) loadTimeTracker();
+    barkIfEnabled();
+  };
 }
 
 async function init() {
@@ -1352,6 +1693,7 @@ async function init() {
     settings = await settingsRes.json();
     setTheme(settings.theme);
     applyColorBlindMode(settings.color_blind_mode);
+    setFontMode(settings.font_mode || 'normal');
   }
   if (user.force_password_reset) {
     loadForcedPasswordReset();
@@ -1368,32 +1710,10 @@ helpSelect.addEventListener('change', async (e) => {
     alert(`Website: ${d.website_version}\nGame: ${d.game_version}\nAdmin: ${d.admin}`);
   }
   if (e.target.value === 'docs') {
-    window.open('https://github.com/TheBuilderHero/AzveriaOnline/blob/main/READMEPLAYER', '_blank');
+    window.open('https://github.com/TheBuilderHero/AzveriaOnline/blob/master/READMEPLAYER', '_blank');
   }
   if (e.target.value === 'reset-password') {
-    if (user.role === 'admin') {
-      const mode = window.prompt('Type "self" to reset your own password or enter another user ID to reset that user password.', 'self');
-      if (mode) {
-        if (mode === 'self') {
-          const currentPassword = window.prompt('Current password');
-          const newPassword = window.prompt('New password (min 8 characters)');
-          if (currentPassword && newPassword) {
-            await api('/api/auth/password', { method: 'PATCH', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) });
-          }
-        } else {
-          const newPassword = window.prompt('New temporary password for user #' + mode);
-          if (newPassword) {
-            await api('/api/admin/users/' + mode + '/password', { method: 'PATCH', body: JSON.stringify({ new_password: newPassword, force_password_reset: true }) });
-          }
-        }
-      }
-    } else {
-      const currentPassword = window.prompt('Current password');
-      const newPassword = window.prompt('New password (min 8 characters)');
-      if (currentPassword && newPassword) {
-        await api('/api/auth/password', { method: 'PATCH', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) });
-      }
-    }
+    await loadResetPasswordPage();
   }
   if (e.target.value === 'logout') {
     await api('/api/auth/logout', { method: 'POST' });

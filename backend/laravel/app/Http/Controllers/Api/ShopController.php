@@ -54,6 +54,9 @@ class ShopController extends Controller
             return response()->json(['message' => 'Item unavailable'], 422);
         }
 
+        $structureMeta = $this->parseStructureCode((string) $item->code);
+        $effects = json_decode($item->effect_json, true) ?: [];
+
         $this->authorize('buy', new ShopItem((array) $item));
 
         $nation = DB::table('nations')->where('owner_user_id', $request->user()->id)->first();
@@ -64,6 +67,51 @@ class ShopController extends Controller
         $resourceRow = DB::table('nation_resources')->where('nation_id', $nation->id)->first();
         if (!$resourceRow) {
             return response()->json(['message' => 'No resources found'], 404);
+        }
+
+        if ($structureMeta && $structureMeta['level'] > 1) {
+            $requiredLevel = $structureMeta['level'] - 1;
+            $upgradableBuilding = DB::table('nation_buildings as nb')
+                ->join('building_catalog as bc', 'nb.building_catalog_id', '=', 'bc.id')
+                ->where('nb.nation_id', $nation->id)
+                ->where('bc.code', $structureMeta['family'])
+                ->where('nb.level', $requiredLevel)
+                ->where('nb.status', 'built')
+                ->orderBy('nb.id')
+                ->first();
+            if (!$upgradableBuilding) {
+                return response()->json(['message' => 'Upgrade unavailable: you need an existing level ' . $requiredLevel . ' structure.'], 422);
+            }
+        }
+
+        if (is_array($effects) && isset($effects['requires_building_code'])) {
+            $requiredCode = (string) $effects['requires_building_code'];
+            $requiredLevel = (int) ($effects['requires_building_level'] ?? 1);
+            $owned = DB::table('nation_buildings as nb')
+                ->join('building_catalog as bc', 'nb.building_catalog_id', '=', 'bc.id')
+                ->where('nb.nation_id', $nation->id)
+                ->where('bc.code', $requiredCode)
+                ->where('nb.level', '>=', max(1, $requiredLevel))
+                ->where('nb.status', 'built')
+                ->exists();
+            if (!$owned) {
+                return response()->json(['message' => 'Requires ' . $requiredCode . ' level ' . max(1, $requiredLevel) . ' or higher.'], 422);
+            }
+
+            if (isset($effects['requires_building_code_2'])) {
+                $requiredCode2 = (string) $effects['requires_building_code_2'];
+                $requiredLevel2 = (int) ($effects['requires_building_level_2'] ?? 1);
+                $owned2 = DB::table('nation_buildings as nb')
+                    ->join('building_catalog as bc', 'nb.building_catalog_id', '=', 'bc.id')
+                    ->where('nb.nation_id', $nation->id)
+                    ->where('bc.code', $requiredCode2)
+                    ->where('nb.level', '>=', max(1, $requiredLevel2))
+                    ->where('nb.status', 'built')
+                    ->exists();
+                if (!$owned2) {
+                    return response()->json(['message' => 'Requires ' . $requiredCode2 . ' level ' . max(1, $requiredLevel2) . ' or higher.'], 422);
+                }
+            }
         }
 
         $costs = json_decode($item->cost_json, true) ?: [];
@@ -108,7 +156,6 @@ class ShopController extends Controller
         }
 
         // Apply effect gains
-        $effects = json_decode($item->effect_json, true) ?: [];
         if (isset($effects['refined']) && is_array($effects['refined'])) {
             foreach ($effects['refined'] as $key => $gain) {
                 $refined[$key] = ($refined[$key] ?? 0) + ((float) $gain * $quantity);
@@ -197,6 +244,60 @@ class ShopController extends Controller
             }
         }
 
+        if ($structureMeta) {
+            $catalogId = $this->ensureBuildingCatalog($structureMeta['family']);
+            if ($structureMeta['level'] === 1) {
+                for ($i = 0; $i < $quantity; $i++) {
+                    DB::table('nation_buildings')->insert([
+                        'nation_id' => $nation->id,
+                        'building_catalog_id' => $catalogId,
+                        'level' => 1,
+                        'status' => 'built',
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            } else {
+                for ($i = 0; $i < $quantity; $i++) {
+                    $requiredLevel = $structureMeta['level'] - 1;
+                    $row = DB::table('nation_buildings')
+                        ->where('nation_id', $nation->id)
+                        ->where('building_catalog_id', $catalogId)
+                        ->where('level', $requiredLevel)
+                        ->where('status', 'built')
+                        ->orderBy('id')
+                        ->first();
+                    if (!$row) {
+                        break;
+                    }
+                    DB::table('nation_buildings')->where('id', $row->id)->update([
+                        'level' => $structureMeta['level'],
+                        'status' => 'built',
+                        'updated_at' => now(),
+                    ]);
+
+                    $lowerCode = 'struct_' . $structureMeta['family'] . '_l' . $requiredLevel;
+                    $lowerItemId = DB::table('shop_items')->where('code', $lowerCode)->value('id');
+                    if ($lowerItemId) {
+                        $lowerAsset = DB::table('nation_assets')
+                            ->where('nation_id', $nation->id)
+                            ->where('shop_item_id', $lowerItemId)
+                            ->first();
+                        if ($lowerAsset) {
+                            if ((int) $lowerAsset->qty <= 1) {
+                                DB::table('nation_assets')->where('id', $lowerAsset->id)->delete();
+                            } else {
+                                DB::table('nation_assets')->where('id', $lowerAsset->id)->update([
+                                    'qty' => (int) $lowerAsset->qty - 1,
+                                    'updated_at' => now(),
+                                ]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         DB::table('admin_notifications')->insert([
             'type' => 'shop_purchase',
             'title' => 'Shop purchase: ' . $item->display_name,
@@ -228,6 +329,36 @@ class ShopController extends Controller
                 'refined'    => $updatedExtra['refined']    ?? [],
                 'currencies' => $updatedExtra['currencies'] ?? [],
             ],
+        ]);
+    }
+
+    private function parseStructureCode(string $code): ?array
+    {
+        if (!preg_match('/^struct_([a-z0-9_]+)_l([0-9]+)$/', $code, $matches)) {
+            return null;
+        }
+
+        return [
+            'family' => $matches[1],
+            'level' => (int) $matches[2],
+        ];
+    }
+
+    private function ensureBuildingCatalog(string $familyCode): int
+    {
+        $code = $familyCode;
+        $existing = DB::table('building_catalog')->where('code', $code)->value('id');
+        if ($existing) {
+            return (int) $existing;
+        }
+
+        $display = ucwords(str_replace('_', ' ', $familyCode));
+        return (int) DB::table('building_catalog')->insertGetId([
+            'code' => $code,
+            'display_name' => $display,
+            'max_level' => 10,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
     }
 }
