@@ -28,6 +28,7 @@ Route::post('/auth/login', [AuthController::class, 'login']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
+    Route::patch('/auth/password', [AuthController::class, 'changeOwnPassword']);
     Route::post('/ws/token', [WsTokenController::class, 'issue']);
 
     Route::get('/meta/about', [MetaController::class, 'about']);
@@ -61,14 +62,23 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('role:admin')->prefix('/admin')->group(function () {
         Route::get('/nations', [AdminController::class, 'nations']);
+        Route::post('/users', [AdminController::class, 'createManagedAccount']);
         Route::post('/nations', [AdminController::class, 'createPlaceholderNation']);
         Route::put('/nations/{nationId}', [AdminController::class, 'updateNation']);
         Route::post('/nations/{nationId}/units', [AdminController::class, 'addUnitToNation']);
+        Route::get('/new-account-defaults', [AdminController::class, 'newAccountDefaults']);
+        Route::patch('/new-account-defaults', [AdminController::class, 'updateNewAccountDefaults']);
+        Route::patch('/users/{userId}/password', [AuthController::class, 'adminResetPassword']);
+        Route::get('/time-tracker', [AdminController::class, 'timeTracker']);
+        Route::get('/notifications', [AdminController::class, 'notifications']);
+        Route::delete('/notifications/{notificationId}', [AdminController::class, 'deleteNotification']);
         Route::post('/maps/layers/{layerType}', [MapController::class, 'uploadLayer']);
         Route::post('/chats', [AdminController::class, 'createChat']);
         Route::delete('/chats/{chatId}', [AdminController::class, 'deleteChat']);
         Route::post('/chats/{chatId}/members', [AdminController::class, 'addMembers']);
         Route::delete('/chats/{chatId}/members/{userId}', [AdminController::class, 'removeMember']);
+        Route::post('/shop/items', [AdminController::class, 'createShopItem']);
         Route::put('/shop/items/{itemId}', [AdminController::class, 'updateShopItem']);
+        Route::delete('/shop/items/{itemId}', [AdminController::class, 'deleteShopItem']);
     });
 });

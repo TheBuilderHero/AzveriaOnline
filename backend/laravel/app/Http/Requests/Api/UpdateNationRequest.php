@@ -27,6 +27,10 @@ class UpdateNationRequest extends FormRequest
             'refined_resources.*' => ['numeric'],
             'currencies' => ['sometimes', 'nullable', 'array'],
             'currencies.*' => ['numeric'],
+            'income' => ['sometimes', 'nullable', 'array'],
+            'income.*' => ['numeric'],
+            'terrain_square_miles' => ['sometimes', 'nullable', 'array'],
+            'terrain_square_miles.*' => ['numeric', 'min:0'],
         ];
     }
 }

@@ -9,9 +9,10 @@ class MetaController extends Controller
     public function about()
     {
         return response()->json([
-            'website_version' => '0.1.0',
+            'website_version' => '1.0.0.0 Beta',
             'game_version' => 'Azveria Ruleset v1',
-            'stack' => 'Laravel + MySQL + Ratchet',
+            'admin' => 'Issac',
+            'developer' => 'Dakota',
             'websocket_scope' => ['announcements', 'chat'],
         ]);
     }

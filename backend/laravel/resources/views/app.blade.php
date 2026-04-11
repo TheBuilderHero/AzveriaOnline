@@ -75,6 +75,7 @@
       <option value="">Help</option>
       <option value="about">About</option>
       <option value="docs">Documentation</option>
+      <option value="reset-password">Reset Password</option>
       <option value="logout">Logout</option>
     </select>
   </aside>
@@ -84,7 +85,7 @@
   </main>
 </div>
 
-<audio id="barkAudio" preload="auto" src="https://assets.mixkit.co/active_storage/sfx/80/80-preview.mp3"></audio>
+<audio id="barkAudio" preload="auto" src="https://www.soundjay.com/animal/dog-bark-1.mp3"></audio>
 
 <script>
 const token = localStorage.getItem('azveria_token');
@@ -118,7 +119,7 @@ const nav = document.getElementById('nav');
 const resourcesBar = document.getElementById('resourcesBar');
 
 const playerMenu = ['Player', 'Announcements', 'Map', 'Chat', 'Other Nations', 'Shop', 'Settings'];
-const adminMenu = ['Announcements', 'All Nations', 'Map', 'Chat', 'Shop'];
+const adminMenu = ['Announcements', 'All Nations', 'New Accounts', 'Time Tracker', 'Map', 'Chat', 'Shop', 'Settings'];
 
 function barkIfEnabled() {
   if (settings.dog_bark_enabled) {
@@ -218,7 +219,7 @@ function renderKVList(map, data) {
 
 async function ensureWs() {
   if (ws || !window.WebSocket) return;
-  ws = new WebSocket('ws://localhost:8081');
+  ws = new WebSocket('ws://localhost:18081');
   ws.onclose = () => {
     ws = null;
   };
@@ -253,6 +254,8 @@ async function loadSection(name) {
   view.innerHTML = '<div class="muted" style="padding:32px 16px;">Loading…</div>';
   if (name === 'Player') return loadPlayer();
   if (name === 'Announcements') return loadAnnouncements();
+  if (name === 'New Accounts') return loadNewAccounts();
+  if (name === 'Time Tracker') return loadTimeTracker();
   if (name === 'Map') return loadMap();
   if (name === 'Chat') return loadChat();
   if (name === 'Other Nations') return loadOtherNations();
@@ -360,12 +363,14 @@ async function loadAnnouncements() {
 }
 
 async function loadMap() {
-  const [layersRes, terrainRes] = await Promise.all([
+  const [layersRes, terrainRes, nationsRes] = await Promise.all([
     api('/api/maps/layers'),
-    api('/api/me/terrain-square-miles')
+    api('/api/me/terrain-square-miles'),
+    api('/api/nations?per_page=200')
   ]);
   const layers = await layersRes.json();
   const terrain = await terrainRes.json();
+  const nations = extractList(await nationsRes.json());
 
   const initial = layers.find(l => l.layer_type === 'main') || layers[0] || { image_path: '' };
   view.innerHTML = `
@@ -373,13 +378,21 @@ async function loadMap() {
       <h2>Map</h2>
       <div class="twocol">
         <div>
-          <img id="mapImage" src="/storage/${initial.image_path}" alt="Map" style="width:100%; max-height:70vh; object-fit:contain; border:1px solid #ccc; border-radius:8px; cursor:grab;" />
+          <div id="mapViewport" style="position:relative;overflow:hidden;border:1px solid #ccc;border-radius:8px;max-height:70vh;height:70vh;background:#111;">
+            <img id="mapImage" src="/storage/${initial.image_path}" alt="Map" style="position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;transform-origin:center center;user-select:none;cursor:grab;" />
+            <button id="resetMapBtn" class="primary" style="display:none;position:absolute;right:8px;top:8px;z-index:2;">Reset View</button>
+          </div>
         </div>
         <div>
           <h3>Layers</h3>
           ${layers.map(l => `<button class="primary layerBtn" data-path="${l.image_path}" style="display:block; width:100%; margin-bottom:8px;">${l.layer_type}</button>`).join('')}
           <h3>Terrain Sq Miles</h3>
-          <div class="list">${Object.entries(terrain).map(([k,v]) => `<div>${k}: ${v}</div>`).join('') || '<div class="muted">No data</div>'}</div>
+          <label style="font-size:13px;">View Nation</label>
+          <select id="mapNationSelect" style="margin-bottom:8px;">
+            <option value="me">My Nation</option>
+            ${nations.map(n => `<option value="${n.id}">${n.name}</option>`).join('')}
+          </select>
+          <div class="list" id="mapTerrainStats"></div>
           ${user.role === 'admin' ? `<h3>Admin Upload</h3>
             <label style="font-size:13px;">Layer Type</label>
             <select id="layerType" style="margin-bottom:6px;"><option value="main">Main</option><option value="terrain">Terrain</option><option value="political">Political</option></select>
@@ -392,10 +405,108 @@ async function loadMap() {
     </div>
   `;
 
+  const renderTerrainStats = (sqMiles) => {
+    const total = Math.max(1, Object.values(sqMiles || {}).reduce((sum, val) => sum + Number(val || 0), 0));
+    document.getElementById('mapTerrainStats').innerHTML = Object.entries(sqMiles || {}).map(([k, v]) => {
+      const pct = ((Number(v || 0) / total) * 100).toFixed(1);
+      return `<div>${k}: ${v} (${pct}%)</div>`;
+    }).join('') || '<div class="muted">No data</div>';
+  };
+  renderTerrainStats(terrain);
+
   document.querySelectorAll('.layerBtn').forEach(btn => btn.onclick = () => {
     document.getElementById('mapImage').src = '/storage/' + btn.dataset.path;
+    resetMapView();
     barkIfEnabled();
   });
+
+  document.getElementById('mapNationSelect').onchange = async (e) => {
+    if (e.target.value === 'me') {
+      renderTerrainStats(terrain);
+      return;
+    }
+    const detailRes = await api('/api/nations/' + e.target.value);
+    const detail = await detailRes.json();
+    const sqMiles = detail.terrain?.square_miles_json ? JSON.parse(detail.terrain.square_miles_json) : {};
+    renderTerrainStats(sqMiles);
+  };
+
+  const mapViewport = document.getElementById('mapViewport');
+  const mapImage = document.getElementById('mapImage');
+  const resetMapBtn = document.getElementById('resetMapBtn');
+  let mapScale = 1;
+  let mapX = 0;
+  let mapY = 0;
+  let dragging = false;
+  let pointerId = null;
+  let startX = 0;
+  let startY = 0;
+
+  const applyMapTransform = () => {
+    mapImage.style.transform = `translate(${mapX}px, ${mapY}px) scale(${mapScale})`;
+    resetMapBtn.style.display = (mapScale !== 1 || mapX !== 0 || mapY !== 0) ? 'inline-block' : 'none';
+  };
+
+  const resetMapView = () => {
+    mapScale = 1;
+    mapX = 0;
+    mapY = 0;
+    applyMapTransform();
+  };
+
+  mapImage.addEventListener('dragstart', (e) => e.preventDefault());
+
+  mapViewport.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.1 : -0.1;
+    mapScale = Math.max(1, Math.min(6, mapScale + delta));
+    if (mapScale === 1) {
+      mapX = 0;
+      mapY = 0;
+    }
+    applyMapTransform();
+  }, { passive: false });
+
+  mapViewport.addEventListener('pointerdown', (e) => {
+    if (mapScale <= 1) {
+      return;
+    }
+    dragging = true;
+    pointerId = e.pointerId;
+    mapViewport.setPointerCapture(pointerId);
+    startX = e.clientX - mapX;
+    startY = e.clientY - mapY;
+    mapImage.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+
+  mapViewport.addEventListener('pointermove', (e) => {
+    if (!dragging || mapScale <= 1) {
+      return;
+    }
+    mapX = e.clientX - startX;
+    mapY = e.clientY - startY;
+    applyMapTransform();
+  });
+
+  const releaseMapPointer = () => {
+    dragging = false;
+    if (pointerId !== null) {
+      try { mapViewport.releasePointerCapture(pointerId); } catch {}
+      pointerId = null;
+    }
+    mapImage.style.cursor = 'grab';
+  };
+
+  mapViewport.addEventListener('pointerup', releaseMapPointer);
+  mapViewport.addEventListener('pointercancel', releaseMapPointer);
+  mapViewport.addEventListener('pointerleave', () => {
+    if (dragging && pointerId === null) {
+      releaseMapPointer();
+    }
+  });
+
+  resetMapBtn.onclick = resetMapView;
 
   if (user.role === 'admin') {
     document.getElementById('saveLayer').onclick = async () => {
@@ -540,7 +651,7 @@ async function loadOtherNations() {
 
 async function loadShop() {
   const isAdmin = user.role === 'admin';
-  const calls = [api('/api/shop/categories'), api('/api/shop/items')];
+  const calls = [api('/api/shop/categories'), api('/api/shop/items?per_page=300')];
   if (isAdmin) calls.push(api('/api/players'));
   const [catRes, itemRes, playersRes] = await Promise.all(calls);
   const cats = await catRes.json();
@@ -551,9 +662,19 @@ async function loadShop() {
   view.innerHTML = `
     <div class="card">
       <h2>Shop</h2>
+      <div id="shopSelectedCategory" class="chip" style="margin-bottom:10px;display:inline-flex;">No category selected</div>
       <div class="twocol">
         <div id="shopItems" class="list">Select a category.</div>
-        <div id="shopCats" class="list">${cats.map(c => `<button class="primary catBtn" data-code="${c.code}" style="display:block; width:100%; margin-bottom:8px;">${c.display_name}</button>`).join('')}</div>
+        <div id="shopCats" class="list">${cats.map(c => `<button class="primary catBtn" data-code="${c.code}" style="display:block; width:100%; margin-bottom:8px; opacity:0.7;">${c.display_name}</button>`).join('')}
+          ${isAdmin ? `<hr><h3 style="margin:8px 0;">Add Item</h3>
+            <label style="font-size:12px;">Category</label>
+            <select id="newShopCategory">${cats.map(c => `<option value="${c.id}">${c.display_name}</option>`).join('')}</select>
+            <label style="font-size:12px;">Code</label><input id="newShopCode" placeholder="unique_code">
+            <label style="font-size:12px;">Name</label><input id="newShopName" placeholder="Display name">
+            <label style="font-size:12px;">Description / Effects</label><textarea id="newShopDescription" rows="4"></textarea>
+            <div class="row"><button class="primary" id="createShopItemBtn" style="width:100%;">Create Item</button></div>
+            <span class="muted" id="createShopItemMsg"></span>` : ''}
+        </div>
       </div>
     </div>
   `;
@@ -579,6 +700,19 @@ async function loadShop() {
       <button type="button" onclick="addCostRow(${itemId})" style="font-size:12px;margin-top:4px;background:none;border:1px solid #aaa;border-radius:6px;padding:3px 8px;cursor:pointer;">+ Add</button>`;
   }
 
+  function jsonEditorRows(obj, itemId, editorIdPrefix) {
+    const rows = Object.entries(obj || {}).map(([k, v]) => `
+      <div class="row dyn-row" style="align-items:center;gap:4px;">
+        <select class="dyn-key" style="flex:1;padding:4px;">
+          ${ALL_COST_KEYS.map(ck => `<option value="${ck}" ${ck === k ? 'selected' : ''}>${labelKey(ck)}</option>`).join('')}
+        </select>
+        <input type="number" class="dyn-val" value="${v}" style="width:80px;padding:4px;">
+        <button type="button" class="danger" onclick="this.closest('.dyn-row').remove()" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0;">✕</button>
+      </div>`).join('');
+    return `<div id="${editorIdPrefix}-${itemId}">${rows}</div>
+      <button type="button" onclick="addDynRow('${editorIdPrefix}', ${itemId})" style="font-size:12px;margin-top:4px;background:none;border:1px solid #aaa;border-radius:6px;padding:3px 8px;cursor:pointer;">+ Add</button>`;
+  }
+
   window.addCostRow = (itemId) => {
     const container = document.getElementById('cost-rows-' + itemId);
     if (!container) return;
@@ -594,6 +728,21 @@ async function loadShop() {
     container.appendChild(div);
   };
 
+  window.addDynRow = (prefix, itemId) => {
+    const container = document.getElementById(`${prefix}-${itemId}`);
+    if (!container) return;
+    const div = document.createElement('div');
+    div.className = 'row dyn-row';
+    div.style.cssText = 'align-items:center;gap:4px;';
+    div.innerHTML = `
+      <select class="dyn-key" style="flex:1;padding:4px;">
+        ${ALL_COST_KEYS.map(ck => `<option value="${ck}">${labelKey(ck)}</option>`).join('')}
+      </select>
+      <input type="number" class="dyn-val" value="1" style="width:80px;padding:4px;">
+      <button type="button" class="danger" onclick="this.closest('.dyn-row').remove()" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0;">✕</button>`;
+    container.appendChild(div);
+  };
+
   function readCostRows(itemId) {
     const rows = document.querySelectorAll(`#cost-rows-${itemId} .cost-row`);
     const obj = {};
@@ -605,14 +754,30 @@ async function loadShop() {
     return obj;
   }
 
+  function readDynRows(prefix, itemId) {
+    const rows = document.querySelectorAll(`#${prefix}-${itemId} .dyn-row`);
+    const obj = {};
+    rows.forEach(row => {
+      const k = row.querySelector('.dyn-key').value;
+      const v = Number(row.querySelector('.dyn-val').value);
+      if (k && v) obj[k] = v;
+    });
+    return obj;
+  }
+
   const renderItems = (category) => {
     const items = allItems.filter(i => i.category_code === category);
+    const selectedCategory = cats.find(c => c.code === category);
+    document.getElementById('shopSelectedCategory').textContent = selectedCategory ? `Selected: ${selectedCategory.display_name}` : 'No category selected';
+    document.querySelectorAll('.catBtn').forEach(btn => {
+      btn.style.opacity = btn.dataset.code === category ? '1' : '0.65';
+      btn.style.boxShadow = btn.dataset.code === category ? '0 0 0 3px rgba(155,90,30,0.2)' : 'none';
+    });
     document.getElementById('shopItems').innerHTML = items.map(i => {
       const costObj = (() => { try { return JSON.parse(i.cost_json || '{}'); } catch { return {}; } })();
+      const maintenanceObj = (() => { try { return JSON.parse(i.maintenance_json || '{}'); } catch { return {}; } })();
+      const yearlyObj = (() => { try { return JSON.parse(i.yearly_effect_json || '{}'); } catch { return {}; } })();
       const visArr  = (() => { try { return i.visibility_json ? JSON.parse(i.visibility_json) : null; } catch { return null; } })();
-      const visLabel = visArr === null ? 'All Players'
-        : (visArr.length === 0 ? 'Nobody'
-        : visArr.map(uid => allPlayers.find(p => p.id === uid)?.name || `User ${uid}`).join(', '));
 
       if (isAdmin) {
         const playerCheckboxes = allPlayers.map(p =>
@@ -625,12 +790,21 @@ async function loadShop() {
               <span class="muted" style="font-size:12px;">${i.category_code}</span>
               <span class="muted" style="font-size:11px;">#${i.id}</span>
             </div>
+            <div class="muted" style="font-size:12px;margin-top:4px;">${i.description_text || 'No description/effects text.'}</div>
             <div style="font-size:13px;margin:4px 0;">Cost: ${formatCost(costObj)}</div>
+            <div style="font-size:13px;margin:4px 0;">Maintenance Cost: ${Object.keys(maintenanceObj).length ? formatCost(maintenanceObj) : 'None'}</div>
+            <div style="font-size:13px;margin:4px 0;">Yearly Effect: ${Object.keys(yearlyObj).length ? formatCost(yearlyObj) : 'None'}</div>
             <details style="margin-top:6px;">
               <summary style="font-size:12px;">✏ Edit</summary>
               <div style="margin-top:8px;">
+                <label style="font-size:12px;">Description / Effects</label>
+                <textarea id="desc-${i.id}" rows="4">${i.description_text || ''}</textarea>
                 <label style="font-size:12px;">Cost</label>
                 ${costEditorRows(costObj, i.id)}
+                <label style="font-size:12px;margin-top:8px;display:block;">Maintenance Cost</label>
+                ${jsonEditorRows(maintenanceObj, i.id, 'maint-rows')}
+                <label style="font-size:12px;margin-top:8px;display:block;">Yearly Effect</label>
+                ${jsonEditorRows(yearlyObj, i.id, 'yearly-rows')}
                 <label style="font-size:12px;margin-top:8px;display:block;">Visibility</label>
                 <label style="font-size:12px;display:flex;align-items:center;gap:4px;margin-bottom:4px;">
                   <input type="checkbox" id="vis-global-${i.id}" ${visArr === null ? 'checked' : ''} onchange="document.getElementById('vis-players-${i.id}').style.display=this.checked?'none':'block'">
@@ -641,6 +815,7 @@ async function loadShop() {
                 </div>
                 <div class="row" style="margin-top:8px;">
                   <button class="primary editItem" data-id="${i.id}">Save</button>
+                  <button class="primary deleteItem" data-id="${i.id}" style="background:#8a1a1a;">Delete</button>
                   <span class="muted" id="edit-msg-${i.id}"></span>
                 </div>
               </div>
@@ -650,7 +825,9 @@ async function loadShop() {
         return `
           <div class="card">
             <div><strong>${i.display_name}</strong></div>
+            <div class="muted" style="font-size:12px;">${i.description_text || ''}</div>
             <div class="muted" style="font-size:13px;">Cost: ${formatCost(costObj)}</div>
+            ${Object.keys(maintenanceObj).length ? `<div class="muted" style="font-size:12px;">Yearly maintenance: ${formatCost(maintenanceObj)}</div>` : ''}
             <button class="primary buyItem" data-id="${i.id}" style="margin-top:6px;">Buy</button>
           </div>`;
       }
@@ -670,14 +847,239 @@ async function loadShop() {
         visibility_json = Array.from(document.querySelectorAll(`.vis-check-${id}:checked`)).map(el => Number(el.value));
       }
       const cost_json = readCostRows(id);
-      const r = await api(`/api/admin/shop/items/${id}`, { method: 'PUT', body: JSON.stringify({ cost_json, visibility_json }) });
+      const maintenance_json = readDynRows('maint-rows', id);
+      const yearly_effect_json = readDynRows('yearly-rows', id);
+      const description_text = document.getElementById(`desc-${id}`).value;
+      const r = await api(`/api/admin/shop/items/${id}`, { method: 'PUT', body: JSON.stringify({ cost_json, maintenance_json, yearly_effect_json, description_text, visibility_json }) });
       const msgEl = document.getElementById(`edit-msg-${id}`);
       if (msgEl) msgEl.textContent = r.ok ? 'Saved' : 'Failed';
+      barkIfEnabled();
+    });
+
+    document.querySelectorAll('.deleteItem').forEach(btn => btn.onclick = async () => {
+      const id = Number(btn.dataset.id);
+      const r = await api(`/api/admin/shop/items/${id}`, { method: 'DELETE' });
+      if (r.ok) {
+        const index = allItems.findIndex(item => item.id === id);
+        if (index >= 0) allItems.splice(index, 1);
+        renderItems(category);
+      }
       barkIfEnabled();
     });
   };
 
   document.querySelectorAll('.catBtn').forEach(btn => btn.onclick = () => renderItems(btn.dataset.code));
+  document.getElementById('createShopItemBtn')?.addEventListener('click', async () => {
+    const payload = {
+      category_id: Number(document.getElementById('newShopCategory').value),
+      code: document.getElementById('newShopCode').value.trim(),
+      display_name: document.getElementById('newShopName').value.trim(),
+      description_text: document.getElementById('newShopDescription').value,
+      cost_json: {},
+    };
+    const r = await api('/api/admin/shop/items', { method: 'POST', body: JSON.stringify(payload) });
+    document.getElementById('createShopItemMsg').textContent = r.ok ? 'Created' : 'Failed';
+    if (r.ok) {
+      const reload = await api('/api/shop/items?per_page=300');
+      const refreshed = extractList(await reload.json());
+      allItems.splice(0, allItems.length, ...refreshed);
+    }
+    barkIfEnabled();
+  });
+}
+
+async function loadNewAccounts() {
+  const res = await api('/api/admin/new-account-defaults');
+  const d = await res.json();
+  const resources = d.resources || {};
+  const refined = d.refined_resources || {};
+  const currencies = d.currencies || {};
+  const terrainSq = d.terrain_square_miles || {};
+  const income = d.income_defaults || {};
+
+  const makeRefInputs = (groupName, map) => `
+    <details style="margin:6px 0;">
+      <summary style="font-size:13px;">${groupName}</summary>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
+        ${Object.entries(map).map(([k,label]) => `<label style="font-size:12px;">${label}</label><input id="na-ref-${k}" type="number" value="${Number(refined[k] || 0)}">`).join('')}
+      </div>
+    </details>`;
+
+  view.innerHTML = `
+    <div class="card">
+      <h2>New Accounts (Admin)</h2>
+      <p class="muted" style="margin-top:0;">These values are applied when a player creates a new account and nation.</p>
+
+      <label>Nation Name Template</label>
+      <input id="na-nation-template" value="${d.nation_name_template || "{name}'s Nation"}">
+      <label>Leader Name Template</label>
+      <input id="na-leader-template" value="${d.leader_name_template || '{name}'}">
+      <label>Alliance Name</label>
+      <input id="na-alliance" value="${d.alliance_name || ''}">
+      <label>Default Temporary Password</label>
+      <input id="na-temp-password" value="${d.default_temp_password || 'password123'}">
+      <label>About Text</label>
+      <textarea id="na-about" rows="3">${d.about_text || ''}</textarea>
+
+      <details open style="margin-top:8px;">
+        <summary>Base Resources</summary>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
+          <label>Cow</label><input id="na-cow" type="number" value="${Number(resources.cow || 0)}">
+          <label>Wood</label><input id="na-wood" type="number" value="${Number(resources.wood || 0)}">
+          <label>Ore</label><input id="na-ore" type="number" value="${Number(resources.ore || 0)}">
+          <label>Food</label><input id="na-food" type="number" value="${Number(resources.food || 0)}">
+        </div>
+      </details>
+
+      <details style="margin-top:8px;">
+        <summary>Refined Resources</summary>
+        ${makeRefInputs('Ore-derived', ORE_REFS)}
+        ${makeRefInputs('Wood-derived', WOOD_REFS)}
+        ${makeRefInputs('Food-derived', FOOD_REFS)}
+        <details style="margin:6px 0;">
+          <summary style="font-size:13px;">Special</summary>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
+            <label style="font-size:12px;">K</label><input id="na-ref-K" type="number" value="${Number(refined.K || 0)}">
+            <label style="font-size:12px;">RK</label><input id="na-ref-RK" type="number" value="${Number(refined.RK || 0)}">
+            <label style="font-size:12px;">DP</label><input id="na-ref-DP" type="number" value="${Number(refined.DP || 0)}">
+          </div>
+        </details>
+      </details>
+
+      <details style="margin-top:8px;">
+        <summary>Currencies</summary>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
+          ${Object.entries(CURRENCIES).map(([k,label]) => `<label style="font-size:12px;">${label}</label><input id="na-cur-${k}" type="number" value="${Number(currencies[k] || 0)}">`).join('')}
+        </div>
+      </details>
+
+      <details style="margin-top:8px;">
+        <summary>Base Income Per Game Year</summary>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
+          <label>Cow</label><input id="na-income-cow" type="number" value="${Number(income.cow || 30)}">
+          <label>Wood</label><input id="na-income-wood" type="number" value="${Number(income.wood || 3)}">
+          <label>Ore</label><input id="na-income-ore" type="number" value="${Number(income.ore || 3)}">
+          <label>Food</label><input id="na-income-food" type="number" value="${Number(income.food || 3)}">
+          <label><input type="checkbox" id="na-rand-res" ${d.income_randomize_resources ? 'checked' : ''}> Randomize resources</label><span></span>
+          <label>Resource Min</label><input id="na-rand-res-min" type="number" value="${Number(d.income_resource_min || 1)}">
+          <label>Resource Max</label><input id="na-rand-res-max" type="number" value="${Number(d.income_resource_max || 5)}">
+          <label><input type="checkbox" id="na-rand-cow" ${d.income_randomize_cow ? 'checked' : ''}> Randomize Cow</label><span></span>
+          <label>Cow Min</label><input id="na-rand-cow-min" type="number" value="${Number(d.income_cow_min || 30)}">
+          <label>Cow Max</label><input id="na-rand-cow-max" type="number" value="${Number(d.income_cow_max || 30)}">
+        </div>
+      </details>
+
+      <details style="margin-top:8px;">
+        <summary>Terrain Square Miles</summary>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
+          <label id="na-sq-label-grassland">Grassland</label><input id="na-sq-grassland" type="number" value="${Number(terrainSq.grassland || 0)}">
+          <label id="na-sq-label-mountain">Mountain</label><input id="na-sq-mountain" type="number" value="${Number(terrainSq.mountain || 0)}">
+          <label id="na-sq-label-freshwater">Freshwater</label><input id="na-sq-freshwater" type="number" value="${Number(terrainSq.freshwater || 0)}">
+          <label id="na-sq-label-hills">Hills</label><input id="na-sq-hills" type="number" value="${Number(terrainSq.hills || 0)}">
+          <label id="na-sq-label-desert">Desert</label><input id="na-sq-desert" type="number" value="${Number(terrainSq.desert || 0)}">
+        </div>
+      </details>
+
+      <hr style="margin:12px 0;">
+      <h3>Create Account</h3>
+      <label>Username / Display Name</label>
+      <input id="na-create-name" placeholder="New player name">
+      <label>Email</label>
+      <input id="na-create-email" type="email" placeholder="player@example.com">
+      <label>Temporary Password</label>
+      <input id="na-create-password" value="${d.default_temp_password || 'password123'}">
+      <div class="row"><button class="primary" id="createManagedAccountBtn">Create Account</button><span class="muted" id="createManagedAccountMsg"></span></div>
+
+      <div class="row" style="margin-top:10px;">
+        <button class="primary" id="saveNewAccountDefaults">Save Defaults</button>
+        <span class="muted" id="saveNewAccountDefaultsMsg"></span>
+      </div>
+    </div>
+  `;
+
+  const updateSqLabels = () => {
+    const sq = {
+      grassland: Number(document.getElementById('na-sq-grassland').value || 0),
+      mountain: Number(document.getElementById('na-sq-mountain').value || 0),
+      freshwater: Number(document.getElementById('na-sq-freshwater').value || 0),
+      hills: Number(document.getElementById('na-sq-hills').value || 0),
+      desert: Number(document.getElementById('na-sq-desert').value || 0),
+    };
+    const total = Math.max(1, Object.values(sq).reduce((sum, value) => sum + value, 0));
+    Object.entries(sq).forEach(([key, value]) => {
+      const pct = ((value / total) * 100).toFixed(1);
+      const label = key.charAt(0).toUpperCase() + key.slice(1);
+      document.getElementById(`na-sq-label-${key}`).textContent = `${label} (${pct}%)`;
+    });
+  };
+  ['grassland', 'mountain', 'freshwater', 'hills', 'desert'].forEach(key => {
+    document.getElementById(`na-sq-${key}`).addEventListener('input', updateSqLabels);
+  });
+  updateSqLabels();
+
+  document.getElementById('saveNewAccountDefaults').onclick = async () => {
+    const refinedResources = {};
+    Object.keys(ORE_REFS).concat(Object.keys(WOOD_REFS)).concat(Object.keys(FOOD_REFS)).concat(['K', 'RK', 'DP']).forEach(k => {
+      const el = document.getElementById('na-ref-' + k);
+      if (el) refinedResources[k] = Number(el.value);
+    });
+
+    const currencyPayload = {};
+    Object.keys(CURRENCIES).forEach(k => {
+      const el = document.getElementById('na-cur-' + k);
+      if (el) currencyPayload[k] = Number(el.value);
+    });
+
+    const payload = {
+      nation_name_template: document.getElementById('na-nation-template').value,
+      leader_name_template: document.getElementById('na-leader-template').value,
+      alliance_name: document.getElementById('na-alliance').value,
+      default_temp_password: document.getElementById('na-temp-password').value,
+      about_text: document.getElementById('na-about').value,
+      resources: {
+        cow: Number(document.getElementById('na-cow').value),
+        wood: Number(document.getElementById('na-wood').value),
+        ore: Number(document.getElementById('na-ore').value),
+        food: Number(document.getElementById('na-food').value),
+      },
+      refined_resources: refinedResources,
+      currencies: currencyPayload,
+      income_defaults: {
+        cow: Number(document.getElementById('na-income-cow').value),
+        wood: Number(document.getElementById('na-income-wood').value),
+        ore: Number(document.getElementById('na-income-ore').value),
+        food: Number(document.getElementById('na-income-food').value),
+      },
+      income_randomize_resources: document.getElementById('na-rand-res').checked,
+      income_resource_min: Number(document.getElementById('na-rand-res-min').value),
+      income_resource_max: Number(document.getElementById('na-rand-res-max').value),
+      income_randomize_cow: document.getElementById('na-rand-cow').checked,
+      income_cow_min: Number(document.getElementById('na-rand-cow-min').value),
+      income_cow_max: Number(document.getElementById('na-rand-cow-max').value),
+      terrain_square_miles: {
+        grassland: Number(document.getElementById('na-sq-grassland').value),
+        mountain: Number(document.getElementById('na-sq-mountain').value),
+        freshwater: Number(document.getElementById('na-sq-freshwater').value),
+        hills: Number(document.getElementById('na-sq-hills').value),
+        desert: Number(document.getElementById('na-sq-desert').value),
+      },
+    };
+
+    const save = await api('/api/admin/new-account-defaults', { method: 'PATCH', body: JSON.stringify(payload) });
+    document.getElementById('saveNewAccountDefaultsMsg').textContent = save.ok ? 'Saved' : 'Failed';
+    barkIfEnabled();
+  };
+
+  document.getElementById('createManagedAccountBtn').onclick = async () => {
+    const payload = {
+      name: document.getElementById('na-create-name').value.trim(),
+      email: document.getElementById('na-create-email').value.trim(),
+      password: document.getElementById('na-create-password').value,
+    };
+    const create = await api('/api/admin/users', { method: 'POST', body: JSON.stringify(payload) });
+    document.getElementById('createManagedAccountMsg').textContent = create.ok ? 'Created' : 'Failed';
+    barkIfEnabled();
+  };
 }
 
 async function loadSettings() {
@@ -716,16 +1118,58 @@ async function loadSettings() {
   };
 }
 
+function loadForcedPasswordReset() {
+  nav.innerHTML = '';
+  view.innerHTML = `
+    <div class="card" style="max-width:560px;">
+      <h2>Password Reset Required</h2>
+      <p class="muted">This account was created or reset with a temporary password. You must choose a new password before accessing the game.</p>
+      <label>Current Password</label>
+      <input id="forcedCurrentPassword" type="password">
+      <label>New Password</label>
+      <input id="forcedNewPassword" type="password">
+      <div class="row"><button class="primary" id="forcedResetBtn">Update Password</button><span class="muted" id="forcedResetMsg"></span></div>
+    </div>
+  `;
+
+  document.getElementById('forcedResetBtn').onclick = async () => {
+    const current_password = document.getElementById('forcedCurrentPassword').value;
+    const new_password = document.getElementById('forcedNewPassword').value;
+    const res = await api('/api/auth/password', { method: 'PATCH', body: JSON.stringify({ current_password, new_password }) });
+    if (res.ok) {
+      user.force_password_reset = false;
+      localStorage.setItem('azveria_user', JSON.stringify(user));
+      renderNav();
+    } else {
+      document.getElementById('forcedResetMsg').textContent = 'Failed';
+    }
+  };
+}
+
 async function loadAllNations() {
-  const res = await api('/api/admin/nations');
+  const [res, notificationsRes] = await Promise.all([api('/api/admin/nations'), api('/api/admin/notifications')]);
   const payload = await res.json();
   const nations = extractList(payload);
+  const notifications = await notificationsRes.json();
 
   view.innerHTML = `
     <div class="card">
       <h2>All Nations (Admin)</h2>
       <div class="twocol">
-        <div id="adminNationEditor" class="list">Select nation to edit.</div>
+        <div>
+          <div id="adminNationEditor" class="list" style="margin-bottom:12px;">Select nation to edit.</div>
+          <div class="list" id="adminNotifications">
+            <h3 style="margin-top:0;">Notifications</h3>
+            ${notifications.map(n => `<div style="border-bottom:1px solid #ddd;padding:8px 0;">
+              <div style="display:flex;justify-content:space-between;gap:8px;">
+                <strong>${n.is_read ? 'Read' : 'Unread'}: ${n.title}</strong>
+                <button class="primary deleteNotif" data-id="${n.id}" style="background:#8a1a1a;">Delete</button>
+              </div>
+              <div class="muted" style="font-size:12px;">${n.created_at || ''}</div>
+              <div style="font-size:13px;white-space:pre-wrap;">${n.body}</div>
+            </div>`).join('') || '<div class="muted">No notifications</div>'}
+          </div>
+        </div>
         <div>
           <input id="newPlaceholder" placeholder="New placeholder nation name">
           <button class="primary" id="createPlaceholder" style="margin-top:8px; width:100%;">Create Placeholder Nation</button>
@@ -744,6 +1188,9 @@ async function loadAllNations() {
     try { extra = JSON.parse(d.resources?.extra_json || '{}'); } catch {}
     const ref = extra.refined || {};
     const cur = extra.currencies || {};
+    const income = extra.income || { cow: 30, wood: 3, ore: 3, food: 3 };
+    let sqMiles = {};
+    try { sqMiles = d.terrain?.square_miles_json ? JSON.parse(d.terrain.square_miles_json) : {}; } catch {}
 
     const makeRefInput = (group, map) => `
       <details style="margin:6px 0;">
@@ -772,6 +1219,21 @@ async function loadAllNations() {
         <label>Wood</label><input id="nWood" type="number" value="${d.resources?.wood || 0}">
         <label>Ore</label><input id="nOre" type="number" value="${d.resources?.ore || 0}">
         <label>Food</label><input id="nFood" type="number" value="${d.resources?.food || 0}">
+      </details>
+      <details style="margin-top:8px;">
+        <summary>Income Per Game Year</summary>
+        <label>Cow</label><input id="nIncomeCow" type="number" value="${income.cow || 30}">
+        <label>Wood</label><input id="nIncomeWood" type="number" value="${income.wood || 3}">
+        <label>Ore</label><input id="nIncomeOre" type="number" value="${income.ore || 3}">
+        <label>Food</label><input id="nIncomeFood" type="number" value="${income.food || 3}">
+      </details>
+      <details style="margin-top:8px;">
+        <summary>Terrain Square Miles</summary>
+        <label>Grassland</label><input id="nSqGrassland" type="number" value="${sqMiles.grassland || 0}">
+        <label>Mountain</label><input id="nSqMountain" type="number" value="${sqMiles.mountain || 0}">
+        <label>Freshwater</label><input id="nSqFreshwater" type="number" value="${sqMiles.freshwater || 0}">
+        <label>Hills</label><input id="nSqHills" type="number" value="${sqMiles.hills || 0}">
+        <label>Desert</label><input id="nSqDesert" type="number" value="${sqMiles.desert || 0}">
       </details>
       <details style="margin-top:8px;">
         <summary>Refined Resources</summary>
@@ -818,6 +1280,19 @@ async function loadAllNations() {
           ore: Number(document.getElementById('nOre').value),
           food: Number(document.getElementById('nFood').value),
         },
+        income: {
+          cow: Number(document.getElementById('nIncomeCow').value),
+          wood: Number(document.getElementById('nIncomeWood').value),
+          ore: Number(document.getElementById('nIncomeOre').value),
+          food: Number(document.getElementById('nIncomeFood').value),
+        },
+        terrain_square_miles: {
+          grassland: Number(document.getElementById('nSqGrassland').value),
+          mountain: Number(document.getElementById('nSqMountain').value),
+          freshwater: Number(document.getElementById('nSqFreshwater').value),
+          hills: Number(document.getElementById('nSqHills').value),
+          desert: Number(document.getElementById('nSqDesert').value),
+        },
         refined_resources,
         currencies,
       };
@@ -837,12 +1312,35 @@ async function loadAllNations() {
   };
 
   document.querySelectorAll('.editNationBtn').forEach(btn => btn.onclick = () => openEditor(btn.dataset.id));
+  document.querySelectorAll('.deleteNotif').forEach(btn => btn.onclick = async () => {
+    const del = await api('/api/admin/notifications/' + btn.dataset.id, { method: 'DELETE' });
+    if (del.ok) loadAllNations();
+  });
   document.getElementById('createPlaceholder').onclick = async () => {
     const name = document.getElementById('newPlaceholder').value;
     await api('/api/admin/nations', { method: 'POST', body: JSON.stringify({ name }) });
     loadAllNations();
     barkIfEnabled();
   };
+}
+
+async function loadTimeTracker() {
+  const res = await api('/api/admin/time-tracker');
+  const d = await res.json();
+  view.innerHTML = `
+    <div class="card">
+      <h2>Time Tracker</h2>
+      <div class="list">
+        <div><strong>Started:</strong> ${d.started_at}</div>
+        <div><strong>Seconds Per In-Game Year:</strong> ${d.seconds_per_year}</div>
+        <div><strong>Elapsed Years:</strong> ${d.elapsed_years}</div>
+        <div><strong>Processed Years:</strong> ${d.processed_years}</div>
+        <div><strong>Current Game Year:</strong> ${d.current_game_year}</div>
+        <div><strong>Processed This Load:</strong> ${d.processed_now}</div>
+        <div class="muted" style="margin-top:8px;">Every real-world two weeks equals one in-game year. Opening this page processes any elapsed unprocessed years.</div>
+      </div>
+    </div>
+  `;
 }
 
 async function init() {
@@ -855,6 +1353,10 @@ async function init() {
     setTheme(settings.theme);
     applyColorBlindMode(settings.color_blind_mode);
   }
+  if (user.force_password_reset) {
+    loadForcedPasswordReset();
+    return;
+  }
   renderNav();
 }
 
@@ -863,10 +1365,35 @@ helpSelect.addEventListener('change', async (e) => {
   if (e.target.value === 'about') {
     const res = await api('/api/meta/about');
     const d = await res.json();
-    alert(`Website: ${d.website_version}\nGame: ${d.game_version}\nStack: ${d.stack}`);
+    alert(`Website: ${d.website_version}\nGame: ${d.game_version}\nAdmin: ${d.admin}`);
   }
   if (e.target.value === 'docs') {
     window.open('https://github.com/TheBuilderHero/AzveriaOnline/blob/main/READMEPLAYER', '_blank');
+  }
+  if (e.target.value === 'reset-password') {
+    if (user.role === 'admin') {
+      const mode = window.prompt('Type "self" to reset your own password or enter another user ID to reset that user password.', 'self');
+      if (mode) {
+        if (mode === 'self') {
+          const currentPassword = window.prompt('Current password');
+          const newPassword = window.prompt('New password (min 8 characters)');
+          if (currentPassword && newPassword) {
+            await api('/api/auth/password', { method: 'PATCH', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) });
+          }
+        } else {
+          const newPassword = window.prompt('New temporary password for user #' + mode);
+          if (newPassword) {
+            await api('/api/admin/users/' + mode + '/password', { method: 'PATCH', body: JSON.stringify({ new_password: newPassword, force_password_reset: true }) });
+          }
+        }
+      }
+    } else {
+      const currentPassword = window.prompt('Current password');
+      const newPassword = window.prompt('New password (min 8 characters)');
+      if (currentPassword && newPassword) {
+        await api('/api/auth/password', { method: 'PATCH', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) });
+      }
+    }
   }
   if (e.target.value === 'logout') {
     await api('/api/auth/logout', { method: 'POST' });

@@ -165,11 +165,45 @@ CREATE TABLE IF NOT EXISTS shop_items (
   category_id BIGINT UNSIGNED NOT NULL,
   code VARCHAR(64) NOT NULL UNIQUE,
   display_name VARCHAR(160) NOT NULL,
+  description_text TEXT NULL,
   cost_json JSON NOT NULL,
+  maintenance_json JSON NULL,
+  yearly_effect_json JSON NULL,
   effect_json JSON NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   visibility_json JSON NULL COMMENT 'null = global; ["all"] = global; [1,2,3] = only those user IDs',
   CONSTRAINT fk_shop_items_category FOREIGN KEY (category_id) REFERENCES shop_categories(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS nation_assets (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nation_id BIGINT UNSIGNED NOT NULL,
+  shop_item_id BIGINT UNSIGNED NOT NULL,
+  qty INT UNSIGNED NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NULL,
+  updated_at TIMESTAMP NULL,
+  UNIQUE KEY uq_nation_assets_unique (nation_id, shop_item_id),
+  CONSTRAINT fk_nation_assets_nation FOREIGN KEY (nation_id) REFERENCES nations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_nation_assets_item FOREIGN KEY (shop_item_id) REFERENCES shop_items(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS admin_notifications (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  type VARCHAR(64) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  body TEXT NOT NULL,
+  meta_json JSON NULL,
+  is_read TINYINT(1) NOT NULL DEFAULT 0,
+  read_at TIMESTAMP NULL,
+  created_at TIMESTAMP NULL
+);
+
+CREATE TABLE IF NOT EXISTS game_time (
+  id TINYINT UNSIGNED PRIMARY KEY,
+  started_at TIMESTAMP NOT NULL,
+  seconds_per_year INT UNSIGNED NOT NULL DEFAULT 1209600,
+  processed_years INT UNSIGNED NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_settings (
@@ -195,3 +229,7 @@ INSERT INTO map_layers (layer_type, image_path, updated_at) VALUES
   ('terrain', 'maps/terrain-map.png', NOW()),
   ('political', 'maps/political-map.png', NOW())
 ON DUPLICATE KEY UPDATE image_path = VALUES(image_path), updated_at = VALUES(updated_at);
+
+INSERT INTO game_time (id, started_at, seconds_per_year, processed_years, updated_at) VALUES
+  (1, NOW(), 1209600, 0, NOW())
+ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at);

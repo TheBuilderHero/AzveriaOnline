@@ -188,7 +188,7 @@ class DatabaseSeeder extends Seeder
         // cost_json keys: cow/wood/ore/food = base; ref_X = refined resource;
         //                 cur_X = currency stored in extra_json.currencies
         // effect_json:    refined = {key:qty}, currency = {key:qty}, unit_code+qty
-        $craftCategory = DB::table('shop_categories')->where('code', 'crafting')->first();
+        $craftCategory = DB::table('shop_categories')->where('code', 'refinement')->first();
         if ($craftCategory) {
             $allCraftItems = [
                 // Ore chain
@@ -229,6 +229,47 @@ class DatabaseSeeder extends Seeder
                         'cost_json'    => json_encode($cost),
                         'effect_json'  => json_encode($effect),
                         'is_active'    => 1,
+                    ]
+                );
+            }
+
+            $structureItems = [
+                ['struct_capital_l1', 'Capital L1', ['cow' => 5, 'ore' => 1, 'food' => 2, 'wood' => 2], ['cow' => 2], ['food' => 1], 'Capital. Takes 10 square miles. Effect: +2C yearly, -1F yearly.'],
+                ['struct_refinery_l1', 'Refinery L1', ['cow' => 4, 'ore' => 2, 'food' => 1, 'wood' => 1], [], [], 'Refinery. Takes 10 square miles. Effect: 5-to-1 conversion rate.'],
+                ['struct_fort_l1', 'Fort L1', ['cow' => 2, 'food' => 1, 'wood' => 1], [], [], 'Fort. Takes 10 square miles. Effect: +25% to each defensive roll.'],
+                ['struct_city_l1', 'City L1', ['wood' => 1], ['cow' => 2], [], 'City. Takes 10 square miles. Effect: +2C yearly.'],
+                ['struct_farm_l1', 'Farm L1', ['cow' => 2], ['food' => 1], [], 'Farm. Takes 10 square miles. Produces food, fish, rice, and blank beans.'],
+                ['struct_lodging_l1', 'Lodging L1', ['cow' => 3], ['wood' => 1], [], 'Lodging. Takes 10 square miles. Effect: +1W yearly.'],
+                ['struct_mine_l1', 'Mine / Excavation L1', ['cow' => 2, 'wood' => 1], ['ore' => 1], [], 'Mine. Takes 10 square miles. Effect: +1O yearly.'],
+                ['struct_barracks_l1', 'Barracks L1', ['cow' => 5, 'food' => 1, 'wood' => 1], [], [], 'Barracks. Takes 10 square miles. Effect: +3 infantry, unlocks light infantry.', ['unit_code' => 'dak_light_infantry', 'qty' => 3]],
+                ['struct_factory_l1', 'Factory L1', ['cow' => 5, 'ore' => 1, 'wood' => 1], [], [], 'Factory. Takes 10 square miles. Effect: +2 artillery, unlocks light artillery.'],
+                ['struct_shipyard_l1', 'Shipyard L1', ['cow' => 5, 'wood' => 3], [], [], 'Shipyard. Takes 10 square miles. Effect: +3 warships, unlocks light cruisers and corvettes.'],
+                ['struct_airfield_l1', 'Airfield L1', ['cow' => 9], [], [], 'Airfield. Takes 10 square miles. Effect: +3 aircraft, 2cm range, unlocks recon planes.'],
+                ['struct_training_ground_l1', 'Training Ground L1', ['cow' => 8, 'ref_GBR' => 2, 'ref_H' => 1], [], [], 'Training Ground. Takes 10 square miles. Effect: +0.2X chosen attribute(s) per year, capacity 2.'],
+                ['struct_trf_l1', 'TRF L1', ['cow' => 20, 'ref_FS' => 1, 'ref_URM' => 1, 'food' => 5, 'ref_CHB' => 1, 'ref_CB' => 1], [], [], 'Technological Research Facility. Takes 10 square miles. Effect: 8-1 conversion rate and SS unlocked.'],
+                ['struct_teleporter_l1', 'Teleporter L1', ['cow' => 20, 'ref_FS' => 3, 'ref_DE' => 1, 'ref_CGM' => 1], [], ['cur_CB' => 1], 'Teleporter. Takes 10 square miles. Effect: instant teleport within 1cm capital radius for 1CB yearly maintenance.'],
+                ['struct_canal_l1', 'Canal', ['cow' => 9, 'ore' => 4, 'ref_M' => 1, 'food' => 2], [], [], 'Canal. Uses land/water terrain. Effect: changes 0.5cm of land to water.'],
+                ['struct_spore_factory_l1', 'Spore Factory L1', [], ['cur_SP' => 1000000, 'ref_MYC' => 1], [], 'Spore Factory. Forced build. Effect: +1mSP and +1MYC yearly.'],
+                ['struct_core_detonater_l1', 'Core Detonater L1', ['cur_GB' => 10000, 'ore' => 1, 'food' => 1, 'ref_H' => 1], [], [], 'Core Detonater. Takes 10 square miles. Effect: Deep hole.'],
+                ['struct_temple_l1', 'Temple L1', ['cow' => 5, 'ore' => 3], [], [], 'Temple. Takes 10 square miles. Effect: +1FTH, 1st level faith unit unlocked.'],
+                ['struct_heavy_mine_l1', 'Heavy Mine L1', ['cow' => 15, 'ref_M' => 2], ['cur_G' => 1], [], 'Heavy Mine. Takes 10 square miles. Effect: +1MTH and chance-based advanced mineral output.'],
+                ['struct_grass_farm_l1', 'Grass Farm L1', ['cow' => 2, 'food' => 2], ['ref_ZZ' => 1, 'cur_SP' => 150], [], 'Grass Farm. Takes 10 square miles. Effect: +1ZZ and +150SP yearly.'],
+            ];
+
+            foreach ($structureItems as $structure) {
+                [$code, $name, $cost, $yearlyEffect, $maintenance, $description] = array_slice($structure, 0, 6);
+                $effect = $structure[6] ?? null;
+                DB::table('shop_items')->updateOrInsert(
+                    ['code' => $code],
+                    [
+                        'category_id' => DB::table('shop_categories')->where('code', 'crafting')->value('id'),
+                        'display_name' => $name,
+                        'description_text' => $description,
+                        'cost_json' => json_encode($cost),
+                        'maintenance_json' => json_encode($maintenance),
+                        'yearly_effect_json' => json_encode($yearlyEffect),
+                        'effect_json' => $effect ? json_encode($effect) : null,
+                        'is_active' => 1,
                     ]
                 );
             }

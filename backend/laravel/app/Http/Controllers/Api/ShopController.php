@@ -120,6 +120,23 @@ class ShopController extends Controller
             }
         }
 
+        // Backward-compatible effect handling: direct keys in effect_json
+        foreach ($effects as $effectKey => $effectValue) {
+            if (!is_numeric($effectValue)) {
+                continue;
+            }
+            $gain = (float) $effectValue * $quantity;
+            if (in_array($effectKey, $baseColumns, true)) {
+                $baseUpdate[$effectKey] = ((float) ($baseUpdate[$effectKey] ?? $resourceRow->{$effectKey})) + $gain;
+            } elseif (str_starts_with($effectKey, 'ref_')) {
+                $rKey = substr($effectKey, 4);
+                $refined[$rKey] = ($refined[$rKey] ?? 0) + $gain;
+            } elseif (str_starts_with($effectKey, 'cur_')) {
+                $cKey = substr($effectKey, 4);
+                $currencies[$cKey] = ($currencies[$cKey] ?? 0) + $gain;
+            }
+        }
+
         $extra['refined'] = $refined;
         $extra['currencies'] = $currencies;
         $baseUpdate['extra_json'] = json_encode($extra);
@@ -131,15 +148,79 @@ class ShopController extends Controller
             $unitCatalog = DB::table('unit_catalog')->where('code', $effects['unit_code'])->first();
             if ($unitCatalog) {
                 $qty = (int) ($effects['qty'] ?? 1) * $quantity;
-                DB::table('nation_units')->updateOrInsert(
-                    ['nation_id' => $nation->id, 'unit_catalog_id' => $unitCatalog->id, 'status' => 'owned'],
-                    ['qty' => DB::raw("qty + {$qty}"), 'updated_at' => now()]
-                );
+                $existing = DB::table('nation_units')
+                    ->where('nation_id', $nation->id)
+                    ->where('unit_catalog_id', $unitCatalog->id)
+                    ->where('status', 'owned')
+                    ->first();
+                if ($existing) {
+                    DB::table('nation_units')->where('id', $existing->id)->update([
+                        'qty' => $existing->qty + $qty,
+                        'updated_at' => now(),
+                    ]);
+                } else {
+                    DB::table('nation_units')->insert([
+                        'nation_id' => $nation->id,
+                        'unit_catalog_id' => $unitCatalog->id,
+                        'qty' => $qty,
+                        'status' => 'owned',
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
             }
         }
 
         $updatedRow = DB::table('nation_resources')->where('nation_id', $nation->id)->first();
         $updatedExtra = json_decode($updatedRow->extra_json ?? '{}', true) ?: [];
+
+        $hasTrackedAsset = !empty(json_decode($item->maintenance_json ?? 'null', true) ?: [])
+            || !empty(json_decode($item->yearly_effect_json ?? 'null', true) ?: []);
+        if ($hasTrackedAsset) {
+            $existingAsset = DB::table('nation_assets')
+                ->where('nation_id', $nation->id)
+                ->where('shop_item_id', $item->id)
+                ->first();
+            if ($existingAsset) {
+                DB::table('nation_assets')->where('id', $existingAsset->id)->update([
+                    'qty' => $existingAsset->qty + $quantity,
+                    'updated_at' => now(),
+                ]);
+            } else {
+                DB::table('nation_assets')->insert([
+                    'nation_id' => $nation->id,
+                    'shop_item_id' => $item->id,
+                    'qty' => $quantity,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+
+        DB::table('admin_notifications')->insert([
+            'type' => 'shop_purchase',
+            'title' => 'Shop purchase: ' . $item->display_name,
+            'body' => 'User #' . $request->user()->id . ' (' . $request->user()->name . ') purchased ' . $quantity . 'x ' . $item->display_name
+                . ' for nation #' . $nation->id . ' (' . $nation->name . ').'
+                . ' Purchase cost: ' . json_encode($costs)
+                . '. Purchase effect: ' . json_encode($effects)
+                . '. Remaining balances after purchase: ' . json_encode([
+                    'base' => ['cow' => (float) $updatedRow->cow, 'wood' => (float) $updatedRow->wood, 'ore' => (float) $updatedRow->ore, 'food' => (float) $updatedRow->food],
+                    'refined' => $updatedExtra['refined'] ?? [],
+                    'currencies' => $updatedExtra['currencies'] ?? [],
+                ]),
+            'meta_json' => json_encode([
+                'actor_user_id' => $request->user()->id,
+                'nation_id' => $nation->id,
+                'item_id' => $item->id,
+                'quantity' => $quantity,
+                'cost_json' => $costs,
+                'effect_json' => $effects,
+            ]),
+            'is_read' => 0,
+            'created_at' => now(),
+        ]);
+
         return response()->json([
             'message' => 'Purchase successful',
             'remaining' => [

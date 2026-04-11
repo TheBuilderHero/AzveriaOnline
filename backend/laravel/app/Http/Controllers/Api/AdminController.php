@@ -7,11 +7,56 @@ use App\Http\Requests\Api\CreatePlaceholderNationRequest;
 use App\Http\Requests\Api\StoreChatRequest;
 use App\Http\Requests\Api\UpdateNationRequest;
 use App\Http\Requests\Api\UpdateShopItemRequest;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class AdminController extends Controller
 {
+    public function newAccountDefaults()
+    {
+        return response()->json($this->getNewAccountDefaults());
+    }
+
+    public function updateNewAccountDefaults(Request $request)
+    {
+        $data = $request->validate([
+            'nation_name_template' => ['sometimes', 'string', 'max:150'],
+            'leader_name_template' => ['sometimes', 'string', 'max:120'],
+            'alliance_name' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'about_text' => ['sometimes', 'nullable', 'string', 'max:5000'],
+            'default_temp_password' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'resources' => ['sometimes', 'array'],
+            'resources.*' => ['numeric', 'min:0'],
+            'refined_resources' => ['sometimes', 'array'],
+            'refined_resources.*' => ['numeric', 'min:0'],
+            'currencies' => ['sometimes', 'array'],
+            'currencies.*' => ['numeric', 'min:0'],
+            'terrain_square_miles' => ['sometimes', 'array'],
+            'terrain_square_miles.*' => ['numeric', 'min:0'],
+            'income_defaults' => ['sometimes', 'array'],
+            'income_defaults.cow' => ['sometimes', 'numeric', 'min:0'],
+            'income_defaults.wood' => ['sometimes', 'numeric', 'min:0'],
+            'income_defaults.ore' => ['sometimes', 'numeric', 'min:0'],
+            'income_defaults.food' => ['sometimes', 'numeric', 'min:0'],
+            'income_randomize_resources' => ['sometimes', 'boolean'],
+            'income_resource_min' => ['sometimes', 'numeric', 'min:0'],
+            'income_resource_max' => ['sometimes', 'numeric', 'min:0'],
+            'income_randomize_cow' => ['sometimes', 'boolean'],
+            'income_cow_min' => ['sometimes', 'numeric', 'min:0'],
+            'income_cow_max' => ['sometimes', 'numeric', 'min:0'],
+        ]);
+
+        $merged = array_replace_recursive($this->getNewAccountDefaults(), $data);
+        $path = storage_path('app/new_account_defaults.json');
+        if (!is_dir(dirname($path))) {
+            mkdir(dirname($path), 0775, true);
+        }
+        file_put_contents($path, json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        return response()->json(['message' => 'New account defaults saved', 'defaults' => $merged]);
+    }
+
     public function nations(Request $request)
     {
         $perPage = min((int) $request->query('per_page', 30), 100);
@@ -86,6 +131,9 @@ class AdminController extends Controller
             if (isset($data['currencies'])) {
                 $extra['currencies'] = array_merge($extra['currencies'] ?? [], $data['currencies']);
             }
+            if (isset($data['income'])) {
+                $extra['income'] = array_merge($extra['income'] ?? [], $data['income']);
+            }
             DB::table('nation_resources')->where('nation_id', $nationId)->update([
                 'cow' => $data['resources']['cow'] ?? ($res->cow ?? 0),
                 'wood' => $data['resources']['wood'] ?? ($res->wood ?? 0),
@@ -94,7 +142,7 @@ class AdminController extends Controller
                 'extra_json' => json_encode($extra),
                 'updated_at' => now(),
             ]);
-        } elseif (isset($data['refined_resources']) || isset($data['currencies'])) {
+        } elseif (isset($data['refined_resources']) || isset($data['currencies']) || isset($data['income'])) {
             $res = DB::table('nation_resources')->where('nation_id', $nationId)->first();
             $extra = json_decode($res->extra_json ?? '{}', true) ?: [];
             if (isset($data['refined_resources'])) {
@@ -103,8 +151,29 @@ class AdminController extends Controller
             if (isset($data['currencies'])) {
                 $extra['currencies'] = array_merge($extra['currencies'] ?? [], $data['currencies']);
             }
+            if (isset($data['income'])) {
+                $extra['income'] = array_merge($extra['income'] ?? [], $data['income']);
+            }
             DB::table('nation_resources')->where('nation_id', $nationId)->update([
                 'extra_json' => json_encode($extra),
+                'updated_at' => now(),
+            ]);
+        }
+
+        if (isset($data['terrain_square_miles'])) {
+            $terrain = DB::table('nation_terrain_stats')->where('nation_id', $nationId)->first();
+            $sqMiles = array_merge(
+                $terrain?->square_miles_json ? (json_decode($terrain->square_miles_json, true) ?: []) : [],
+                $data['terrain_square_miles']
+            );
+            $total = max(1, array_sum(array_map('floatval', $sqMiles)));
+            DB::table('nation_terrain_stats')->where('nation_id', $nationId)->update([
+                'grassland_pct' => round(((float) ($sqMiles['grassland'] ?? 0) / $total) * 100, 2),
+                'mountain_pct' => round(((float) ($sqMiles['mountain'] ?? 0) / $total) * 100, 2),
+                'freshwater_pct' => round(((float) ($sqMiles['freshwater'] ?? 0) / $total) * 100, 2),
+                'hills_pct' => round(((float) ($sqMiles['hills'] ?? 0) / $total) * 100, 2),
+                'desert_pct' => round(((float) ($sqMiles['desert'] ?? 0) / $total) * 100, 2),
+                'square_miles_json' => json_encode($sqMiles),
                 'updated_at' => now(),
             ]);
         }
@@ -146,6 +215,48 @@ class AdminController extends Controller
         }
 
         return response()->json(['message' => 'Unit added']);
+    }
+
+    public function createManagedAccount(Request $request)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:120'],
+            'email' => ['required', 'email', 'max:190', 'unique:users,email'],
+            'password' => ['required', 'string', 'min:8'],
+        ]);
+
+        $user = User::create([
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'password' => $data['password'],
+            'role' => 'player',
+        ]);
+
+        $settings = DB::table('user_settings')->where('user_id', $user->id)->first();
+        $extra = json_decode($settings->extra_json ?? '{}', true) ?: [];
+        $extra['force_password_reset'] = true;
+        DB::table('user_settings')->updateOrInsert(
+            ['user_id' => $user->id],
+            [
+                'theme' => $settings?->theme ?? 'light',
+                'color_blind_mode' => $settings?->color_blind_mode ?? 'none',
+                'dog_bark_enabled' => (int) ($settings?->dog_bark_enabled ?? 0),
+                'extra_json' => json_encode($extra),
+                'updated_at' => now(),
+            ]
+        );
+
+        app(AuthController::class)->createNationForNewAccount($user->id, $user->name);
+
+        $globalChat = DB::table('chats')->where('type', 'global')->first();
+        if ($globalChat) {
+            DB::table('chat_members')->insertOrIgnore([
+                'chat_id' => $globalChat->id,
+                'user_id' => $user->id,
+            ]);
+        }
+
+        return response()->json(['message' => 'Account created', 'user' => $user], 201);
     }
 
     public function createChat(StoreChatRequest $request)
@@ -193,7 +304,10 @@ class AdminController extends Controller
 
         $updated = [
             'display_name' => $data['display_name'] ?? $item->display_name,
+            'description_text' => $data['description_text'] ?? $item->description_text,
             'cost_json' => array_key_exists('cost_json', $data) ? json_encode($data['cost_json']) : $item->cost_json,
+            'maintenance_json' => array_key_exists('maintenance_json', $data) ? json_encode($data['maintenance_json']) : $item->maintenance_json,
+            'yearly_effect_json' => array_key_exists('yearly_effect_json', $data) ? json_encode($data['yearly_effect_json']) : $item->yearly_effect_json,
             'effect_json' => array_key_exists('effect_json', $data) ? json_encode($data['effect_json']) : $item->effect_json,
             'is_active' => array_key_exists('is_active', $data) ? (int) $data['is_active'] : $item->is_active,
             'visibility_json' => array_key_exists('visibility_json', $data)
@@ -204,5 +318,291 @@ class AdminController extends Controller
         DB::table('shop_items')->where('id', $itemId)->update($updated);
 
         return response()->json(['message' => 'Shop item updated']);
+    }
+
+    public function createShopItem(Request $request)
+    {
+        $data = $request->validate([
+            'category_id' => ['required', 'integer', 'exists:shop_categories,id'],
+            'code' => ['required', 'string', 'max:64', 'unique:shop_items,code'],
+            'display_name' => ['required', 'string', 'max:160'],
+            'description_text' => ['sometimes', 'nullable', 'string', 'max:20000'],
+            'cost_json' => ['sometimes', 'array'],
+            'maintenance_json' => ['sometimes', 'nullable', 'array'],
+            'yearly_effect_json' => ['sometimes', 'nullable', 'array'],
+            'effect_json' => ['sometimes', 'nullable', 'array'],
+            'is_active' => ['sometimes', 'boolean'],
+            'visibility_json' => ['sometimes', 'nullable', 'array'],
+            'visibility_json.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        $itemId = DB::table('shop_items')->insertGetId([
+            'category_id' => $data['category_id'],
+            'code' => $data['code'],
+            'display_name' => $data['display_name'],
+            'description_text' => $data['description_text'] ?? null,
+            'cost_json' => json_encode($data['cost_json'] ?? new \stdClass()),
+            'maintenance_json' => array_key_exists('maintenance_json', $data) ? json_encode($data['maintenance_json']) : null,
+            'yearly_effect_json' => array_key_exists('yearly_effect_json', $data) ? json_encode($data['yearly_effect_json']) : null,
+            'effect_json' => array_key_exists('effect_json', $data) ? json_encode($data['effect_json']) : null,
+            'is_active' => (int) ($data['is_active'] ?? 1),
+            'visibility_json' => array_key_exists('visibility_json', $data)
+                ? ($data['visibility_json'] === null ? null : json_encode(array_values(array_map('intval', $data['visibility_json']))))
+                : null,
+        ]);
+
+        return response()->json(['message' => 'Shop item created', 'id' => $itemId], 201);
+    }
+
+    public function deleteShopItem(int $itemId)
+    {
+        DB::table('nation_assets')->where('shop_item_id', $itemId)->delete();
+        DB::table('shop_items')->where('id', $itemId)->delete();
+        return response()->json(['message' => 'Shop item deleted']);
+    }
+
+    public function notifications()
+    {
+        $rows = DB::table('admin_notifications')->orderByDesc('created_at')->get();
+        DB::table('admin_notifications')->where('is_read', 0)->update(['is_read' => 1, 'read_at' => now()]);
+        return response()->json($rows);
+    }
+
+    public function deleteNotification(int $notificationId)
+    {
+        DB::table('admin_notifications')->where('id', $notificationId)->delete();
+        return response()->json(['message' => 'Notification deleted']);
+    }
+
+    public function timeTracker()
+    {
+        $processed = $this->processElapsedYears();
+        $state = $this->getGameTimeState();
+        $elapsedYears = (int) floor(max(0, now()->timestamp - strtotime($state->started_at)) / max(1, (int) $state->seconds_per_year));
+
+        return response()->json([
+            'started_at' => $state->started_at,
+            'seconds_per_year' => (int) $state->seconds_per_year,
+            'processed_years' => (int) $state->processed_years,
+            'elapsed_years' => $elapsedYears,
+            'current_game_year' => $elapsedYears + 1,
+            'processed_now' => $processed,
+        ]);
+    }
+
+    private function getGameTimeState(): object
+    {
+        $state = DB::table('game_time')->where('id', 1)->first();
+        if ($state) {
+            return $state;
+        }
+
+        DB::table('game_time')->insert([
+            'id' => 1,
+            'started_at' => now(),
+            'seconds_per_year' => 1209600,
+            'processed_years' => 0,
+            'updated_at' => now(),
+        ]);
+
+        return DB::table('game_time')->where('id', 1)->first();
+    }
+
+    private function processElapsedYears(): int
+    {
+        $state = $this->getGameTimeState();
+        $elapsedYears = (int) floor(max(0, now()->timestamp - strtotime($state->started_at)) / max(1, (int) $state->seconds_per_year));
+        $pendingYears = max(0, $elapsedYears - (int) $state->processed_years);
+        if ($pendingYears === 0) {
+            return 0;
+        }
+
+        for ($yearOffset = 1; $yearOffset <= $pendingYears; $yearOffset++) {
+            $yearNumber = (int) $state->processed_years + $yearOffset;
+            $nations = DB::table('nations')->where('is_placeholder', 0)->get();
+            foreach ($nations as $nation) {
+                $resourceRow = DB::table('nation_resources')->where('nation_id', $nation->id)->first();
+                if (!$resourceRow) {
+                    continue;
+                }
+                $extra = json_decode($resourceRow->extra_json ?? '{}', true) ?: [];
+                $income = $extra['income'] ?? ['cow' => 30, 'wood' => 3, 'ore' => 3, 'food' => 3];
+
+                $delta = [
+                    'base' => [
+                        'cow' => (float) ($income['cow'] ?? 30),
+                        'wood' => (float) ($income['wood'] ?? 3),
+                        'ore' => (float) ($income['ore'] ?? 3),
+                        'food' => (float) ($income['food'] ?? 3),
+                    ],
+                    'refined' => [],
+                    'currencies' => [],
+                ];
+
+                $assets = DB::table('nation_assets as na')
+                    ->join('shop_items as si', 'na.shop_item_id', '=', 'si.id')
+                    ->where('na.nation_id', $nation->id)
+                    ->select('na.qty', 'si.display_name', 'si.maintenance_json', 'si.yearly_effect_json')
+                    ->get();
+
+                $maintenanceDetails = [];
+                foreach ($assets as $asset) {
+                    $yearlyEffect = json_decode($asset->yearly_effect_json ?? 'null', true) ?: [];
+                    $maintenance = json_decode($asset->maintenance_json ?? 'null', true) ?: [];
+
+                    foreach ($yearlyEffect as $key => $value) {
+                        $this->applyDeltaValue($delta, $key, (float) $value * (int) $asset->qty);
+                    }
+                    foreach ($maintenance as $key => $value) {
+                        $amount = (float) $value * (int) $asset->qty;
+                        $this->applyDeltaValue($delta, $key, -$amount);
+                        $maintenanceDetails[] = $asset->display_name . ': ' . $key . ' ' . $amount;
+                    }
+                }
+
+                $updated = $this->applyNationDelta($nation->id, $delta);
+                $negativeKeys = [];
+                foreach (['cow', 'wood', 'ore', 'food'] as $key) {
+                    if (($updated['base'][$key] ?? 0) < 0) {
+                        $negativeKeys[] = $key . '=' . $updated['base'][$key];
+                    }
+                }
+                foreach (($updated['currencies'] ?? []) as $key => $value) {
+                    if ($value < 0) {
+                        $negativeKeys[] = $key . '=' . $value;
+                    }
+                }
+                foreach (($updated['refined'] ?? []) as $key => $value) {
+                    if ($value < 0) {
+                        $negativeKeys[] = $key . '=' . $value;
+                    }
+                }
+
+                if ($maintenanceDetails || $negativeKeys) {
+                    $this->createNotification(
+                        'yearly_maintenance',
+                        'Year ' . $yearNumber . ' processing for ' . $nation->name,
+                        'System processed yearly income and maintenance for nation "' . $nation->name . '".'
+                        . ' Income applied: ' . json_encode($delta['base'])
+                        . '. Maintenance details: ' . ($maintenanceDetails ? implode('; ', $maintenanceDetails) : 'none')
+                        . '. Negative balances: ' . ($negativeKeys ? implode(', ', $negativeKeys) : 'none') . '.',
+                        ['nation_id' => $nation->id, 'year' => $yearNumber, 'negative_balances' => $negativeKeys]
+                    );
+                }
+            }
+        }
+
+        DB::table('game_time')->where('id', 1)->update([
+            'processed_years' => $elapsedYears,
+            'updated_at' => now(),
+        ]);
+
+        return $pendingYears;
+    }
+
+    private function applyNationDelta(int $nationId, array $delta): array
+    {
+        $resourceRow = DB::table('nation_resources')->where('nation_id', $nationId)->first();
+        $extra = json_decode($resourceRow->extra_json ?? '{}', true) ?: [];
+        $refined = $extra['refined'] ?? [];
+        $currencies = $extra['currencies'] ?? [];
+
+        foreach (($delta['refined'] ?? []) as $key => $value) {
+            $refined[$key] = ($refined[$key] ?? 0) + (float) $value;
+        }
+        foreach (($delta['currencies'] ?? []) as $key => $value) {
+            $currencies[$key] = ($currencies[$key] ?? 0) + (float) $value;
+        }
+
+        $updatedBase = [
+            'cow' => (float) $resourceRow->cow + (float) (($delta['base']['cow'] ?? 0)),
+            'wood' => (float) $resourceRow->wood + (float) (($delta['base']['wood'] ?? 0)),
+            'ore' => (float) $resourceRow->ore + (float) (($delta['base']['ore'] ?? 0)),
+            'food' => (float) $resourceRow->food + (float) (($delta['base']['food'] ?? 0)),
+        ];
+
+        $extra['refined'] = $refined;
+        $extra['currencies'] = $currencies;
+
+        DB::table('nation_resources')->where('nation_id', $nationId)->update([
+            'cow' => $updatedBase['cow'],
+            'wood' => $updatedBase['wood'],
+            'ore' => $updatedBase['ore'],
+            'food' => $updatedBase['food'],
+            'extra_json' => json_encode($extra),
+            'updated_at' => now(),
+        ]);
+
+        return ['base' => $updatedBase, 'refined' => $refined, 'currencies' => $currencies];
+    }
+
+    private function applyDeltaValue(array &$delta, string $key, float $value): void
+    {
+        if (in_array($key, ['cow', 'wood', 'ore', 'food'], true)) {
+            $delta['base'][$key] = ($delta['base'][$key] ?? 0) + $value;
+        } elseif (str_starts_with($key, 'ref_')) {
+            $rKey = substr($key, 4);
+            $delta['refined'][$rKey] = ($delta['refined'][$rKey] ?? 0) + $value;
+        } elseif (str_starts_with($key, 'cur_')) {
+            $cKey = substr($key, 4);
+            $delta['currencies'][$cKey] = ($delta['currencies'][$cKey] ?? 0) + $value;
+        }
+    }
+
+    private function createNotification(string $type, string $title, string $body, array $meta = []): void
+    {
+        DB::table('admin_notifications')->insert([
+            'type' => $type,
+            'title' => $title,
+            'body' => $body,
+            'meta_json' => json_encode($meta),
+            'is_read' => 0,
+            'created_at' => now(),
+        ]);
+    }
+
+    private function getNewAccountDefaults(): array
+    {
+        $defaults = [
+            'nation_name_template' => "{name}'s Nation",
+            'leader_name_template' => '{name}',
+            'alliance_name' => 'Neutral Front',
+            'about_text' => 'A rising nation.',
+            'default_temp_password' => 'password123',
+            'resources' => ['cow' => 100, 'wood' => 100, 'ore' => 100, 'food' => 100],
+            'income_defaults' => ['cow' => 30, 'wood' => 3, 'ore' => 3, 'food' => 3],
+            'income_randomize_resources' => true,
+            'income_resource_min' => 1,
+            'income_resource_max' => 5,
+            'income_randomize_cow' => false,
+            'income_cow_min' => 30,
+            'income_cow_max' => 30,
+            'refined_resources' => [
+                'M' => 0, 'RM' => 0, 'FS' => 0, 'URM' => 0, 'AD' => 0, 'AM' => 0, 'DM' => 0, 'DE' => 0,
+                'H' => 0, 'TW' => 0, 'CB' => 0, 'MYC' => 0, 'SM' => 0, 'CFB' => 0, 'BST' => 0, 'CGM' => 0,
+                'GBR' => 0, 'CHB' => 0, 'SR' => 0, 'ZZ' => 0, 'PZA' => 0, 'IC' => 0, 'WSH' => 0, 'SD' => 0, 'NS' => 0,
+                'K' => 0, 'RK' => 0, 'DP' => 0,
+            ],
+            'currencies' => ['GB' => 0, 'P' => 0, 'G' => 0, 'S' => 0, 'B' => 0, 'X' => 0, 'CD' => 0, 'FD' => 0, 'cheese' => 0, 'SP' => 0, 'R' => 0, 'MK' => 0],
+            'terrain_percentages' => ['grassland' => 40, 'mountain' => 20, 'freshwater' => 10, 'hills' => 20, 'desert' => 10],
+            'terrain_square_miles' => ['grassland' => 400, 'mountain' => 200, 'freshwater' => 100, 'hills' => 200, 'desert' => 100],
+        ];
+
+        $path = storage_path('app/new_account_defaults.json');
+        if (!is_file($path)) {
+            return $defaults;
+        }
+
+        $raw = @file_get_contents($path);
+        if (!is_string($raw) || trim($raw) === '') {
+            return $defaults;
+        }
+
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return $defaults;
+        }
+
+        return array_replace_recursive($defaults, $decoded);
     }
 }

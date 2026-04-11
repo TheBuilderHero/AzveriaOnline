@@ -1,0 +1,129 @@
+# Azveria Online - Player Guide
+
+This guide explains how to use the site as a player and what each major section does.
+
+## 1) Login and Account Creation
+
+1. Open the website in your browser.
+2. Create an account from the login page.
+3. After registration, your player account is automatically linked to a new Nation.
+4. Your Nation starts with default base resources, refined resources, currencies, and terrain square miles.
+
+Note for admins:
+- The default values for new players are configurable in the New Accounts tab.
+
+## 2) Main Navigation
+
+Player navigation includes:
+- Player
+- Announcements
+- Map
+- Chat
+- Other Nations
+- Shop
+- Settings
+
+Admin navigation includes:
+- Announcements
+- All Nations
+- New Accounts
+- Map
+- Chat
+- Shop
+
+## 3) Player Tab
+
+The Player tab shows:
+- Nation identity (name, leader, alliance)
+- Terrain square miles by type
+- Expandable Base Resources
+- Expandable Refined Resources grouped by type
+- Expandable Currencies
+- Units owned/training
+- Buildings built/in progress
+
+You can edit and save your Nation About text from this tab.
+
+## 4) Announcements
+
+- Players can read announcements.
+- Admins can post announcements.
+
+## 5) Map
+
+Map features:
+- Select map layers from the layer list.
+- Mouse wheel zoom in and out.
+- Click-drag to pan while zoomed.
+- Reset View button appears when view is moved or zoomed.
+
+Admin map features:
+- Upload Main, Terrain, or Political layer images.
+
+## 6) Chat
+
+Chat features:
+- Current chat name is shown in the header.
+- Sent and received messages are visually distinct.
+- Sender names are color-differentiated.
+- Create group chats and add members.
+
+## 7) Other Nations
+
+Use this section to:
+- Search nations by nation name or player name.
+- View another nation's public overview (leader, alliance, about).
+
+## 8) Shop
+
+Player actions:
+- Browse categories.
+- Buy items.
+
+Admin actions:
+- Edit item costs with structured resource/currency selectors.
+- Set item visibility globally or per-player.
+
+Shop item effects can modify:
+- Base resources
+- Refined resources
+- Currencies
+- Units
+
+## 9) Settings
+
+Available settings:
+- Theme (Light/Dark)
+- Color blind mode
+- Dog bark sound toggle
+
+## 10) Help Menu
+
+Help menu options:
+- About: shows website version, game version, and admin name.
+- Documentation: opens READMEPLAYER.
+- Logout: signs out and returns to login page.
+
+## 11) Admin: All Nations
+
+Admin can:
+- Create placeholder nations
+- Edit nation identity fields
+- Edit base resources
+- Edit refined resources
+- Edit currencies
+- Add units to nations
+
+## 12) Admin: New Accounts
+
+Admin can configure defaults applied at account registration:
+- Nation/leader naming templates
+- Alliance/about defaults
+- Base resources
+- Refined resources (expandable groups)
+- Currencies
+- Terrain percentages
+- Terrain square miles
+
+These defaults are stored and reused for all new player registrations.
+
