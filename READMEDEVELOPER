@@ -1,0 +1,261 @@
+# Azveria Online Developer Guide
+
+This guide covers the developer-facing workflows needed to safely maintain Azveria Online across local Docker, remote Docker contexts, and fresh server installs.
+
+## 1) Core Stack
+
+- Backend: Laravel 9
+- Database: MySQL 8
+- Realtime: Ratchet websocket server
+- Deployment: Docker Compose with image-contained app/nginx/mysql services
+
+## 2) Bring Up The Stack
+
+### Local
+
+From the repository root:
+
+```powershell
+docker context use default
+docker compose up -d --build
+```
+
+### Remote Docker Context
+
+```powershell
+docker context use remote
+docker compose up -d --build
+```
+
+This repository is already structured so app, nginx, and MySQL images do not depend on Windows-only bind mounts when using an SSH Docker context.
+
+## 3) Existing Server Schema Updates
+
+Fresh setups use the SQL in `database/init/001_schema.sql` automatically.
+
+For an already-running server with an existing MySQL volume, apply:
+
+`database/manual-upgrades/2026_04_12_account_chat_and_terrain.sql`
+
+Example from the repository root:
+
+```powershell
+docker context use remote
+docker compose exec -T mysql mysql -u root -p$env:MYSQL_ROOT_PASSWORD azveria < database/manual-upgrades/2026_04_12_account_chat_and_terrain.sql
+```
+
+If you do not have `$env:MYSQL_ROOT_PASSWORD` exported in the shell, pass the password explicitly.
+
+This upgrade adds:
+
+- `seafront_pct` to `nation_terrain_stats`
+- `archived_at` and `deleted_at` to `chat_members`
+- `year_started_at`, `elapsed_hours_in_year`, `auto_increment_enabled`, and `year_label_offset` to `game_time`
+
+## 4) Account Management Scripts
+
+Account creation and deletion is implemented as Laravel Artisan commands so it works locally, inside Docker, and on remote servers without using the GUI.
+
+### Create a player account
+
+```powershell
+docker compose exec app php artisan azveria:account-create "Player Name" player@example.com "TempPass123"
+```
+
+### Create an admin account
+
+```powershell
+docker compose exec app php artisan azveria:account-create "Admin Name" admin2@example.com "TempPass123" --role=admin --no-force-password-reset
+```
+
+### Create an admin account with forced reset
+
+```powershell
+docker compose exec app php artisan azveria:account-create "Admin Name" admin2@example.com "TempPass123" --role=admin
+```
+
+### Create an account and force nation creation manually
+
+```powershell
+docker compose exec app php artisan azveria:account-create "GM Account" gm@example.com "TempPass123" --role=admin --with-nation
+```
+
+### Delete a player account
+
+```powershell
+docker compose exec app php artisan azveria:account-delete player@example.com --confirm-name="Player Name"
+```
+
+### Delete an admin account
+
+```powershell
+docker compose exec app php artisan azveria:account-delete admin2@example.com --allow-admin --confirm-name="Admin Name"
+```
+
+Account deletion removes the owned nation first, then deletes the user record and API tokens.
+
+## 5) GUI Account Management Notes
+
+### Admin New Accounts page
+
+The admin `New Accounts` page now supports:
+
+- saving account defaults
+- creating player or admin accounts
+- deciding whether nation creation happens immediately
+- forcing password reset on next login
+- permanently deleting player accounts through a multi-step confirmation flow
+
+Player deletion requires typing the exact username before the final delete request is accepted.
+
+## 6) About Page Content
+
+The in-app About view is now backed by:
+
+`backend/laravel/config/azveria.php`
+
+Edit the `about` array in that file to change:
+
+- title
+- subtitle
+- website version
+- game version
+- admin/developer labels
+- informational sections shown on the About page
+
+After editing config in a running environment, rebuild or clear config cache if needed.
+
+## 7) Accounts, Stats, Terrain, and Nation Data
+
+### New-account defaults storage
+
+Runtime-modified defaults are written to:
+
+`backend/laravel/storage/app/new_account_defaults.json`
+
+Those defaults control:
+
+- base resources
+- refined resources
+- currencies
+- yearly income defaults
+- terrain square miles
+- account temp password
+- default nation/alliance/about fields
+
+### Terrain keys
+
+Current supported terrain keys are:
+
+- `grassland`
+- `mountain`
+- `freshwater`
+- `hills`
+- `desert`
+- `seafront`
+
+If you add more terrain types later, update all of the following together:
+
+- `database/init/001_schema.sql`
+- `backend/laravel/database/migrations/...create_azveria_core_tables.php`
+- `backend/laravel/app/Services/AccountService.php`
+- `backend/laravel/resources/views/app.blade.php`
+
+## 8) Shop Items, Player Stats, and Nation Editing
+
+Relevant backend surfaces:
+
+- Shop admin logic: `backend/laravel/app/Http/Controllers/Api/AdminController.php`
+- Shop player logic: `backend/laravel/app/Http/Controllers/Api/ShopController.php`
+- Nation/player dashboard data: `backend/laravel/app/Http/Controllers/Api/MeController.php`
+- Other nation/admin nation editing: `backend/laravel/app/Http/Controllers/Api/NationController.php` and `backend/laravel/app/Http/Controllers/Api/AdminController.php`
+
+When changing account-related gameplay data, verify all consumers:
+
+- player dashboard
+- map nation selector
+- chat player selector
+- admin reset-password selector
+- admin nation editor
+- shop visibility and ownership logic
+
+## 9) Chat System Notes
+
+### Auto-include-all chats
+
+Admins can create a chat with auto-include behavior by creating a `global` chat from the chat UI.
+
+Global chats:
+
+- include all current users immediately
+- include future accounts automatically
+- are available in websocket auth tokens
+
+### Archive and delete behavior
+
+Per-user chat state is stored in `chat_members`:
+
+- `archived_at`: hidden from the main chat list, shown in the archived list
+- `deleted_at`: removed from the user’s list entirely
+
+Deleting a chat from the player UI is per-user removal, not full chat destruction.
+
+## 10) Time Tracker Notes
+
+The time tracker is not meant to depend on a hand-edited MySQL admin row.
+
+Use the account creation command or the admin New Accounts page to create real admin users so the following are present consistently:
+
+- Laravel-authenticatable user record
+- hashed password
+- optional password reset state
+- chat membership bootstrap
+
+Relevant files:
+
+- `backend/laravel/app/Http/Controllers/Api/AdminController.php`
+- `database/init/001_schema.sql`
+
+## 11) Frontend Reliability
+
+The SPA now uses:
+
+- request timeouts on API calls
+- section-level error rendering instead of leaving pages stuck on `Loading…`
+
+If a page starts hanging again, first inspect:
+
+- browser console
+- `storage/logs/laravel.log`
+- `docker compose logs app nginx websocket`
+
+## 12) Storage and Public Assets
+
+Map layers and other public assets depend on the Laravel storage symlink.
+
+If a server is rebuilt or a fresh volume is used, run:
+
+```powershell
+docker compose exec app php artisan storage:link --force
+```
+
+## 13) Useful Commands
+
+```powershell
+docker compose exec app php artisan route:list
+docker compose exec app php artisan cache:clear
+docker compose exec app php artisan config:clear
+docker compose exec app php artisan storage:link --force
+docker compose logs app --tail=100
+docker compose logs nginx --tail=100
+docker compose logs websocket --tail=100
+```
+
+## 14) File Index
+
+- Player login/register UI: `backend/laravel/resources/views/login.blade.php`
+- Main SPA UI: `backend/laravel/resources/views/app.blade.php`
+- Shared account logic: `backend/laravel/app/Services/AccountService.php`
+- API routes: `backend/laravel/routes/api.php`
+- Web/documentation routes: `backend/laravel/routes/web.php`
+- Developer about content: `backend/laravel/config/azveria.php`

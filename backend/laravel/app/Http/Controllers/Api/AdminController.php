@@ -8,15 +8,22 @@ use App\Http\Requests\Api\StoreChatRequest;
 use App\Http\Requests\Api\UpdateNationRequest;
 use App\Http\Requests\Api\UpdateShopItemRequest;
 use App\Models\User;
+use App\Services\AccountService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
 
 class AdminController extends Controller
 {
+    public function __construct(private AccountService $accounts)
+    {
+    }
+
     public function newAccountDefaults()
     {
-        return response()->json($this->getNewAccountDefaults());
+        return response()->json($this->accounts->getNewAccountDefaults());
     }
 
     public function updateNewAccountDefaults(Request $request)
@@ -48,12 +55,7 @@ class AdminController extends Controller
             'income_cow_max' => ['sometimes', 'numeric', 'min:0'],
         ]);
 
-        $merged = array_replace_recursive($this->getNewAccountDefaults(), $data);
-        $path = storage_path('app/new_account_defaults.json');
-        if (!is_dir(dirname($path))) {
-            mkdir(dirname($path), 0775, true);
-        }
-        file_put_contents($path, json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        $merged = $this->accounts->saveNewAccountDefaults($data);
 
         return response()->json(['message' => 'New account defaults saved', 'defaults' => $merged]);
     }
@@ -92,16 +94,11 @@ class AdminController extends Controller
             'updated_at' => now(),
         ]);
 
-        DB::table('nation_terrain_stats')->insert([
-            'nation_id' => $nationId,
-            'grassland_pct' => 0,
-            'mountain_pct' => 0,
-            'freshwater_pct' => 0,
-            'hills_pct' => 0,
-            'desert_pct' => 0,
-            'square_miles_json' => json_encode(new \stdClass()),
-            'updated_at' => now(),
-        ]);
+        DB::table('nation_terrain_stats')->insert(array_merge(
+            ['nation_id' => $nationId],
+            $this->accounts->buildTerrainStatsPayload([]),
+            ['updated_at' => now()]
+        ));
 
         return response()->json(['id' => $nationId, 'message' => 'Placeholder nation created'], 201);
     }
@@ -167,16 +164,10 @@ class AdminController extends Controller
                 $terrain?->square_miles_json ? (json_decode($terrain->square_miles_json, true) ?: []) : [],
                 $data['terrain_square_miles']
             );
-            $total = max(1, array_sum(array_map('floatval', $sqMiles)));
-            DB::table('nation_terrain_stats')->where('nation_id', $nationId)->update([
-                'grassland_pct' => round(((float) ($sqMiles['grassland'] ?? 0) / $total) * 100, 2),
-                'mountain_pct' => round(((float) ($sqMiles['mountain'] ?? 0) / $total) * 100, 2),
-                'freshwater_pct' => round(((float) ($sqMiles['freshwater'] ?? 0) / $total) * 100, 2),
-                'hills_pct' => round(((float) ($sqMiles['hills'] ?? 0) / $total) * 100, 2),
-                'desert_pct' => round(((float) ($sqMiles['desert'] ?? 0) / $total) * 100, 2),
-                'square_miles_json' => json_encode($sqMiles),
-                'updated_at' => now(),
-            ]);
+            DB::table('nation_terrain_stats')->where('nation_id', $nationId)->update(array_merge(
+                $this->accounts->buildTerrainStatsPayload($sqMiles),
+                ['updated_at' => now()]
+            ));
         }
 
         return response()->json(['message' => 'Nation updated']);
@@ -221,48 +212,84 @@ class AdminController extends Controller
     public function createManagedAccount(Request $request)
     {
         $data = $request->validate([
-            'name' => ['required', 'string', 'max:120'],
+            'name' => ['required', 'string', 'min:3', 'max:120', "regex:/^[A-Za-z0-9][A-Za-z0-9 _'\\-]*$/"],
             'email' => ['required', 'email', 'max:190', 'unique:users,email'],
-            'password' => ['required', 'string', 'min:8'],
+            'password' => ['required', Password::min(8)->letters()->mixedCase()->numbers()],
+            'role' => ['sometimes', 'in:admin,player'],
+            'force_password_reset' => ['sometimes', 'boolean'],
+            'create_nation' => ['sometimes', 'boolean'],
+        ], [
+            'name.regex' => 'Display names may use letters, numbers, spaces, apostrophes, hyphens, and underscores only.',
+            'email.unique' => 'That email address already belongs to an existing account.',
         ]);
 
-        $user = User::create([
+        $role = (string) ($data['role'] ?? 'player');
+        $user = $this->accounts->createAccount([
             'name' => $data['name'],
             'email' => $data['email'],
             'password' => $data['password'],
-            'role' => 'player',
+            'role' => $role,
+            'create_nation' => array_key_exists('create_nation', $data) ? (bool) $data['create_nation'] : $role === 'player',
+            'force_password_reset' => (bool) ($data['force_password_reset'] ?? true),
         ]);
-
-        $settings = DB::table('user_settings')->where('user_id', $user->id)->first();
-        $extra = json_decode($settings->extra_json ?? '{}', true) ?: [];
-        $extra['force_password_reset'] = true;
-        DB::table('user_settings')->updateOrInsert(
-            ['user_id' => $user->id],
-            [
-                'theme' => $settings?->theme ?? 'light',
-                'color_blind_mode' => $settings?->color_blind_mode ?? 'none',
-                'dog_bark_enabled' => (int) ($settings?->dog_bark_enabled ?? 0),
-                'extra_json' => json_encode($extra),
-                'updated_at' => now(),
-            ]
-        );
-
-        app(AuthController::class)->createNationForNewAccount($user->id, $user->name);
-
-        $globalChat = DB::table('chats')->where('type', 'global')->first();
-        if ($globalChat) {
-            DB::table('chat_members')->insertOrIgnore([
-                'chat_id' => $globalChat->id,
-                'user_id' => $user->id,
-            ]);
-        }
 
         return response()->json(['message' => 'Account created', 'user' => $user], 201);
     }
 
+    public function users(Request $request)
+    {
+        $role = trim((string) $request->query('role', ''));
+
+        $query = DB::table('users as u')
+            ->leftJoin('nations as n', 'n.owner_user_id', '=', 'u.id')
+            ->select('u.id', 'u.name', 'u.email', 'u.role', 'u.created_at', 'n.id as nation_id', 'n.name as nation_name')
+            ->orderBy('u.role')
+            ->orderBy('u.name');
+
+        if ($role !== '') {
+            $query->where('u.role', $role);
+        }
+
+        return response()->json($query->get());
+    }
+
+    public function deleteManagedAccount(Request $request, int $userId)
+    {
+        $data = $request->validate([
+            'confirmation_name' => ['required', 'string'],
+        ], [
+            'confirmation_name.required' => 'Enter the exact username to confirm account removal.',
+        ]);
+
+        $user = User::find($userId);
+        if (!$user) {
+            return response()->json(['message' => 'User not found'], 404);
+        }
+
+        if ($user->name !== $data['confirmation_name']) {
+            throw ValidationException::withMessages([
+                'confirmation_name' => 'The confirmation name does not match the account you are trying to delete.',
+            ]);
+        }
+
+        $this->accounts->deleteAccount($user, false);
+
+        return response()->json(['message' => 'Player account deleted permanently.']);
+    }
+
     public function createChat(StoreChatRequest $request)
     {
-        return app(ChatController::class)->store($request);
+        $response = app(ChatController::class)->store($request);
+        $payload = $response->getData(true);
+        $chatId = (int) ($payload['id'] ?? 0);
+        if ($chatId > 0) {
+            $chatType = DB::table('chats')->where('id', $chatId)->value('type');
+            if ($chatType === 'global') {
+                $this->accounts->syncGlobalChatMembershipsForAllUsers($chatId);
+            }
+        }
+
+        return $response;
     }
 
     public function deleteChat(int $chatId)
@@ -742,48 +769,4 @@ class AdminController extends Controller
         ]);
     }
 
-    private function getNewAccountDefaults(): array
-    {
-        $defaults = [
-            'nation_name_template' => "{name}'s Nation",
-            'leader_name_template' => '{name}',
-            'alliance_name' => 'Neutral Front',
-            'about_text' => 'A rising nation.',
-            'default_temp_password' => 'password123',
-            'resources' => ['cow' => 100, 'wood' => 100, 'ore' => 100, 'food' => 100],
-            'income_defaults' => ['cow' => 30, 'wood' => 3, 'ore' => 3, 'food' => 3],
-            'income_randomize_resources' => true,
-            'income_resource_min' => 1,
-            'income_resource_max' => 5,
-            'income_randomize_cow' => false,
-            'income_cow_min' => 30,
-            'income_cow_max' => 30,
-            'refined_resources' => [
-                'M' => 0, 'RM' => 0, 'FS' => 0, 'URM' => 0, 'AD' => 0, 'AM' => 0, 'DM' => 0, 'DE' => 0,
-                'H' => 0, 'TW' => 0, 'CB' => 0, 'MYC' => 0, 'SM' => 0, 'CFB' => 0, 'BST' => 0, 'CGM' => 0,
-                'GBR' => 0, 'CHB' => 0, 'SR' => 0, 'ZZ' => 0, 'PZA' => 0, 'IC' => 0, 'WSH' => 0, 'SD' => 0, 'NS' => 0,
-                'K' => 0, 'RK' => 0, 'DP' => 0,
-            ],
-            'currencies' => ['GB' => 0, 'P' => 0, 'G' => 0, 'S' => 0, 'B' => 0, 'X' => 0, 'CD' => 0, 'FD' => 0, 'cheese' => 0, 'SP' => 0, 'R' => 0, 'MK' => 0],
-            'terrain_percentages' => ['grassland' => 40, 'mountain' => 20, 'freshwater' => 10, 'hills' => 20, 'desert' => 10],
-            'terrain_square_miles' => ['grassland' => 400, 'mountain' => 200, 'freshwater' => 100, 'hills' => 200, 'desert' => 100],
-        ];
-
-        $path = storage_path('app/new_account_defaults.json');
-        if (!is_file($path)) {
-            return $defaults;
-        }
-
-        $raw = @file_get_contents($path);
-        if (!is_string($raw) || trim($raw) === '') {
-            return $defaults;
-        }
-
-        $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            return $defaults;
-        }
-
-        return array_replace_recursive($defaults, $decoded);
-    }
 }

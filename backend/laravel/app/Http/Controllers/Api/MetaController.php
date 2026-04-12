@@ -8,12 +8,8 @@ class MetaController extends Controller
 {
     public function about()
     {
-        return response()->json([
-            'website_version' => '1.0.0.0 Beta',
-            'game_version' => 'Azveria Ruleset v1',
-            'admin' => 'Issac',
-            'developer' => 'Dakota',
+        return response()->json(array_merge(config('azveria.about', []), [
             'websocket_scope' => ['announcements', 'chat'],
-        ]);
+        ]));
     }
 }

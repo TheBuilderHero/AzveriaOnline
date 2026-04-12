@@ -22,9 +22,13 @@ Route::get('/app', function () {
 });
 
 Route::get('/docs/player', function () {
-    return redirect('https://github.com/TheBuilderHero/AzveriaOnline/blob/master/README');
+    return redirect('https://github.com/TheBuilderHero/AzveriaOnline/blob/master/READMEPLAYER');
 });
 
 Route::get('/docs/admin', function () {
     return redirect('https://github.com/TheBuilderHero/AzveriaOnline/blob/master/READMEADMIN');
+});
+
+Route::get('/docs/developer', function () {
+    return redirect('https://github.com/TheBuilderHero/AzveriaOnline/blob/master/READMEDEVELOPER');
 });

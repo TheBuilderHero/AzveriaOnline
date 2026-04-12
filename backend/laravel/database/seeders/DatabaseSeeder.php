@@ -86,12 +86,14 @@ class DatabaseSeeder extends Seeder
                 'freshwater_pct' => 10,
                 'hills_pct' => 20,
                 'desert_pct' => 15,
+                'seafront_pct' => 0,
                 'square_miles_json' => json_encode([
                     'grassland' => 300,
                     'mountain' => 250,
                     'freshwater' => 100,
                     'hills' => 200,
                     'desert' => 150,
+                    'seafront' => 0,
                 ]),
                 'updated_at' => now(),
             ]
@@ -138,8 +140,8 @@ class DatabaseSeeder extends Seeder
                     ['nation_id' => $pNation->id],
                     [
                         'grassland_pct' => 40, 'mountain_pct' => 20, 'freshwater_pct' => 10,
-                        'hills_pct' => 20, 'desert_pct' => 10,
-                        'square_miles_json' => json_encode(['grassland' => 400, 'mountain' => 200, 'freshwater' => 100, 'hills' => 200, 'desert' => 100]),
+                        'hills_pct' => 20, 'desert_pct' => 10, 'seafront_pct' => 0,
+                        'square_miles_json' => json_encode(['grassland' => 400, 'mountain' => 200, 'freshwater' => 100, 'hills' => 200, 'desert' => 100, 'seafront' => 0]),
                         'updated_at' => now(),
                     ]
                 );
@@ -161,7 +163,10 @@ class DatabaseSeeder extends Seeder
         }
 
         foreach ([$admin->id, $player->id, $player2->id, $player3->id] as $uid) {
-            DB::table('chat_members')->updateOrInsert(['chat_id' => $chatId, 'user_id' => $uid], []);
+            DB::table('chat_members')->updateOrInsert(
+                ['chat_id' => $chatId, 'user_id' => $uid],
+                ['archived_at' => null, 'deleted_at' => null]
+            );
         }
 
         $recruitmentCategory = DB::table('shop_categories')->where('code', 'recruitment')->first();

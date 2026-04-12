@@ -121,33 +121,47 @@ const user = JSON.parse(localStorage.getItem('azveria_user') || 'null');
 if (!token || !user) window.location.href = '/';
 
 const api = async (url, opts = {}) => {
-  const res = await fetch(url, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-      ...(opts.headers || {})
-    }
-  });
-  if (res.status === 401) {
-    localStorage.removeItem('azveria_token');
-    localStorage.removeItem('azveria_user');
-    window.location.href = '/';
-    return;
+  const controller = new AbortController();
+  const headers = { 'Authorization': `Bearer ${token}`, ...(opts.headers || {}) };
+  if (!(opts.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
   }
-  return res;
+  const timeout = window.setTimeout(() => controller.abort(), opts.timeout ?? 20000);
+
+  try {
+    const res = await fetch(url, {
+      ...opts,
+      headers,
+      signal: opts.signal || controller.signal,
+    });
+    if (res.status === 401) {
+      localStorage.removeItem('azveria_token');
+      localStorage.removeItem('azveria_user');
+      window.location.href = '/';
+      return null;
+    }
+    return res;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('The server took too long to respond. Please try again.');
+    }
+    throw new Error('The server could not be reached. Check the deployment and try again.');
+  } finally {
+    window.clearTimeout(timeout);
+  }
 };
 
 let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal' };
 let ws = null;
 let wsAuthToken = null;
 let wsAuthTokenExpiresAt = 0;
+let activeSectionName = '';
 const view = document.getElementById('view');
 const nav = document.getElementById('nav');
 const resourcesBar = document.getElementById('resourcesBar');
 
-const playerMenu = ['Player', 'Announcements', 'Map', 'Chat', 'Other Nations', 'Shop', 'Settings'];
-const adminMenu = ['Announcements', 'All Nations', 'New Accounts', 'Time Tracker', 'Map', 'Chat', 'Shop', 'Settings'];
+const playerMenu = ['Player', 'Announcements', 'Map', 'Combat', 'Chat', 'Other Nations', 'Shop', 'Settings'];
+const adminMenu = ['Announcements', 'All Nations', 'New Accounts', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
 
 const goofyAudio = new Audio('https://actions.google.com/sounds/v1/cartoon/boing.ogg');
 goofyAudio.preload = 'auto';
@@ -182,6 +196,48 @@ function extractList(payload) {
   if (Array.isArray(payload)) return payload;
   if (payload && Array.isArray(payload.data)) return payload.data;
   return [];
+}
+
+function labelTerrainKey(key) {
+  const map = {
+    grassland: 'Grassland',
+    mountain: 'Mountain',
+    freshwater: 'Freshwater',
+    hills: 'Hills',
+    desert: 'Desert',
+    seafront: 'Sea Front',
+  };
+  return map[key] || key.replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+function renderLoadingState(title) {
+  view.innerHTML = `<div class="card"><h2>${title}</h2><p class="muted">Loading…</p></div>`;
+}
+
+function renderSectionError(title, error) {
+  console.error(error);
+  view.innerHTML = `
+    <div class="card">
+      <h2>${title}</h2>
+      <p class="danger">This section could not be loaded.</p>
+      <p class="muted">${error?.message || 'An unexpected error occurred.'}</p>
+      <div class="row"><button class="primary" id="retrySectionBtn">Try Again</button></div>
+    </div>
+  `;
+  document.getElementById('retrySectionBtn')?.addEventListener('click', () => loadSection(title));
+}
+
+async function readErrorMessage(res, fallback) {
+  if (!res) return fallback;
+  try {
+    const payload = await res.json();
+    if (payload.errors) {
+      return Object.values(payload.errors).flat().join(' ');
+    }
+    return payload.message || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 async function getWsToken() {
@@ -294,17 +350,26 @@ async function subscribeChannel(channel) {
 }
 
 async function loadSection(name) {
-  view.innerHTML = '<div class="muted" style="padding:32px 16px;">Loading…</div>';
-  if (name === 'Player') return loadPlayer();
-  if (name === 'Announcements') return loadAnnouncements();
-  if (name === 'New Accounts') return loadNewAccounts();
-  if (name === 'Time Tracker') return loadTimeTracker();
-  if (name === 'Map') return loadMap();
-  if (name === 'Chat') return loadChat();
-  if (name === 'Other Nations') return loadOtherNations();
-  if (name === 'Shop') return loadShop();
-  if (name === 'Settings') return loadSettings();
-  if (name === 'All Nations') return loadAllNations();
+  activeSectionName = name;
+  renderLoadingState(name);
+  try {
+    if (name === 'Player') return await loadPlayer();
+    if (name === 'Announcements') return await loadAnnouncements();
+    if (name === 'New Accounts') return await loadNewAccounts();
+    if (name === 'Time Tracker') return await loadTimeTracker();
+    if (name === 'Map') return await loadMap();
+    if (name === 'Combat') return await loadCombat();
+    if (name === 'Chat') return await loadChat();
+    if (name === 'Other Nations') return await loadOtherNations();
+    if (name === 'Shop') return await loadShop();
+    if (name === 'Settings') return await loadSettings();
+    if (name === 'All Nations') return await loadAllNations();
+    if (name === 'About') return await loadAboutPage();
+  } catch (error) {
+    if (activeSectionName === name) {
+      renderSectionError(name, error);
+    }
+  }
 }
 
 async function loadPlayer() {
@@ -315,7 +380,7 @@ async function loadPlayer() {
   const data = await dashRes.json();
   const sqMiles = await sqMilesRes.json();
   const terrainRows = Object.entries(sqMiles).length
-    ? Object.entries(sqMiles).map(([k, v]) => `<span>${k.charAt(0).toUpperCase() + k.slice(1)}: <strong>${v} sq mi</strong></span>`).join(' &nbsp;|&nbsp; ')
+    ? Object.entries(sqMiles).map(([k, v]) => `<span>${labelTerrainKey(k)}: <strong>${v} sq mi</strong></span>`).join(' &nbsp;|&nbsp; ')
     : 'No terrain data';
 
   const res = data.resources || {};
@@ -379,9 +444,51 @@ async function loadPlayer() {
     const aboutText = document.getElementById('aboutField').value;
     const allianceName = document.getElementById('allianceField').value;
     const save = await api('/api/me/about', { method: 'PATCH', body: JSON.stringify({ about_text: aboutText, alliance_name: allianceName }) });
-    document.getElementById('aboutMsg').textContent = save.ok ? 'Saved' : 'Failed';
+    document.getElementById('aboutMsg').textContent = save?.ok ? 'Saved' : await readErrorMessage(save, 'The about text could not be saved.');
     barkIfEnabled();
   };
+}
+
+async function loadCombat() {
+  view.innerHTML = `
+    <div class="card">
+      <h2>Combat</h2>
+      <p class="muted">Combat tools and battle resolution are coming soon.</p>
+    </div>
+  `;
+}
+
+async function loadAboutPage() {
+  const res = await api('/api/meta/about');
+  const about = await res.json();
+  const sections = Array.isArray(about.sections) ? about.sections : [];
+
+  view.innerHTML = `
+    <div class="card">
+      <h2>${about.title || 'About Azveria Online'}</h2>
+      <p class="muted">${about.subtitle || ''}</p>
+      <div class="twocol">
+        <div>
+          ${sections.map(section => `<div class="card"><h3 style="margin-top:0;">${section.heading}</h3><p style="margin-bottom:0;">${section.body}</p></div>`).join('')}
+        </div>
+        <div>
+          <div class="card">
+            <h3 style="margin-top:0;">Build Info</h3>
+            <div><strong>Website:</strong> ${about.website_version || '-'}</div>
+            <div><strong>Game:</strong> ${about.game_version || '-'}</div>
+            <div><strong>Admin:</strong> ${about.admin || '-'}</div>
+            <div><strong>Developer:</strong> ${about.developer || '-'}</div>
+          </div>
+          <div class="card">
+            <h3 style="margin-top:0;">Documentation</h3>
+            <div><a href="/docs/player" target="_blank" rel="noreferrer">Player Guide</a></div>
+            <div><a href="/docs/admin" target="_blank" rel="noreferrer">Admin Guide</a></div>
+            <div><a href="/docs/developer" target="_blank" rel="noreferrer">Developer Guide</a></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 async function loadAnnouncements() {
@@ -455,7 +562,7 @@ async function loadMap() {
     const total = Math.max(1, Object.values(sqMiles || {}).reduce((sum, val) => sum + Number(val || 0), 0));
     document.getElementById('mapTerrainStats').innerHTML = Object.entries(sqMiles || {}).map(([k, v]) => {
       const pct = ((Number(v || 0) / total) * 100).toFixed(1);
-      return `<div>${k}: ${v} (${pct}%)</div>`;
+      return `<div>${labelTerrainKey(k)}: ${v} (${pct}%)</div>`;
     }).join('') || '<div class="muted">No data</div>';
   };
   renderTerrainStats(terrain);
@@ -519,7 +626,7 @@ async function loadMap() {
   }, { passive: false });
 
   mapViewport.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.zoom-control')) {
+    if (e.target.closest('.zoom-control') || e.target.closest('#resetMapBtn')) {
       return;
     }
     if (mapScale <= 1) {
@@ -574,6 +681,9 @@ async function loadMap() {
     zoomControl.addEventListener(evt, (e) => {
       e.stopPropagation();
     }, { passive: false });
+    resetMapBtn.addEventListener(evt, (e) => {
+      e.stopPropagation();
+    }, { passive: false });
   });
 
   applyMapTransform();
@@ -608,14 +718,15 @@ async function loadChat() {
     api('/api/chats'),
     api('/api/players'),
   ]);
-  const chatsPayload = await chatsRes.json();
-  const chats = extractList(chatsPayload);
+  const chats = extractList(await chatsRes.json());
   const players = await playersRes.json();
-  const firstChat = chats[0];
+  const activeChats = chats.filter(chat => !chat.is_archived);
+  const archivedChats = chats.filter(chat => chat.is_archived);
+  const firstChat = activeChats[0] || archivedChats[0] || null;
 
   const playerCheckboxes = players
-    .filter(p => p.id !== user.id)
-    .map(p => `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;"><input type="checkbox" class="memberCheck" value="${p.id}"> ${p.name}</label>`)
+    .filter(player => player.id !== user.id)
+    .map(player => `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;"><input type="checkbox" class="memberCheck" value="${player.id}"> ${player.name}</label>`)
     .join('');
 
   view.innerHTML = `
@@ -623,62 +734,135 @@ async function loadChat() {
       <div class="twocol">
         <div>
           <h2 id="chatHeader" style="margin-top:0;">Chat</h2>
-          <div id="chatView" class="list" style="min-height:200px;">Select a chat.</div>
+          <div id="chatView" class="list" style="min-height:220px;">Select a chat.</div>
           <div class="row" style="margin-top:8px;"><input id="chatMsg" placeholder="Message…"><button class="primary" id="sendMsg">Send</button></div>
+          <div class="row" style="margin-top:10px;flex-wrap:wrap;">
+            <button class="primary" id="archiveChatBtn" style="background:#314f72;">Archive</button>
+            <button class="primary" id="unarchiveChatBtn" style="display:none;background:#314f72;">Unarchive</button>
+            <button class="primary" id="deleteChatForMeBtn" style="background:#8a1a1a;">Delete</button>
+            <span class="muted" id="chatActionMsg"></span>
+          </div>
         </div>
         <div>
           <div class="row"><input id="chatName" placeholder="New chat name"></div>
-          <label style="font-size:13px;margin-top:8px;">Add players:</label>
+          ${user.role === 'admin' ? '<label style="display:flex;align-items:center;gap:6px;margin-top:8px;"><input type="checkbox" id="chatAutoIncludeAll"> Auto include all current and future players</label>' : ''}
+          <label style="font-size:13px;margin-top:8px;display:block;">Add players:</label>
           <div id="playerPickerList" style="max-height:160px;overflow:auto;border:1px solid #bfc8d2;border-radius:8px;padding:6px;margin-bottom:6px;">${playerCheckboxes || '<span class="muted">No other players</span>'}</div>
-          <div class="row"><button class="primary" id="newChat">Create Chat</button></div>
+          <div class="row"><button class="primary" id="newChat">Create Chat</button><span class="muted" id="chatCreateMsg"></span></div>
           <h3>Chats</h3>
-          <div class="list" id="chatList">${chats.map(c => `<div><button class="primary selectChat" data-id="${c.id}" data-name="${c.name.replace(/"/g,'&quot;')}" style="width:100%; margin-bottom:8px;">${c.name}${c.type === 'global' ? ' 🌐' : ''}</button></div>`).join('')}</div>
+          <div class="list" id="chatList">${activeChats.map(chat => `<div><button class="primary selectChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" data-archived="0" style="width:100%; margin-bottom:8px;">${chat.name}${chat.type === 'global' ? ' 🌐' : ''}</button></div>`).join('') || '<div class="muted">No active chats</div>'}</div>
+          <h3 style="margin-top:12px;">Archived</h3>
+          <div class="list" id="archivedChatList" style="max-height:140px;">${archivedChats.map(chat => `<div><button class="primary selectChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" data-archived="1" style="width:100%; margin-bottom:8px; opacity:0.7;">${chat.name}</button></div>`).join('') || '<div class="muted">No archived chats</div>'}</div>
         </div>
       </div>
     </div>
   `;
 
-  let activeChatId = firstChat ? firstChat.id : null;
+  let activeChatId = firstChat ? Number(firstChat.id) : null;
+  let activeChatArchived = !!firstChat?.is_archived;
 
-  async function loadMessages(chatId, chatName) {
+  const setChatActions = () => {
+    document.getElementById('archiveChatBtn').style.display = activeChatId && !activeChatArchived ? 'inline-block' : 'none';
+    document.getElementById('unarchiveChatBtn').style.display = activeChatId && activeChatArchived ? 'inline-block' : 'none';
+    document.getElementById('deleteChatForMeBtn').style.display = activeChatId ? 'inline-block' : 'none';
+  };
+
+  async function loadMessages(chatId, chatName, isArchived = false) {
     if (!chatId) return;
-    activeChatId = chatId;
+    activeChatId = Number(chatId);
+    activeChatArchived = !!isArchived;
+    setChatActions();
+    document.getElementById('chatActionMsg').textContent = '';
     if (chatName) document.getElementById('chatHeader').textContent = chatName;
     await subscribeChannel(`chat.${chatId}`);
     const res = await api(`/api/chats/${chatId}/messages`);
-    const messagesPayload = await res.json();
-    const messages = extractList(messagesPayload);
-    document.getElementById('chatView').innerHTML = messages.map(m => {
-      const isOwn = m.sender_id === user.id;
+    const messages = extractList(await res.json());
+    document.getElementById('chatView').innerHTML = messages.map(message => {
+      const isOwn = Number(message.sender_user_id) === Number(user.id);
       return `<div class="msg-wrap ${isOwn ? 'own' : 'other'}">
-        <div class="msg-sender">${m.sender_name}</div>
-        <div class="msg-bubble">${m.message.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+        <div class="msg-sender">${message.sender_name}</div>
+        <div class="msg-bubble">${message.message.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
       </div>`;
     }).join('') || '<div class="muted">No messages</div>';
-    const cv = document.getElementById('chatView');
-    cv.scrollTop = cv.scrollHeight;
+    const chatView = document.getElementById('chatView');
+    chatView.scrollTop = chatView.scrollHeight;
   }
 
-  document.querySelectorAll('.selectChat').forEach(btn => btn.onclick = () => loadMessages(btn.dataset.id, btn.dataset.name));
-  if (firstChat) loadMessages(firstChat.id, firstChat.name);
+  document.querySelectorAll('.selectChat').forEach(btn => {
+    btn.onclick = () => loadMessages(btn.dataset.id, btn.dataset.name, btn.dataset.archived === '1');
+  });
+  if (firstChat) {
+    await loadMessages(firstChat.id, firstChat.name, firstChat.is_archived);
+  } else {
+    setChatActions();
+  }
 
   document.getElementById('sendMsg').onclick = async () => {
     if (!activeChatId) return;
-    const message = document.getElementById('chatMsg').value;
-    await api(`/api/chats/${activeChatId}/messages`, { method: 'POST', body: JSON.stringify({ message }) });
+    const message = document.getElementById('chatMsg').value.trim();
+    if (!message) return;
+    const res = await api(`/api/chats/${activeChatId}/messages`, { method: 'POST', body: JSON.stringify({ message }) });
+    if (!res?.ok) {
+      document.getElementById('chatActionMsg').textContent = await readErrorMessage(res, 'The message could not be sent.');
+      return;
+    }
     document.getElementById('chatMsg').value = '';
     const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
-    loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null);
+    await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
     barkIfEnabled();
+  };
+
+  document.getElementById('archiveChatBtn').onclick = async () => {
+    if (!activeChatId) return;
+    const res = await api(`/api/chats/${activeChatId}/archive`, { method: 'PATCH' });
+    document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat archived.' : await readErrorMessage(res, 'The chat could not be archived.');
+    if (res?.ok) await loadChat();
+  };
+
+  document.getElementById('unarchiveChatBtn').onclick = async () => {
+    if (!activeChatId) return;
+    const res = await api(`/api/chats/${activeChatId}/unarchive`, { method: 'PATCH' });
+    document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat restored.' : await readErrorMessage(res, 'The chat could not be restored.');
+    if (res?.ok) await loadChat();
+  };
+
+  document.getElementById('deleteChatForMeBtn').onclick = async () => {
+    if (!activeChatId) return;
+    const chatButton = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+    const chatName = chatButton?.dataset.name || 'this chat';
+    if (!window.confirm(`Remove ${chatName} from your list? This cannot be undone from the UI.`)) {
+      return;
+    }
+    const res = await api(`/api/chats/${activeChatId}`, { method: 'DELETE' });
+    document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat deleted from your list.' : await readErrorMessage(res, 'The chat could not be deleted.');
+    if (res?.ok) await loadChat();
   };
 
   document.getElementById('newChat').onclick = async () => {
     const name = document.getElementById('chatName').value.trim();
-    if (!name) return;
     const memberIds = Array.from(document.querySelectorAll('.memberCheck:checked')).map(el => Number(el.value));
-    await api('/api/chats', { method: 'POST', body: JSON.stringify({ name, type: 'group', member_ids: memberIds }) });
-    loadChat();
-    barkIfEnabled();
+    const autoIncludeAll = user.role === 'admin' && document.getElementById('chatAutoIncludeAll')?.checked;
+
+    if (!name) {
+      document.getElementById('chatCreateMsg').textContent = 'Enter a chat name before creating the chat.';
+      return;
+    }
+    if (!autoIncludeAll && memberIds.length === 0) {
+      document.getElementById('chatCreateMsg').textContent = 'Select at least one player for a normal group chat.';
+      return;
+    }
+
+    const res = await api('/api/chats', {
+      method: 'POST',
+      body: JSON.stringify({ name, type: autoIncludeAll ? 'global' : 'group', member_ids: memberIds })
+    });
+    document.getElementById('chatCreateMsg').textContent = res?.ok
+      ? (autoIncludeAll ? 'Everyone chat created.' : 'Chat created.')
+      : await readErrorMessage(res, 'The chat could not be created.');
+    if (res?.ok) {
+      await loadChat();
+      barkIfEnabled();
+    }
   };
 }
 
@@ -1027,8 +1211,12 @@ async function loadShop() {
 }
 
 async function loadNewAccounts() {
-  const res = await api('/api/admin/new-account-defaults');
-  const d = await res.json();
+  const [defaultsRes, usersRes] = await Promise.all([
+    api('/api/admin/new-account-defaults'),
+    api('/api/admin/users?role=player'),
+  ]);
+  const d = await defaultsRes.json();
+  const players = await usersRes.json();
   const resources = d.resources || {};
   const refined = d.refined_resources || {};
   const currencies = d.currencies || {};
@@ -1115,18 +1303,32 @@ async function loadNewAccounts() {
           <label id="na-sq-label-freshwater">Freshwater</label><input id="na-sq-freshwater" type="number" value="${Number(terrainSq.freshwater || 0)}">
           <label id="na-sq-label-hills">Hills</label><input id="na-sq-hills" type="number" value="${Number(terrainSq.hills || 0)}">
           <label id="na-sq-label-desert">Desert</label><input id="na-sq-desert" type="number" value="${Number(terrainSq.desert || 0)}">
+          <label id="na-sq-label-seafront">Sea Front</label><input id="na-sq-seafront" type="number" value="${Number(terrainSq.seafront || 0)}">
         </div>
       </details>
 
       <hr style="margin:12px 0;">
       <h3>Create Account</h3>
       <label>Username / Display Name</label>
-      <input id="na-create-name" placeholder="New player name">
+      <input id="na-create-name" placeholder="New account name">
       <label>Email</label>
-      <input id="na-create-email" type="email" placeholder="player@example.com">
+      <input id="na-create-email" type="email" placeholder="account@example.com">
       <label>Temporary Password</label>
       <input id="na-create-password" value="${d.default_temp_password || 'password123'}">
+      <label>Role</label>
+      <select id="na-create-role"><option value="player">Player</option><option value="admin">Admin</option></select>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;"><input type="checkbox" id="na-create-nation" checked> Create nation for this account</label>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;"><input type="checkbox" id="na-force-reset" checked> Require password reset on first login</label>
       <div class="row"><button class="primary" id="createManagedAccountBtn">Create Account</button><span class="muted" id="createManagedAccountMsg"></span></div>
+
+      <hr style="margin:12px 0;">
+      <h3>Delete Player Account</h3>
+      <p class="danger" style="margin-top:0;">This permanently removes the player account and its owned nation data.</p>
+      <label>Player Account</label>
+      <select id="deletePlayerId">${players.map(player => `<option value="${player.id}" data-name="${player.name.replace(/"/g, '&quot;')}">${player.name} (${player.email})</option>`).join('')}</select>
+      <label>Type the exact username to confirm deletion</label>
+      <input id="deletePlayerConfirmName" placeholder="Exact username required">
+      <div class="row"><button class="primary" id="deletePlayerBtn" style="background:#8a1a1a;">Delete Player Permanently</button><span class="muted" id="deletePlayerMsg"></span></div>
 
       <div class="row" style="margin-top:10px;">
         <button class="primary" id="saveNewAccountDefaults">Save Defaults</button>
@@ -1142,18 +1344,27 @@ async function loadNewAccounts() {
       freshwater: Number(document.getElementById('na-sq-freshwater').value || 0),
       hills: Number(document.getElementById('na-sq-hills').value || 0),
       desert: Number(document.getElementById('na-sq-desert').value || 0),
+      seafront: Number(document.getElementById('na-sq-seafront').value || 0),
     };
     const total = Math.max(1, Object.values(sq).reduce((sum, value) => sum + value, 0));
     Object.entries(sq).forEach(([key, value]) => {
       const pct = ((value / total) * 100).toFixed(1);
-      const label = key.charAt(0).toUpperCase() + key.slice(1);
-      document.getElementById(`na-sq-label-${key}`).textContent = `${label} (${pct}%)`;
+      document.getElementById(`na-sq-label-${key}`).textContent = `${labelTerrainKey(key)} (${pct}%)`;
     });
   };
-  ['grassland', 'mountain', 'freshwater', 'hills', 'desert'].forEach(key => {
+  ['grassland', 'mountain', 'freshwater', 'hills', 'desert', 'seafront'].forEach(key => {
     document.getElementById(`na-sq-${key}`).addEventListener('input', updateSqLabels);
   });
   updateSqLabels();
+
+  document.getElementById('na-create-role').addEventListener('change', (e) => {
+    const createNationToggle = document.getElementById('na-create-nation');
+    if (e.target.value === 'admin') {
+      createNationToggle.checked = false;
+    } else {
+      createNationToggle.checked = true;
+    }
+  });
 
   document.getElementById('saveNewAccountDefaults').onclick = async () => {
     const refinedResources = {};
@@ -1200,11 +1411,12 @@ async function loadNewAccounts() {
         freshwater: Number(document.getElementById('na-sq-freshwater').value),
         hills: Number(document.getElementById('na-sq-hills').value),
         desert: Number(document.getElementById('na-sq-desert').value),
+        seafront: Number(document.getElementById('na-sq-seafront').value),
       },
     };
 
     const save = await api('/api/admin/new-account-defaults', { method: 'PATCH', body: JSON.stringify(payload) });
-    document.getElementById('saveNewAccountDefaultsMsg').textContent = save.ok ? 'Saved' : 'Failed';
+    document.getElementById('saveNewAccountDefaultsMsg').textContent = save?.ok ? 'Saved' : await readErrorMessage(save, 'The defaults could not be saved.');
     barkIfEnabled();
   };
 
@@ -1213,9 +1425,44 @@ async function loadNewAccounts() {
       name: document.getElementById('na-create-name').value.trim(),
       email: document.getElementById('na-create-email').value.trim(),
       password: document.getElementById('na-create-password').value,
+      role: document.getElementById('na-create-role').value,
+      create_nation: document.getElementById('na-create-nation').checked,
+      force_password_reset: document.getElementById('na-force-reset').checked,
     };
     const create = await api('/api/admin/users', { method: 'POST', body: JSON.stringify(payload) });
-    document.getElementById('createManagedAccountMsg').textContent = create.ok ? 'Created' : 'Failed';
+    document.getElementById('createManagedAccountMsg').textContent = create?.ok ? 'Account created.' : await readErrorMessage(create, 'The account could not be created.');
+    if (create?.ok) {
+      await loadNewAccounts();
+    }
+    barkIfEnabled();
+  };
+
+  document.getElementById('deletePlayerBtn').onclick = async () => {
+    const userId = Number(document.getElementById('deletePlayerId').value);
+    const confirmName = document.getElementById('deletePlayerConfirmName').value.trim();
+    const selected = document.getElementById('deletePlayerId').selectedOptions[0];
+    const expectedName = selected?.dataset.name || '';
+
+    if (!userId) {
+      document.getElementById('deletePlayerMsg').textContent = 'Select a player account first.';
+      return;
+    }
+    if (confirmName !== expectedName) {
+      document.getElementById('deletePlayerMsg').textContent = 'The confirmation username does not match the selected player.';
+      return;
+    }
+    if (!window.confirm(`Delete ${expectedName} forever? This also removes the player\'s nation data.`)) {
+      return;
+    }
+
+    const res = await api(`/api/admin/users/${userId}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ confirmation_name: confirmName })
+    });
+    document.getElementById('deletePlayerMsg').textContent = res?.ok ? 'Player deleted permanently.' : await readErrorMessage(res, 'The player could not be deleted.');
+    if (res?.ok) {
+      await loadNewAccounts();
+    }
     barkIfEnabled();
   };
 }
@@ -1298,8 +1545,8 @@ function loadForcedPasswordReset() {
 
 async function loadResetPasswordPage() {
   const isAdmin = user.role === 'admin';
-  const playersRes = isAdmin ? await api('/api/players') : null;
-  const players = playersRes ? await playersRes.json() : [];
+  const usersRes = isAdmin ? await api('/api/admin/users') : null;
+  const users = usersRes ? await usersRes.json() : [];
 
   view.innerHTML = `
     <div class="card" style="max-width:720px;">
@@ -1316,8 +1563,8 @@ async function loadResetPasswordPage() {
       ${isAdmin ? `
         <hr style="margin:12px 0;">
         <h3>Admin: Reset Another User</h3>
-        <label>Player</label>
-        <select id="rpUserId">${players.map(p => `<option value="${p.id}">${p.name} (#${p.id})</option>`).join('')}</select>
+        <label>Account</label>
+        <select id="rpUserId">${users.map(account => `<option value="${account.id}">${account.name} (${account.role})</option>`).join('')}</select>
         <label>Temporary Password</label>
         <input id="rpOtherNew" type="password" value="password123">
         <label><input id="rpShowTemp" type="checkbox"> Show temporary password</label>
@@ -1524,6 +1771,7 @@ async function loadAllNations() {
         <label>Freshwater</label><input id="nSqFreshwater" type="number" value="${sqMiles.freshwater || 0}">
         <label>Hills</label><input id="nSqHills" type="number" value="${sqMiles.hills || 0}">
         <label>Desert</label><input id="nSqDesert" type="number" value="${sqMiles.desert || 0}">
+        <label>Sea Front</label><input id="nSqSeafront" type="number" value="${sqMiles.seafront || 0}">
       </details>
       <details style="margin-top:8px;">
         <summary>Refined Resources</summary>
@@ -1582,6 +1830,7 @@ async function loadAllNations() {
           freshwater: Number(document.getElementById('nSqFreshwater').value),
           hills: Number(document.getElementById('nSqHills').value),
           desert: Number(document.getElementById('nSqDesert').value),
+          seafront: Number(document.getElementById('nSqSeafront').value),
         },
         refined_resources,
         currencies,
@@ -1705,12 +1954,10 @@ async function init() {
 const helpSelect = document.getElementById('helpSelect');
 helpSelect.addEventListener('change', async (e) => {
   if (e.target.value === 'about') {
-    const res = await api('/api/meta/about');
-    const d = await res.json();
-    alert(`Website: ${d.website_version}\nGame: ${d.game_version}\nAdmin: ${d.admin}`);
+    await loadAboutPage();
   }
   if (e.target.value === 'docs') {
-    window.open('https://github.com/TheBuilderHero/AzveriaOnline/blob/master/READMEPLAYER', '_blank');
+    window.open(user.role === 'admin' ? '/docs/developer' : '/docs/player', '_blank');
   }
   if (e.target.value === 'reset-password') {
     await loadResetPasswordPage();

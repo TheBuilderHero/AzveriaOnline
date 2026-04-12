@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS nation_terrain_stats (
   freshwater_pct DECIMAL(5,2) NOT NULL DEFAULT 0,
   hills_pct DECIMAL(5,2) NOT NULL DEFAULT 0,
   desert_pct DECIMAL(5,2) NOT NULL DEFAULT 0,
+  seafront_pct DECIMAL(5,2) NOT NULL DEFAULT 0,
   square_miles_json JSON NULL,
   updated_at TIMESTAMP NULL,
   CONSTRAINT fk_nation_terrain_nation FOREIGN KEY (nation_id) REFERENCES nations(id) ON DELETE CASCADE
@@ -130,6 +131,8 @@ CREATE TABLE IF NOT EXISTS chats (
 CREATE TABLE IF NOT EXISTS chat_members (
   chat_id BIGINT UNSIGNED NOT NULL,
   user_id BIGINT UNSIGNED NOT NULL,
+  archived_at TIMESTAMP NULL,
+  deleted_at TIMESTAMP NULL,
   PRIMARY KEY(chat_id, user_id),
   CONSTRAINT fk_chat_members_chat FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
   CONSTRAINT fk_chat_members_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

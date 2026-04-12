@@ -11,9 +11,28 @@ class WsTokenController extends Controller
 {
     public function issue(Request $request)
     {
-        $chatIds = DB::table('chat_members')
-            ->where('user_id', $request->user()->id)
-            ->pluck('chat_id')
+        $userId = (int) $request->user()->id;
+
+        $memberChatIds = DB::table('chat_members')
+            ->where('user_id', $userId)
+            ->whereNull('deleted_at')
+            ->pluck('chat_id');
+
+        $globalChatIds = DB::table('chats as c')
+            ->leftJoin('chat_members as cm', function ($join) use ($userId) {
+                $join->on('c.id', '=', 'cm.chat_id')
+                    ->where('cm.user_id', '=', $userId);
+            })
+            ->where('c.type', 'global')
+            ->where(function ($query) {
+                $query->whereNull('cm.deleted_at')
+                    ->orWhereNull('cm.user_id');
+            })
+            ->pluck('c.id');
+
+        $chatIds = $memberChatIds
+            ->merge($globalChatIds)
+            ->unique()
             ->map(fn ($id) => (int) $id)
             ->values()
             ->all();

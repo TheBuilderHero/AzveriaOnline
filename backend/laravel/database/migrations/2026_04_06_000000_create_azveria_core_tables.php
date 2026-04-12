@@ -36,6 +36,7 @@ return new class extends Migration
             $table->decimal('freshwater_pct', 5, 2)->default(0);
             $table->decimal('hills_pct', 5, 2)->default(0);
             $table->decimal('desert_pct', 5, 2)->default(0);
+            $table->decimal('seafront_pct', 5, 2)->default(0);
             $table->json('square_miles_json')->nullable();
             $table->timestamp('updated_at')->nullable();
         });
@@ -91,7 +92,7 @@ return new class extends Migration
         Schema::create('chats', function (Blueprint $table) {
             $table->id();
             $table->string('name');
-            $table->enum('type', ['group', 'dm', 'announcement']);
+            $table->enum('type', ['group', 'dm', 'announcement', 'global']);
             $table->foreignId('created_by_user_id')->constrained('users')->cascadeOnDelete();
             $table->timestamps();
         });
@@ -99,6 +100,8 @@ return new class extends Migration
         Schema::create('chat_members', function (Blueprint $table) {
             $table->foreignId('chat_id')->constrained('chats')->cascadeOnDelete();
             $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
+            $table->timestamp('archived_at')->nullable();
+            $table->timestamp('deleted_at')->nullable();
             $table->primary(['chat_id', 'user_id']);
         });
 

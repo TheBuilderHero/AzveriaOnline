@@ -14,7 +14,7 @@ class ChatController extends Controller
     public function index(Request $request)
     {
         $this->authorize('viewAny', Chat::class);
-        $perPage = min((int) $request->query('per_page', 30), 100);
+        $userId = (int) $request->user()->id;
 
         $chats = DB::table('chats as c')
             ->leftJoin('chat_members as cm', function ($j) use ($request) {
@@ -22,12 +22,27 @@ class ChatController extends Controller
                   ->where('cm.user_id', '=', $request->user()->id);
             })
             ->where(function ($q) {
-                $q->whereNotNull('cm.user_id')
-                  ->orWhere('c.type', '=', 'global');
+                $q->where(function ($memberQuery) {
+                    $memberQuery->whereNotNull('cm.user_id')
+                        ->whereNull('cm.deleted_at');
+                })->orWhere(function ($globalQuery) {
+                    $globalQuery->where('c.type', '=', 'global')
+                        ->where(function ($membershipState) {
+                            $membershipState->whereNull('cm.deleted_at')
+                                ->orWhereNull('cm.user_id');
+                        });
+                });
             })
-            ->select('c.*')
+            ->select('c.*', 'cm.archived_at as membership_archived_at', 'cm.deleted_at as membership_deleted_at')
             ->orderByDesc('c.updated_at')
-            ->paginate($perPage);
+            ->get()
+            ->map(function ($chat) use ($userId) {
+                $chat->is_archived = $chat->membership_archived_at !== null;
+                $chat->is_deleted = $chat->membership_deleted_at !== null;
+                $chat->can_manage_membership = !($chat->type === 'global' && $chat->created_by_user_id !== $userId);
+                return $chat;
+            })
+            ->values();
 
         return response()->json($chats);
     }
@@ -44,12 +59,12 @@ class ChatController extends Controller
             'updated_at' => now(),
         ]);
 
-        $memberIds = array_values(array_unique(array_merge($data['member_ids'], [$request->user()->id])));
+        $memberIds = array_values(array_unique(array_merge($data['member_ids'] ?? [], [$request->user()->id])));
         foreach ($memberIds as $userId) {
-            DB::table('chat_members')->insert([
-                'chat_id' => $chatId,
-                'user_id' => $userId,
-            ]);
+            DB::table('chat_members')->updateOrInsert(
+                ['chat_id' => $chatId, 'user_id' => $userId],
+                ['archived_at' => null, 'deleted_at' => null]
+            );
         }
 
         return response()->json(['id' => $chatId, 'message' => 'Chat created'], 201);
@@ -87,7 +102,14 @@ class ChatController extends Controller
                 DB::table('chat_members')->insert([
                     'chat_id' => $chatId,
                     'user_id' => $request->user()->id,
+                    'archived_at' => null,
+                    'deleted_at' => null,
                 ]);
+            } else {
+                DB::table('chat_members')
+                    ->where('chat_id', $chatId)
+                    ->where('user_id', $request->user()->id)
+                    ->update(['archived_at' => null, 'deleted_at' => null]);
             }
         }
 
@@ -101,5 +123,44 @@ class ChatController extends Controller
         DB::table('chats')->where('id', $chatId)->update(['updated_at' => now()]);
 
         return response()->json(['id' => $id, 'message' => 'Sent'], 201);
+    }
+
+    public function archive(Request $request, int $chatId)
+    {
+        $chat = Chat::findOrFail($chatId);
+        $this->authorize('view', $chat);
+
+        DB::table('chat_members')->updateOrInsert(
+            ['chat_id' => $chatId, 'user_id' => $request->user()->id],
+            ['archived_at' => now(), 'deleted_at' => null]
+        );
+
+        return response()->json(['message' => 'Chat archived']);
+    }
+
+    public function unarchive(Request $request, int $chatId)
+    {
+        $chat = Chat::findOrFail($chatId);
+        $this->authorize('view', $chat);
+
+        DB::table('chat_members')->updateOrInsert(
+            ['chat_id' => $chatId, 'user_id' => $request->user()->id],
+            ['archived_at' => null, 'deleted_at' => null]
+        );
+
+        return response()->json(['message' => 'Chat restored']);
+    }
+
+    public function removeForUser(Request $request, int $chatId)
+    {
+        $chat = Chat::findOrFail($chatId);
+        $this->authorize('view', $chat);
+
+        DB::table('chat_members')->updateOrInsert(
+            ['chat_id' => $chatId, 'user_id' => $request->user()->id],
+            ['archived_at' => null, 'deleted_at' => now()]
+        );
+
+        return response()->json(['message' => 'Chat removed from your list']);
     }
 }

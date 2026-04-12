@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\Chat;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 class ChatPolicy
 {
@@ -18,11 +19,16 @@ class ChatPolicy
             return true;
         }
 
+        $membership = DB::table('chat_members')
+            ->where('chat_id', $chat->id)
+            ->where('user_id', $user->id)
+            ->first();
+
         if ($chat->type === 'global') {
-            return true;
+            return $membership?->deleted_at === null;
         }
 
-        return $chat->members()->where('users.id', $user->id)->exists();
+        return $membership !== null && $membership->deleted_at === null;
     }
 
     public function sendMessage(User $user, Chat $chat): bool

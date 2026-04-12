@@ -211,8 +211,9 @@ class MeController extends Controller
     public function players(Request $request)
     {
         $rows = DB::table('users')
+            ->leftJoin('nations', 'nations.owner_user_id', '=', 'users.id')
             ->where('role', 'player')
-            ->select('id', 'name', 'email')
+            ->select('users.id', 'users.name', 'users.email', 'nations.id as nation_id', 'nations.name as nation_name')
             ->orderBy('name')
             ->get();
         return response()->json($rows);

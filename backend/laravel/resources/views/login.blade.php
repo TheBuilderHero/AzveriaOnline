@@ -55,6 +55,35 @@
   </div>
 
   <script>
+    function formatApiError(payload, fallback) {
+      if (payload && payload.errors) {
+        return Object.values(payload.errors).flat().join(' ');
+      }
+      return (payload && payload.message) || fallback;
+    }
+
+    function validateRegistration(name, email, password, confirm) {
+      if (name.length < 3) {
+        return 'Display names must be at least 3 characters long.';
+      }
+      if (!/^[A-Za-z0-9][A-Za-z0-9 _'\-]*$/.test(name)) {
+        return 'Display names may use letters, numbers, spaces, apostrophes, hyphens, and underscores only.';
+      }
+      if (/\s{2,}/.test(name)) {
+        return 'Display names cannot contain repeated spaces.';
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return 'Enter a valid email address, such as leader@example.com.';
+      }
+      if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}/.test(password)) {
+        return 'Passwords must be at least 8 characters and include uppercase, lowercase, and a number.';
+      }
+      if (password !== confirm) {
+        return 'Passwords do not match.';
+      }
+      return '';
+    }
+
     // Toggle between login and register
     document.getElementById('showRegister').addEventListener('click', () => {
       document.getElementById('loginSection').style.display = 'none';
@@ -81,7 +110,9 @@
       });
 
       if (!res.ok) {
-        errorBox.textContent = 'Login failed. Check credentials.';
+        let payload = null;
+        try { payload = await res.json(); } catch {}
+        errorBox.textContent = formatApiError(payload, 'Login failed. Check your email and password.');
         return;
       }
 
@@ -102,8 +133,9 @@
       const password = document.getElementById('regPassword').value;
       const confirm = document.getElementById('regPasswordConfirm').value;
 
-      if (password !== confirm) {
-        errorBox.textContent = 'Passwords do not match.';
+      const validationError = validateRegistration(name, email, password, confirm);
+      if (validationError) {
+        errorBox.textContent = validationError;
         return;
       }
 
@@ -116,10 +148,7 @@
       const data = await res.json();
 
       if (!res.ok) {
-        const firstError = data.errors
-          ? Object.values(data.errors)[0][0]
-          : (data.message || 'Registration failed.');
-        errorBox.textContent = firstError;
+        errorBox.textContent = formatApiError(data, 'Registration failed.');
         return;
       }
 

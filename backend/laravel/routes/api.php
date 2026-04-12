@@ -55,14 +55,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/chats', [ChatController::class, 'store']);
     Route::get('/chats/{chatId}/messages', [ChatController::class, 'messages']);
     Route::post('/chats/{chatId}/messages', [ChatController::class, 'send']);
+    Route::patch('/chats/{chatId}/archive', [ChatController::class, 'archive']);
+    Route::patch('/chats/{chatId}/unarchive', [ChatController::class, 'unarchive']);
+    Route::delete('/chats/{chatId}', [ChatController::class, 'removeForUser']);
 
     Route::get('/shop/categories', [ShopController::class, 'categories']);
     Route::get('/shop/items', [ShopController::class, 'items']);
     Route::post('/shop/buy', [ShopController::class, 'buy']);
 
     Route::middleware('role:admin')->prefix('/admin')->group(function () {
+        Route::get('/users', [AdminController::class, 'users']);
         Route::get('/nations', [AdminController::class, 'nations']);
         Route::post('/users', [AdminController::class, 'createManagedAccount']);
+        Route::delete('/users/{userId}', [AdminController::class, 'deleteManagedAccount']);
         Route::post('/nations', [AdminController::class, 'createPlaceholderNation']);
         Route::put('/nations/{nationId}', [AdminController::class, 'updateNation']);
         Route::post('/nations/{nationId}/units', [AdminController::class, 'addUnitToNation']);
