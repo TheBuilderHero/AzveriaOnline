@@ -311,6 +311,42 @@ class AdminController extends Controller
         return response()->json($rows);
     }
 
+    public function downloadAllGameDocuments()
+    {
+        $zip = new \ZipArchive();
+        $tmpFile = tempnam(sys_get_temp_dir(), 'gamerules_') . '.zip';
+        $zip->open($tmpFile, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
+
+        foreach ($this->gameDocumentDefinitions() as $document) {
+            $code = $document['code'];
+
+            $content = null;
+            if (Schema::hasTable('game_documents')) {
+                $row = DB::table('game_documents')->where('code', $code)->first();
+                $isPlaceholder = $row && str_contains((string) $row->content_text, 'Use Edit to replace this placeholder');
+                if ($row && $row->updated_by_user_id !== null && !$isPlaceholder) {
+                    $content = $row->content_text;
+                }
+            }
+            if ($content === null) {
+                $path = $this->gameDocumentPath($document['filename']);
+                if (File::exists($path)) {
+                    $content = File::get($path);
+                }
+            }
+
+            if ($content !== null) {
+                $zip->addFromString($document['filename'], $content);
+            }
+        }
+
+        $zip->close();
+
+        return response()->download($tmpFile, 'game-information.zip', [
+            'Content-Type' => 'application/zip',
+        ])->deleteFileAfterSend(true);
+    }
+
     public function gameDocument(string $code)
     {
         $document = $this->findGameDocument($code);
@@ -318,12 +354,29 @@ class AdminController extends Controller
             return response()->json(['message' => 'Game information document not found'], 404);
         }
 
+        // DB takes priority if an admin has explicitly saved edits (updated_by_user_id is set).
+        // Otherwise fall back to the baked-in resource file which is the factory default.
         $content = null;
-        $path = $this->gameDocumentPath($document['filename']);
-        if (File::exists($path)) {
-            $content = File::get($path);
-        } elseif (Schema::hasTable('game_documents')) {
-            $content = DB::table('game_documents')->where('code', $code)->value('content_text');
+        $updatedAt = null;
+
+        if (Schema::hasTable('game_documents')) {
+            $row = DB::table('game_documents')->where('code', $code)->first();
+            $isPlaceholder = $row && str_contains((string) $row->content_text, 'Use Edit to replace this placeholder');
+            if ($row && $row->updated_by_user_id !== null && !$isPlaceholder) {
+                $content = $row->content_text;
+                $updatedAt = $row->updated_at;
+            }
+        }
+
+        if ($content === null) {
+            $path = $this->gameDocumentPath($document['filename']);
+            if (File::exists($path)) {
+                $content = File::get($path);
+                $updatedAt = date('c', File::lastModified($path));
+            } elseif (Schema::hasTable('game_documents')) {
+                // Last resort: use whatever is in DB even if it is the seeded placeholder.
+                $content = DB::table('game_documents')->where('code', $code)->value('content_text');
+            }
         }
 
         if ($content === null) {
@@ -334,7 +387,7 @@ class AdminController extends Controller
             'code' => $document['code'],
             'title' => $document['title'],
             'content_text' => $content,
-            'updated_at' => File::exists($path) ? date('c', File::lastModified($path)) : null,
+            'updated_at' => $updatedAt,
         ]);
     }
 
@@ -350,9 +403,9 @@ class AdminController extends Controller
             return response()->json(['message' => 'Game information document not found'], 404);
         }
 
-        File::ensureDirectoryExists($this->gameDocumentRoot());
-        File::put($this->gameDocumentPath($document['filename']), $data['content_text']);
-
+        // Persist edits to the DB so they survive container restarts.
+        // The resource file is baked into the image and serves as the factory default;
+        // writing to it inside a container would be lost on restart.
         if (Schema::hasTable('game_documents')) {
             DB::table('game_documents')->updateOrInsert(
                 ['code' => $code],
@@ -674,7 +727,10 @@ class AdminController extends Controller
 
     private function gameDocumentRoot(): string
     {
-        return base_path('..' . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'docs' . DIRECTORY_SEPARATOR . 'game-information');
+        // Files live inside backend/laravel/resources/game-information/ so they are
+        // included in the Docker build context (context: ./backend) and copied into
+        // the image at build time via `COPY laravel/ ./`.
+        return resource_path('game-information');
     }
 
     private function gameDocumentPath(string $filename): string

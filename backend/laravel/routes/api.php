@@ -95,6 +95,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/visibility/rules', [AdminController::class, 'visibilityRules']);
         Route::put('/visibility/rules', [AdminController::class, 'updateVisibilityRules']);
         Route::get('/game-documents', [AdminController::class, 'gameDocuments']);
+        Route::get('/game-documents/download-all', [AdminController::class, 'downloadAllGameDocuments']);
         Route::get('/game-documents/{code}', [AdminController::class, 'gameDocument']);
         Route::put('/game-documents/{code}', [AdminController::class, 'updateGameDocument']);
     });

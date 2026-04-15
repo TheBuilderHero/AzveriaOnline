@@ -2392,73 +2392,132 @@ async function loadGameInformationRules() {
   view.innerHTML = `
     <div class="card">
       <h2>Game Information and Rules</h2>
-      <p class="muted">Select a document, view read-only text, then click Edit to modify and Save.</p>
-      <div class="row" style="flex-wrap:wrap;">
-        <div style="min-width:300px;flex:1;">
+      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap;">
+        <div style="min-width:240px;flex:1;">
           <label style="font-size:12px;">Document</label>
           <select id="gameDocSelect">
-            <option value="">Select document</option>
-            ${docs.map(d => `<option value="${d.code}">${d.title}</option>`).join('')}
+            <option value="">— Select a document —</option>
+            ${docs.map(d => `<option value="${escapeHtml(d.code)}">${escapeHtml(d.title)}</option>`).join('')}
           </select>
         </div>
-        <button class="primary" id="gameDocEditBtn" style="align-self:flex-end;background:#314f72;" disabled>Edit</button>
-        <button class="primary" id="gameDocSaveBtn" style="align-self:flex-end;display:none;" disabled>Save</button>
+        <button class="primary" id="gameDocEditBtn" style="background:#314f72;" disabled>Edit</button>
+        <button class="primary" id="gameDocSaveBtn" style="display:none;" disabled>Save</button>
+        <button id="gameDocCancelBtn" style="display:none;">Cancel</button>
+        <button id="gameDocDownloadAllBtn" style="background:#2a5934;">Download All</button>
         <span class="muted" id="gameDocMsg"></span>
       </div>
-      <textarea id="gameDocText" rows="22" readonly style="margin-top:8px;font-family:Consolas, 'Courier New', monospace;"></textarea>
+      <p id="gameDocHint" class="muted" style="margin:8px 0 0;">Select a document above to view its contents.</p>
+      <div id="gameDocLoading" style="display:none;margin-top:8px;" class="muted">Loading…</div>
+      <textarea id="gameDocText" rows="28" readonly
+        style="display:none;margin-top:8px;font-family:Consolas,'Courier New',monospace;resize:vertical;"></textarea>
     </div>
   `;
 
   let currentCode = '';
-  let editMode = false;
+  let originalContent = '';
 
-  const select = document.getElementById('gameDocSelect');
-  const text = document.getElementById('gameDocText');
-  const editBtn = document.getElementById('gameDocEditBtn');
-  const saveBtn = document.getElementById('gameDocSaveBtn');
-  const msg = document.getElementById('gameDocMsg');
+  const select          = document.getElementById('gameDocSelect');
+  const text            = document.getElementById('gameDocText');
+  const editBtn         = document.getElementById('gameDocEditBtn');
+  const saveBtn         = document.getElementById('gameDocSaveBtn');
+  const cancelBtn       = document.getElementById('gameDocCancelBtn');
+  const downloadAllBtn  = document.getElementById('gameDocDownloadAllBtn');
+  const msg             = document.getElementById('gameDocMsg');
 
-  const setMode = (isEdit) => {
-    editMode = isEdit;
-    text.readOnly = !isEdit;
-    editBtn.style.display = isEdit ? 'none' : 'inline-block';
-    saveBtn.style.display = isEdit ? 'inline-block' : 'none';
-    saveBtn.disabled = !currentCode;
+  downloadAllBtn.onclick = async () => {
+    const res = await fetch('/api/admin/game-documents/download-all', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      alert('Download failed.');
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'game-information.zip';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const hint      = document.getElementById('gameDocHint');
+  const loading   = document.getElementById('gameDocLoading');
+
+  const showReadOnly = () => {
+    text.readOnly = true;
+    editBtn.style.display  = '';
+    saveBtn.style.display  = 'none';
+    cancelBtn.style.display = 'none';
+    msg.textContent = '';
+  };
+
+  const showEditMode = () => {
+    text.readOnly = false;
+    editBtn.style.display  = 'none';
+    saveBtn.style.display  = '';
+    saveBtn.disabled = false;
+    cancelBtn.style.display = '';
+    text.focus();
   };
 
   select.onchange = async () => {
     currentCode = select.value;
     text.value = '';
+    text.style.display = 'none';
+    hint.style.display = 'none';
     msg.textContent = '';
-    editBtn.disabled = !currentCode;
+    editBtn.disabled = true;
+    showReadOnly();
+
     if (!currentCode) {
-      setMode(false);
+      hint.style.display = '';
+      loading.style.display = 'none';
       return;
     }
-    const res = await api('/api/admin/game-documents/' + currentCode);
+
+    loading.style.display = 'block';
+    const res = await api('/api/admin/game-documents/' + encodeURIComponent(currentCode));
+    loading.style.display = 'none';
+
     if (!res || !res.ok) {
       msg.textContent = 'Failed to load document.';
       return;
     }
+
     const doc = await res.json();
-    text.value = doc.content_text || '';
-    setMode(false);
+    originalContent = doc.content_text || '';
+    text.value = originalContent;
+    text.style.display = 'block';
+    editBtn.disabled = false;
   };
 
   editBtn.onclick = () => {
     if (!currentCode) return;
-    setMode(true);
+    showEditMode();
+  };
+
+  cancelBtn.onclick = () => {
+    text.value = originalContent;
+    showReadOnly();
   };
 
   saveBtn.onclick = async () => {
     if (!currentCode) return;
-    const res = await api('/api/admin/game-documents/' + currentCode, {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    const res = await api('/api/admin/game-documents/' + encodeURIComponent(currentCode), {
       method: 'PUT',
       body: JSON.stringify({ content_text: text.value }),
     });
-    msg.textContent = res && res.ok ? 'Saved.' : 'Save failed.';
+    saveBtn.textContent = 'Save';
     if (res && res.ok) {
-      setMode(false);
+      originalContent = text.value;
+      msg.textContent = 'Saved.';
+      setTimeout(() => { if (msg.textContent === 'Saved.') msg.textContent = ''; }, 3000);
+      showReadOnly();
+    } else {
+      saveBtn.disabled = false;
+      msg.textContent = 'Save failed.';
     }
   };
 }
