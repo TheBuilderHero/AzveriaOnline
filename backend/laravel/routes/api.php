@@ -54,6 +54,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/chats', [ChatController::class, 'index']);
     Route::post('/chats', [ChatController::class, 'store']);
     Route::get('/chats/{chatId}/messages', [ChatController::class, 'messages']);
+    Route::patch('/chats/{chatId}/read', [ChatController::class, 'markRead']);
+    Route::patch('/chats/{chatId}/unread', [ChatController::class, 'markUnread']);
     Route::post('/chats/{chatId}/messages', [ChatController::class, 'send']);
     Route::patch('/chats/{chatId}/archive', [ChatController::class, 'archive']);
     Route::patch('/chats/{chatId}/unarchive', [ChatController::class, 'unarchive']);
@@ -71,6 +73,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/nations', [AdminController::class, 'createPlaceholderNation']);
         Route::put('/nations/{nationId}', [AdminController::class, 'updateNation']);
         Route::post('/nations/{nationId}/units', [AdminController::class, 'addUnitToNation']);
+        Route::get('/unit-catalog', [AdminController::class, 'unitCatalog']);
         Route::get('/new-account-defaults', [AdminController::class, 'newAccountDefaults']);
         Route::patch('/new-account-defaults', [AdminController::class, 'updateNewAccountDefaults']);
         Route::patch('/users/{userId}/password', [AuthController::class, 'adminResetPassword']);
@@ -85,7 +88,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/chats/{chatId}/members', [AdminController::class, 'addMembers']);
         Route::delete('/chats/{chatId}/members/{userId}', [AdminController::class, 'removeMember']);
         Route::post('/shop/items', [AdminController::class, 'createShopItem']);
+        Route::get('/shop/item-templates', [AdminController::class, 'shopItemTemplates']);
         Route::put('/shop/items/{itemId}', [AdminController::class, 'updateShopItem']);
         Route::delete('/shop/items/{itemId}', [AdminController::class, 'deleteShopItem']);
+        Route::get('/visibility/fields', [AdminController::class, 'visibilityFields']);
+        Route::get('/visibility/rules', [AdminController::class, 'visibilityRules']);
+        Route::put('/visibility/rules', [AdminController::class, 'updateVisibilityRules']);
+        Route::get('/game-documents', [AdminController::class, 'gameDocuments']);
+        Route::get('/game-documents/{code}', [AdminController::class, 'gameDocument']);
+        Route::put('/game-documents/{code}', [AdminController::class, 'updateGameDocument']);
     });
 });

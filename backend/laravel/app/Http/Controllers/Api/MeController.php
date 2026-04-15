@@ -45,6 +45,7 @@ class MeController extends Controller
             ->get();
 
         $extra = json_decode($resources->extra_json ?? '{}', true) ?: [];
+        $income = $extra['income'] ?? ['cow' => 30, 'wood' => 3, 'ore' => 3, 'food' => 3];
         $structuredResources = [
             'base' => [
                 'cow'  => (float) $resources->cow,
@@ -55,6 +56,70 @@ class MeController extends Controller
             'refined'    => $extra['refined']    ?? [],
             'currencies' => $extra['currencies'] ?? [],
         ];
+
+        $projection = [
+            'income' => [
+                'base' => [
+                    'cow' => (float) ($income['cow'] ?? 30),
+                    'wood' => (float) ($income['wood'] ?? 3),
+                    'ore' => (float) ($income['ore'] ?? 3),
+                    'food' => (float) ($income['food'] ?? 3),
+                ],
+                'refined' => [],
+                'currencies' => [],
+            ],
+            'maintenance' => [
+                'base' => [],
+                'refined' => [],
+                'currencies' => [],
+            ],
+            'net' => [
+                'base' => [
+                    'cow' => (float) ($income['cow'] ?? 30),
+                    'wood' => (float) ($income['wood'] ?? 3),
+                    'ore' => (float) ($income['ore'] ?? 3),
+                    'food' => (float) ($income['food'] ?? 3),
+                ],
+                'refined' => [],
+                'currencies' => [],
+            ],
+            'income_breakdown' => [],
+            'maintenance_breakdown' => [],
+        ];
+
+        $assets = DB::table('nation_assets as na')
+            ->join('shop_items as si', 'na.shop_item_id', '=', 'si.id')
+            ->where('na.nation_id', $nation->id)
+            ->select('na.qty', 'si.display_name', 'si.maintenance_json', 'si.yearly_effect_json')
+            ->get();
+
+        foreach ($assets as $asset) {
+            $qty = (int) $asset->qty;
+            $yearly = json_decode($asset->yearly_effect_json ?? 'null', true) ?: [];
+            $maintenance = json_decode($asset->maintenance_json ?? 'null', true) ?: [];
+
+            foreach ($yearly as $key => $value) {
+                $amount = (float) $value * $qty;
+                $this->accumulateProjection($projection['income'], $key, $amount);
+                $this->accumulateProjection($projection['net'], $key, $amount);
+                $projection['income_breakdown'][] = [
+                    'asset' => $asset->display_name,
+                    'key' => $key,
+                    'amount' => $amount,
+                ];
+            }
+
+            foreach ($maintenance as $key => $value) {
+                $amount = (float) $value * $qty;
+                $this->accumulateProjection($projection['maintenance'], $key, $amount);
+                $this->accumulateProjection($projection['net'], $key, -$amount);
+                $projection['maintenance_breakdown'][] = [
+                    'asset' => $asset->display_name,
+                    'key' => $key,
+                    'amount' => $amount,
+                ];
+            }
+        }
 
         return response()->json([
             'user' => $request->user(),
@@ -69,6 +134,7 @@ class MeController extends Controller
                 'built' => $buildingsBuilt,
                 'in_progress' => $buildingsInProgress,
             ],
+            'yearly_projection' => $projection,
         ]);
     }
 
@@ -121,6 +187,8 @@ class MeController extends Controller
             $extra = json_decode($settings->extra_json ?? '{}', true) ?: [];
             $payload = (array) $settings;
             $payload['font_mode'] = $extra['font_mode'] ?? 'normal';
+            $payload['show_unread_chat_badge'] = (bool) ($extra['show_unread_chat_badge'] ?? true);
+            $payload['apply_year_change_effects'] = (bool) ($extra['apply_year_change_effects'] ?? false);
             return response()->json($payload);
         }
 
@@ -129,12 +197,14 @@ class MeController extends Controller
             'theme' => 'light',
             'color_blind_mode' => 'none',
             'dog_bark_enabled' => 0,
-            'extra_json' => json_encode(['font_mode' => 'normal']),
+            'extra_json' => json_encode(['font_mode' => 'normal', 'show_unread_chat_badge' => true, 'apply_year_change_effects' => false]),
             'updated_at' => now(),
         ]);
         $created = DB::table('user_settings')->where('user_id', $request->user()->id)->first();
         $payload = (array) $created;
         $payload['font_mode'] = 'normal';
+        $payload['show_unread_chat_badge'] = true;
+        $payload['apply_year_change_effects'] = false;
         return response()->json($payload);
     }
 
@@ -145,6 +215,12 @@ class MeController extends Controller
         $current = $this->settings($request)->getData(true);
         $extra = json_decode($current['extra_json'] ?? '{}', true) ?: [];
         $extra['font_mode'] = $data['font_mode'] ?? ($current['font_mode'] ?? 'normal');
+        $extra['show_unread_chat_badge'] = array_key_exists('show_unread_chat_badge', $data)
+            ? (bool) $data['show_unread_chat_badge']
+            : (bool) ($current['show_unread_chat_badge'] ?? true);
+        $extra['apply_year_change_effects'] = array_key_exists('apply_year_change_effects', $data)
+            ? (bool) $data['apply_year_change_effects']
+            : (bool) ($current['apply_year_change_effects'] ?? false);
 
         DB::table('user_settings')->where('user_id', $request->user()->id)->update([
             'theme' => $data['theme'] ?? $current['theme'],
@@ -222,5 +298,24 @@ class MeController extends Controller
     private function findNation(int $userId): ?object
     {
         return DB::table('nations')->where('owner_user_id', $userId)->first();
+    }
+
+    private function accumulateProjection(array &$bucket, string $key, float $value): void
+    {
+        if (in_array($key, ['cow', 'wood', 'ore', 'food'], true)) {
+            $bucket['base'][$key] = (float) ($bucket['base'][$key] ?? 0) + $value;
+            return;
+        }
+
+        if (str_starts_with($key, 'ref_')) {
+            $refinedKey = substr($key, 4);
+            $bucket['refined'][$refinedKey] = (float) ($bucket['refined'][$refinedKey] ?? 0) + $value;
+            return;
+        }
+
+        if (str_starts_with($key, 'cur_')) {
+            $currencyKey = substr($key, 4);
+            $bucket['currencies'][$currencyKey] = (float) ($bucket['currencies'][$currencyKey] ?? 0) + $value;
+        }
     }
 }

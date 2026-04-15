@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS chats (
 CREATE TABLE IF NOT EXISTS chat_members (
   chat_id BIGINT UNSIGNED NOT NULL,
   user_id BIGINT UNSIGNED NOT NULL,
+  last_read_message_id BIGINT UNSIGNED NULL,
   archived_at TIMESTAMP NULL,
   deleted_at TIMESTAMP NULL,
   PRIMARY KEY(chat_id, user_id),
@@ -223,6 +224,26 @@ CREATE TABLE IF NOT EXISTS user_settings (
   CONSTRAINT fk_user_settings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS player_visibility_rules (
+  viewer_user_id BIGINT UNSIGNED NOT NULL,
+  subject_user_id BIGINT UNSIGNED NOT NULL,
+  field_key VARCHAR(80) NOT NULL,
+  is_allowed TINYINT(1) NOT NULL DEFAULT 1,
+  updated_at TIMESTAMP NULL,
+  PRIMARY KEY (viewer_user_id, subject_user_id, field_key),
+  CONSTRAINT fk_visibility_viewer FOREIGN KEY (viewer_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_visibility_subject FOREIGN KEY (subject_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS game_documents (
+  code VARCHAR(80) PRIMARY KEY,
+  title VARCHAR(200) NOT NULL,
+  content_text LONGTEXT NOT NULL,
+  updated_by_user_id BIGINT UNSIGNED NULL,
+  updated_at TIMESTAMP NULL,
+  CONSTRAINT fk_game_docs_updater FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 INSERT INTO shop_categories (code, display_name) VALUES
   ('refinement', 'Refinement'),
   ('structures', 'Structures'),
@@ -241,3 +262,18 @@ ON DUPLICATE KEY UPDATE image_path = VALUES(image_path), updated_at = VALUES(upd
 INSERT INTO game_time (id, started_at, year_started_at, seconds_per_year, processed_years, elapsed_hours_in_year, auto_increment_enabled, year_label_offset, updated_at) VALUES
   (1, NOW(), NOW(), 172800, 0, 0, 1, 0, NOW())
 ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at);
+
+INSERT INTO game_documents (code, title, content_text, updated_at) VALUES
+  ('reptonians', 'Reptonians', 'Azveria reptonian unit stats. Use Edit to replace this placeholder with full rules text.', NOW()),
+  ('elves', 'Elves', 'Azveria elf unit stats. Use Edit to replace this placeholder with full rules text.', NOW()),
+  ('kilonites', 'Kilonites', 'Azveria kilonite unit stats. Use Edit to replace this placeholder with full rules text.', NOW()),
+  ('goblins', 'Goblins', 'Azveria goblin unit stats. Use Edit to replace this placeholder with full rules text.', NOW()),
+  ('testudians', 'Testudians', 'Azveria testudian unit stats. Use Edit to replace this placeholder with full rules text.', NOW()),
+  ('zeptins', 'Zeptins', 'Azveria zeptin unit stats. Use Edit to replace this placeholder with full rules text.', NOW()),
+  ('centaurs', 'Centaurs', 'Azveria centaur division stats. Use Edit to replace this placeholder with full rules text.', NOW()),
+  ('dwarves', 'Dwarves', 'Azveria dwarf unit stats. Use Edit to replace this placeholder with full rules text.', NOW()),
+  ('humans', 'Humans', 'Azveria human (base) unit stats. Use Edit to replace this placeholder with full rules text.', NOW()),
+  ('structures_and_terrain', 'Structures and Terrain', 'Azveria structure and terrain stats. Use Edit to replace this placeholder with full rules text.', NOW()),
+  ('war_rules_and_such', 'War Rules and Such', 'Azveria war and army rules. Use Edit to replace this placeholder with full rules text.', NOW()),
+  ('rules_and_resources', 'Rules and Resources', 'Azveria general rules and resources. Use Edit to replace this placeholder with full rules text.', NOW())
+ON DUPLICATE KEY UPDATE title = VALUES(title), updated_at = VALUES(updated_at);

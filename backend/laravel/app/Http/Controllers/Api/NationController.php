@@ -58,12 +58,77 @@ class NationController extends Controller
             ->select('nb.*', 'bc.display_name', 'bc.code')
             ->get();
 
+        $viewer = $request->user();
+        $visibility = [
+            'leader_name' => true,
+            'alliance_name' => true,
+            'about_text' => true,
+            'resources_base' => true,
+            'resources_refined' => true,
+            'resources_currencies' => true,
+            'terrain' => true,
+            'units' => true,
+            'buildings' => true,
+        ];
+
+        if ($viewer && $viewer->role !== 'admin') {
+            $viewerUserId = (int) $viewer->id;
+            $subjectUserId = (int) ($nation->owner_user_id ?? 0);
+            if ($subjectUserId > 0 && $viewerUserId !== $subjectUserId) {
+                $ruleRows = DB::table('player_visibility_rules')
+                    ->where('viewer_user_id', $viewerUserId)
+                    ->where('subject_user_id', $subjectUserId)
+                    ->get();
+                foreach ($ruleRows as $rule) {
+                    $visibility[(string) $rule->field_key] = (bool) $rule->is_allowed;
+                }
+
+                if (!$visibility['leader_name']) {
+                    $nation->leader_name = null;
+                }
+                if (!$visibility['alliance_name']) {
+                    $nation->alliance_name = null;
+                }
+                if (!$visibility['about_text']) {
+                    $nation->about_text = null;
+                }
+
+                if ($resources) {
+                    $extra = json_decode($resources->extra_json ?? '{}', true) ?: [];
+                    if (!$visibility['resources_base']) {
+                        $resources->cow = null;
+                        $resources->wood = null;
+                        $resources->ore = null;
+                        $resources->food = null;
+                    }
+                    if (!$visibility['resources_refined']) {
+                        $extra['refined'] = [];
+                    }
+                    if (!$visibility['resources_currencies']) {
+                        $extra['currencies'] = [];
+                    }
+                    $resources->extra_json = json_encode($extra);
+                }
+
+                if (!$visibility['terrain']) {
+                    $terrain = null;
+                }
+                if (!$visibility['units']) {
+                    $units = collect();
+                }
+                if (!$visibility['buildings']) {
+                    $buildings = collect();
+                }
+            }
+        }
+
         return response()->json([
             'nation' => $nation,
             'resources' => $resources,
             'terrain' => $terrain,
             'units' => $units,
             'buildings' => $buildings,
+            'visibility' => $visibility,
         ]);
     }
 }

@@ -167,6 +167,16 @@ class ShopController extends Controller
             }
         }
 
+        // Legacy compatibility: support effect_json like {"gain":{"metal":1}}.
+        if (isset($effects['gain']) && is_array($effects['gain'])) {
+            foreach ($effects['gain'] as $key => $gain) {
+                $normalizedKey = $this->normalizeRefinedKey((string) $key);
+                if ($normalizedKey !== null) {
+                    $refined[$normalizedKey] = ($refined[$normalizedKey] ?? 0) + ((float) $gain * $quantity);
+                }
+            }
+        }
+
         // Backward-compatible effect handling: direct keys in effect_json
         foreach ($effects as $effectKey => $effectValue) {
             if (!is_numeric($effectValue)) {
@@ -360,5 +370,28 @@ class ShopController extends Controller
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+    }
+
+    private function normalizeRefinedKey(string $key): ?string
+    {
+        $trimmed = strtoupper(trim($key));
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $aliases = [
+            'METAL' => 'M',
+            'M' => 'M',
+            'RADIOACTIVE_METAL' => 'RM',
+            'RADIOACTIVE METAL' => 'RM',
+            'RM' => 'RM',
+            'FOVIUM_STEEL' => 'FS',
+            'FOVIUM STEEL' => 'FS',
+            'FS' => 'FS',
+            'URANIUM' => 'URM',
+            'URM' => 'URM',
+        ];
+
+        return $aliases[$trimmed] ?? $trimmed;
     }
 }

@@ -72,7 +72,7 @@ VALUES
 ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), class_name = VALUES(class_name), base_stats_json = VALUES(base_stats_json), upkeep_json = VALUES(upkeep_json), unlocked_by_structure = VALUES(unlocked_by_structure), updated_at = VALUES(updated_at);
 
 INSERT INTO shop_items (category_id, code, display_name, cost_json, effect_json, is_active)
-SELECT c.id, 'refine_ore_to_metal', 'Refine Ore to Metal', JSON_OBJECT('ore', 5), JSON_OBJECT('gain', JSON_OBJECT('metal', 1)), 1
+SELECT c.id, 'refine_ore_to_metal', 'Refine Ore to Metal', JSON_OBJECT('ore', 5), JSON_OBJECT('refined', JSON_OBJECT('M', 1)), 1
 FROM shop_categories c
 WHERE c.code = 'refinement'
 ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), cost_json = VALUES(cost_json), effect_json = VALUES(effect_json), is_active = VALUES(is_active);

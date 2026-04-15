@@ -29,7 +29,31 @@
     body { margin: 0; font-family: "Trebuchet MS", Verdana, sans-serif; color: var(--text); background: radial-gradient(circle at top right, var(--bg-alt), var(--bg)); }
     .layout { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
     .menu { background: var(--menu); color: var(--menu-text); padding: 16px; position: sticky; top: 0; height: 100vh; }
-    .menu h2 { margin-top: 0; }
+    .menu-brand {
+      display: flex;
+      align-items: center;
+      min-height: 40px;
+      padding-left: 54px;
+      margin-bottom: 8px;
+    }
+    #menuToggle {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 1100;
+      background: #314f72;
+      color: #fff;
+      border: 0;
+      border-radius: 8px;
+      width: 40px;
+      height: 40px;
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+    }
+    body.menu-collapsed .layout { grid-template-columns: 0 1fr; }
+    body.menu-collapsed .menu { width: 0; padding: 0; overflow: hidden; }
+    .menu h2 { margin: 0; }
     .menu button, .menu .help-select { width: 100%; margin-top: 8px; padding: 10px; border-radius: 8px; border: 0; text-align: left; cursor: pointer; }
     .menu button { background: #314f72; color: #f8fbff; }
     .menu button.active { background: var(--accent); }
@@ -49,6 +73,7 @@
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
       .menu { height: auto; position: relative; }
+      .menu-brand { padding-left: 54px; }
       .twocol { grid-template-columns: 1fr; }
     }
     details summary { cursor:pointer; font-weight:bold; padding:4px 0; user-select:none; }
@@ -97,14 +122,16 @@
   </style>
 </head>
 <body>
+<button id="menuToggle" title="Toggle menu">&#9776;</button>
 <div class="layout">
   <aside class="menu">
-    <h2>Azveria</h2>
+    <div class="menu-brand"><h2>Azveria</h2></div>
     <div id="nav"></div>
     <select id="helpSelect" class="help-select">
       <option value="">Help</option>
       <option value="about">About</option>
       <option value="docs">Documentation</option>
+      <option value="report-issue">Report Issue</option>
       <option value="reset-password">Reset Password</option>
       <option value="logout">Logout</option>
     </select>
@@ -161,7 +188,7 @@ const nav = document.getElementById('nav');
 const resourcesBar = document.getElementById('resourcesBar');
 
 const playerMenu = ['Player', 'Announcements', 'Map', 'Combat', 'Chat', 'Other Nations', 'Shop', 'Settings'];
-const adminMenu = ['Announcements', 'All Nations', 'New Accounts', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
+const adminMenu = ['Announcements', 'All Nations', 'Notifications', 'Game Information and Rules', 'New Accounts', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
 
 const goofyAudio = new Audio('https://actions.google.com/sounds/v1/cartoon/boing.ogg');
 goofyAudio.preload = 'auto';
@@ -198,6 +225,44 @@ function extractList(payload) {
   return [];
 }
 
+function safeJsonParse(value, fallback = null) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function toFiniteNumber(value, fallback = 0) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : fallback;
+  }
+  if (typeof value === 'string') {
+    const cleaned = value.trim().replace(/^"+|"+$/g, '');
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeTerrainSquareMiles(raw) {
+  const parsed = safeJsonParse(raw, raw) || {};
+  const asObject = typeof parsed === 'string' ? (safeJsonParse(parsed, {}) || {}) : parsed;
+  const source = (asObject && typeof asObject === 'object') ? asObject : {};
+  const sea = source.seafront ?? source.sea_front ?? source.seaFront ?? 0;
+  return {
+    grassland: toFiniteNumber(source.grassland, 0),
+    mountain: toFiniteNumber(source.mountain, 0),
+    freshwater: toFiniteNumber(source.freshwater, 0),
+    hills: toFiniteNumber(source.hills, 0),
+    desert: toFiniteNumber(source.desert, 0),
+    seafront: toFiniteNumber(sea, 0),
+  };
+}
+
 function labelTerrainKey(key) {
   const map = {
     grassland: 'Grassland',
@@ -230,14 +295,40 @@ function renderSectionError(title, error) {
 async function readErrorMessage(res, fallback) {
   if (!res) return fallback;
   try {
-    const payload = await res.json();
-    if (payload.errors) {
+    const raw = await res.text();
+    const payload = safeJsonParse(raw, null);
+    if (payload?.errors) {
       return Object.values(payload.errors).flat().join(' ');
     }
-    return payload.message || fallback;
+    if (payload?.message) {
+      return payload.message;
+    }
+    const plain = raw
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (plain) {
+      return `${fallback} (${plain.slice(0, 160)})`;
+    }
+    return res.status ? `${fallback} (HTTP ${res.status})` : fallback;
   } catch {
     return fallback;
   }
+}
+
+async function parseJsonResponse(res, fallback = null) {
+  if (!res) return fallback;
+  const raw = await res.text();
+  const parsed = safeJsonParse(raw, undefined);
+  if (parsed !== undefined) {
+    return parsed;
+  }
+  const snippet = raw
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160);
+  throw new Error(snippet ? `The server returned an invalid response: ${snippet}` : 'The server returned an invalid response.');
 }
 
 async function getWsToken() {
@@ -268,7 +359,32 @@ function renderNav() {
       barkIfEnabled();
     });
   });
+  refreshChatBadge();
   nav.querySelector('button')?.click();
+}
+
+async function refreshChatBadge() {
+  const chatButton = nav.querySelector('button[data-item="Chat"]');
+  if (!chatButton) return;
+
+  const showBadge = settings?.show_unread_chat_badge !== false;
+  if (!showBadge) {
+    chatButton.textContent = 'Chat';
+    return;
+  }
+
+  try {
+    const res = await api('/api/chats');
+    if (!res || !res.ok) {
+      chatButton.textContent = 'Chat';
+      return;
+    }
+    const chats = extractList(await res.json());
+    const unreadChats = chats.filter(chat => Number(chat.unread_messages || 0) > 0 && !chat.is_archived).length;
+    chatButton.textContent = unreadChats > 0 ? `Chat (${unreadChats})` : 'Chat';
+  } catch {
+    chatButton.textContent = 'Chat';
+  }
 }
 
 async function loadResources() {
@@ -312,8 +428,21 @@ const WOOD_REFS  = {H:'Hardwood', TW:'Toxic Waste', CB:'Carbon Battery', MYC:'My
 const FOOD_REFS  = {GBR:'Granola Bars', CHB:'Chocolate Bar', SR:'Sushi Rolls', ZZ:'Zaza', PZA:'Pizza', IC:'Ice Cream', WSH:'Whale Sushi', SD:'StarDust', NS:'Neutron StarDust'};
 const CURRENCIES = {GB:'Gobbo Bucks', P:'Psycoin', G:'Gold', S:'Silver', B:'Bronze', X:'codebuX', CD:'Credits', FD:'Fairy Dust', cheese:'Cheese', SP:'SPores', R:'Rupees', MK:'MarKs'};
 
-function renderKVList(map, data) {
-  return Object.entries(map).map(([k,label]) => `<div class="res-kv"><span>${label}</span><span>${Number(data[k]||0).toLocaleString()}</span></div>`).join('');
+function renderKVList(map, data, opts = {}) {
+  const showZero = opts.showZero !== false;
+  return Object.entries(map)
+    .filter(([k]) => showZero || toFiniteNumber(data[k] || 0, 0) !== 0)
+    .map(([k,label]) => `<div class="res-kv"><span>${label}</span><span>${toFiniteNumber(data[k]||0, 0).toLocaleString()}</span></div>`)
+    .join('');
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 async function ensureWs() {
@@ -329,19 +458,26 @@ async function ensureWs() {
 
 async function subscribeChannel(channel) {
   await ensureWs();
-  if (!ws) return false;
+  const socket = ws;
+  if (!socket) return false;
 
   const authToken = await getWsToken();
   if (!authToken) return false;
 
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'subscribe', channel, token: authToken }));
+  if (!ws || socket !== ws) {
+    return false;
+  }
+
+  if (socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'subscribe', channel, token: authToken }));
     return true;
   }
 
-  if (ws.readyState === WebSocket.CONNECTING) {
-    ws.addEventListener('open', () => {
-      ws.send(JSON.stringify({ type: 'subscribe', channel, token: authToken }));
+  if (socket.readyState === WebSocket.CONNECTING) {
+    socket.addEventListener('open', () => {
+      if (ws === socket) {
+        socket.send(JSON.stringify({ type: 'subscribe', channel, token: authToken }));
+      }
     }, { once: true });
     return true;
   }
@@ -364,6 +500,8 @@ async function loadSection(name) {
     if (name === 'Shop') return await loadShop();
     if (name === 'Settings') return await loadSettings();
     if (name === 'All Nations') return await loadAllNations();
+    if (name === 'Notifications') return await loadNotifications();
+    if (name === 'Game Information and Rules') return await loadGameInformationRules();
     if (name === 'About') return await loadAboutPage();
   } catch (error) {
     if (activeSectionName === name) {
@@ -379,14 +517,21 @@ async function loadPlayer() {
   ]);
   const data = await dashRes.json();
   const sqMiles = await sqMilesRes.json();
-  const terrainRows = Object.entries(sqMiles).length
-    ? Object.entries(sqMiles).map(([k, v]) => `<span>${labelTerrainKey(k)}: <strong>${v} sq mi</strong></span>`).join(' &nbsp;|&nbsp; ')
+  const normalizedSqMiles = normalizeTerrainSquareMiles(sqMiles);
+  const terrainRows = Object.entries(normalizedSqMiles).length
+    ? Object.entries(normalizedSqMiles).map(([k, v]) => `<span>${labelTerrainKey(k)}: <strong>${toFiniteNumber(v, 0)} sq mi</strong></span>`).join(' &nbsp;|&nbsp; ')
     : 'No terrain data';
 
   const res = data.resources || {};
   const base = res.base || {};
   const refined = res.refined || {};
   const currencies = res.currencies || {};
+  const yearly = data.yearly_projection || { income: { base: {}, refined: {}, currencies: {} }, maintenance: { base: {}, refined: {}, currencies: {} }, net: { base: {}, refined: {}, currencies: {} }, maintenance_breakdown: [] };
+
+  const ownedUnits = data.units.owned || [];
+  const trainingUnits = data.units.training || [];
+  const builtBuildings = data.buildings.built || [];
+  const progressBuildings = data.buildings.in_progress || [];
 
   view.innerHTML = `
     <div class="card">
@@ -412,9 +557,19 @@ async function loadPlayer() {
           <details style="margin-top:8px;">
             <summary>Refined Resources</summary>
             <div style="border:1px solid #c9d1db;border-radius:8px;padding:6px;margin-top:4px;">
-              <details open><summary style="font-size:12px;color:#666;">⛏ Ore-derived</summary>${renderKVList(ORE_REFS, refined)}</details>
-              <details open style="margin-top:4px;"><summary style="font-size:12px;color:#666;">🌲 Wood-derived</summary>${renderKVList(WOOD_REFS, refined)}</details>
-              <details open style="margin-top:4px;"><summary style="font-size:12px;color:#666;">🍞 Food-derived</summary>${renderKVList(FOOD_REFS, refined)}</details>
+              <details open><summary style="font-size:12px;color:#666;">⛏ Ore-derived</summary>${renderKVList(ORE_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;">None</div>'}</details>
+              <details open style="margin-top:4px;"><summary style="font-size:12px;color:#666;">🌲 Wood-derived</summary>${renderKVList(WOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;">None</div>'}</details>
+              <details open style="margin-top:4px;"><summary style="font-size:12px;color:#666;">🍞 Food-derived</summary>${renderKVList(FOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;">None</div>'}</details>
+            </div>
+          </details>
+
+          <details style="margin-top:8px;" open>
+            <summary>Expected Yearly Income / Maintenance</summary>
+            <div style="border:1px solid #c9d1db;border-radius:8px;padding:8px;margin-top:4px;">
+              <div style="font-size:12px;color:#666;margin-bottom:4px;">Net (Income - Maintenance)</div>
+              <div>${renderKVList({cow:'Cow',wood:'Wood',ore:'Ore',food:'Food'}, yearly.net?.base || {}, { showZero: false }) || '<div class="muted" style="padding:4px 6px;">No yearly net base changes.</div>'}</div>
+              <div style="margin-top:8px;font-size:12px;color:#666;">Maintenance causes</div>
+              <div>${(yearly.maintenance_breakdown || []).map(m => `<div class="res-kv"><span>${m.asset} (${m.key})</span><span>- ${toFiniteNumber(m.amount, 0)}</span></div>`).join('') || '<div class="muted" style="padding:4px 6px;">No maintenance assets.</div>'}</div>
             </div>
           </details>
 
@@ -431,15 +586,35 @@ async function loadPlayer() {
         </div>
         <div>
           <h3>Units</h3>
-          <div class="list">${data.units.owned.map(u => `<div>${u.display_name || u.custom_name || 'Unit'} x${u.qty}</div>`).join('') || '<div class="muted">None</div>'}
-          <hr>${data.units.training.map(u => `<div>${u.display_name || u.custom_name || 'Unit'} x${u.qty} (training)</div>`).join('') || '<div class="muted">No training units</div>'}</div>
+          <div class="list">${ownedUnits.map(u => `<div><button class="primary playerUnitDetail" data-json='${JSON.stringify(u).replace(/'/g, '&#39;')}' title="Click for details" style="width:100%;margin-bottom:6px;background:#314f72;">${u.display_name || u.custom_name || 'Unit'} x${u.qty}</button></div>`).join('') || '<div class="muted">None</div>'}
+          <hr>${trainingUnits.map(u => `<div><button class="primary playerUnitDetail" data-json='${JSON.stringify(u).replace(/'/g, '&#39;')}' title="Click for details" style="width:100%;margin-bottom:6px;background:#4f5f72;">${u.display_name || u.custom_name || 'Unit'} x${u.qty} (training)</button></div>`).join('') || '<div class="muted">No training units</div>'}
+          <div id="playerUnitDetailPanel" class="muted" style="margin-top:8px;">Hover/click a unit to see details.</div></div>
           <h3>Buildings</h3>
-          <div class="list">${data.buildings.built.map(b => `<div>${b.display_name} L${b.level}</div>`).join('') || '<div class="muted">None</div>'}
-          <hr>${data.buildings.in_progress.map(b => `<div>${b.display_name} (${b.status})</div>`).join('') || '<div class="muted">No construction</div>'}</div>
+          <div class="list">${builtBuildings.map(b => `<div><button class="primary playerBuildingDetail" data-json='${JSON.stringify(b).replace(/'/g, '&#39;')}' title="Click for details" style="width:100%;margin-bottom:6px;background:#314f72;">${b.display_name} L${b.level}</button></div>`).join('') || '<div class="muted">None</div>'}
+          <hr>${progressBuildings.map(b => `<div><button class="primary playerBuildingDetail" data-json='${JSON.stringify(b).replace(/'/g, '&#39;')}' title="Click for details" style="width:100%;margin-bottom:6px;background:#4f5f72;">${b.display_name} (${b.status})</button></div>`).join('') || '<div class="muted">No construction</div>'}
+          <div id="playerBuildingDetailPanel" class="muted" style="margin-top:8px;">Hover/click a building to see details.</div></div>
         </div>
       </div>
     </div>
   `;
+
+  document.querySelectorAll('.playerUnitDetail').forEach(button => {
+    const showDetails = () => {
+      const payload = safeJsonParse(button.dataset.json, {});
+      document.getElementById('playerUnitDetailPanel').innerHTML = `<strong>${payload.display_name || payload.custom_name || 'Unit'}</strong><br>Qty: ${payload.qty || 0}<br>Status: ${payload.status || 'owned'}<br>Class: ${payload.class_name || '-'}<br>ID: ${payload.id || '-'}`;
+    };
+    button.addEventListener('mouseenter', showDetails);
+    button.addEventListener('click', showDetails);
+  });
+
+  document.querySelectorAll('.playerBuildingDetail').forEach(button => {
+    const showDetails = () => {
+      const payload = safeJsonParse(button.dataset.json, {});
+      document.getElementById('playerBuildingDetailPanel').innerHTML = `<strong>${payload.display_name || 'Building'}</strong><br>Level: ${payload.level || 1}<br>Status: ${payload.status || 'built'}<br>Code: ${payload.code || '-'}<br>ID: ${payload.id || '-'}`;
+    };
+    button.addEventListener('mouseenter', showDetails);
+    button.addEventListener('click', showDetails);
+  });
   document.getElementById('saveAbout').onclick = async () => {
     const aboutText = document.getElementById('aboutField').value;
     const allianceName = document.getElementById('allianceField').value;
@@ -559,10 +734,12 @@ async function loadMap() {
   `;
 
   const renderTerrainStats = (sqMiles) => {
-    const total = Math.max(1, Object.values(sqMiles || {}).reduce((sum, val) => sum + Number(val || 0), 0));
-    document.getElementById('mapTerrainStats').innerHTML = Object.entries(sqMiles || {}).map(([k, v]) => {
-      const pct = ((Number(v || 0) / total) * 100).toFixed(1);
-      return `<div>${labelTerrainKey(k)}: ${v} (${pct}%)</div>`;
+    const normalized = normalizeTerrainSquareMiles(sqMiles);
+    const total = Math.max(1, Object.values(normalized).reduce((sum, val) => sum + toFiniteNumber(val, 0), 0));
+    document.getElementById('mapTerrainStats').innerHTML = Object.entries(normalized).map(([k, v]) => {
+      const value = toFiniteNumber(v, 0);
+      const pct = ((value / total) * 100).toFixed(1);
+      return `<div>${labelTerrainKey(k)}: ${value} (${pct}%)</div>`;
     }).join('') || '<div class="muted">No data</div>';
   };
   renderTerrainStats(terrain);
@@ -580,7 +757,7 @@ async function loadMap() {
     }
     const detailRes = await api('/api/nations/' + e.target.value);
     const detail = await detailRes.json();
-    const sqMiles = detail.terrain?.square_miles_json ? JSON.parse(detail.terrain.square_miles_json) : {};
+    const sqMiles = normalizeTerrainSquareMiles(detail.terrain?.square_miles_json || {});
     renderTerrainStats(sqMiles);
   };
 
@@ -705,24 +882,45 @@ async function loadMap() {
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
       });
-      msgEl.textContent = res.ok ? 'Uploaded!' : 'Upload failed.';
+      if (res.ok) {
+        msgEl.textContent = 'Uploaded!';
+      } else {
+        let detail = 'Upload failed.';
+        try {
+          const payload = await res.json();
+          detail = payload.detail ? `${payload.message} (${payload.detail})` : (payload.message || detail);
+        } catch {}
+        const selected = fileInput.files[0];
+        if (selected) {
+          const mb = (selected.size / (1024 * 1024)).toFixed(2);
+          detail += ` File: ${selected.name} (${mb} MB).`;
+        }
+        msgEl.textContent = detail;
+      }
       if (res.ok) setTimeout(loadMap, 800);
       barkIfEnabled();
     };
   }
 }
 
-async function loadChat() {
+async function loadChat(preferredChatId = null) {
   const [, chatsRes, playersRes] = await Promise.all([
     ensureWs(),
     api('/api/chats'),
     api('/api/players'),
   ]);
-  const chats = extractList(await chatsRes.json());
-  const players = await playersRes.json();
+  if (!chatsRes?.ok) {
+    throw new Error(await readErrorMessage(chatsRes, 'The chat list could not be loaded.'));
+  }
+  if (!playersRes?.ok) {
+    throw new Error(await readErrorMessage(playersRes, 'The player list could not be loaded.'));
+  }
+  const chats = extractList(await parseJsonResponse(chatsRes, []));
+  const players = await parseJsonResponse(playersRes, []);
   const activeChats = chats.filter(chat => !chat.is_archived);
   const archivedChats = chats.filter(chat => chat.is_archived);
-  const firstChat = activeChats[0] || archivedChats[0] || null;
+  const chatsById = new Map(chats.map(chat => [Number(chat.id), chat]));
+  const firstChat = chatsById.get(Number(preferredChatId)) || activeChats[0] || archivedChats[0] || null;
 
   const playerCheckboxes = players
     .filter(player => player.id !== user.id)
@@ -737,6 +935,11 @@ async function loadChat() {
           <div id="chatView" class="list" style="min-height:220px;">Select a chat.</div>
           <div class="row" style="margin-top:8px;"><input id="chatMsg" placeholder="Message…"><button class="primary" id="sendMsg">Send</button></div>
           <div class="row" style="margin-top:10px;flex-wrap:wrap;">
+            <span class="muted" id="chatUnreadStatus">No chat selected.</span>
+            <button class="primary" id="markChatReadBtn" style="background:#2f6a41;">Read</button>
+            <button class="primary" id="markChatUnreadBtn" style="background:#7a5b1f;">Unread</button>
+          </div>
+          <div class="row" style="margin-top:10px;flex-wrap:wrap;">
             <button class="primary" id="archiveChatBtn" style="background:#314f72;">Archive</button>
             <button class="primary" id="unarchiveChatBtn" style="display:none;background:#314f72;">Unarchive</button>
             <button class="primary" id="deleteChatForMeBtn" style="background:#8a1a1a;">Delete</button>
@@ -750,7 +953,7 @@ async function loadChat() {
           <div id="playerPickerList" style="max-height:160px;overflow:auto;border:1px solid #bfc8d2;border-radius:8px;padding:6px;margin-bottom:6px;">${playerCheckboxes || '<span class="muted">No other players</span>'}</div>
           <div class="row"><button class="primary" id="newChat">Create Chat</button><span class="muted" id="chatCreateMsg"></span></div>
           <h3>Chats</h3>
-          <div class="list" id="chatList">${activeChats.map(chat => `<div><button class="primary selectChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" data-archived="0" style="width:100%; margin-bottom:8px;">${chat.name}${chat.type === 'global' ? ' 🌐' : ''}</button></div>`).join('') || '<div class="muted">No active chats</div>'}</div>
+          <div class="list" id="chatList">${activeChats.map(chat => `<div><button class="primary selectChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" data-archived="0" style="width:100%; margin-bottom:8px;">${chat.name}${chat.type === 'global' ? ' 🌐' : ''}${Number(chat.unread_messages || 0) > 0 ? ` (${Number(chat.unread_messages)})` : ''}</button></div>`).join('') || '<div class="muted">No active chats</div>'}</div>
           <h3 style="margin-top:12px;">Archived</h3>
           <div class="list" id="archivedChatList" style="max-height:140px;">${archivedChats.map(chat => `<div><button class="primary selectChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" data-archived="1" style="width:100%; margin-bottom:8px; opacity:0.7;">${chat.name}</button></div>`).join('') || '<div class="muted">No archived chats</div>'}</div>
         </div>
@@ -762,6 +965,13 @@ async function loadChat() {
   let activeChatArchived = !!firstChat?.is_archived;
 
   const setChatActions = () => {
+    const activeChat = chatsById.get(Number(activeChatId)) || null;
+    const unreadMessages = Number(activeChat?.unread_messages || 0);
+    document.getElementById('chatUnreadStatus').textContent = activeChatId
+      ? `Unread messages: ${unreadMessages}`
+      : 'No chat selected.';
+    document.getElementById('markChatReadBtn').disabled = !activeChatId || unreadMessages === 0;
+    document.getElementById('markChatUnreadBtn').disabled = !activeChatId || unreadMessages > 0;
     document.getElementById('archiveChatBtn').style.display = activeChatId && !activeChatArchived ? 'inline-block' : 'none';
     document.getElementById('unarchiveChatBtn').style.display = activeChatId && activeChatArchived ? 'inline-block' : 'none';
     document.getElementById('deleteChatForMeBtn').style.display = activeChatId ? 'inline-block' : 'none';
@@ -776,16 +986,20 @@ async function loadChat() {
     if (chatName) document.getElementById('chatHeader').textContent = chatName;
     await subscribeChannel(`chat.${chatId}`);
     const res = await api(`/api/chats/${chatId}/messages`);
-    const messages = extractList(await res.json());
+    if (!res?.ok) {
+      throw new Error(await readErrorMessage(res, 'The chat messages could not be loaded.'));
+    }
+    const messages = extractList(await parseJsonResponse(res, []));
     document.getElementById('chatView').innerHTML = messages.map(message => {
       const isOwn = Number(message.sender_user_id) === Number(user.id);
       return `<div class="msg-wrap ${isOwn ? 'own' : 'other'}">
         <div class="msg-sender">${message.sender_name}</div>
-        <div class="msg-bubble">${message.message.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        <div class="msg-bubble">${escapeHtml(message.message)}</div>
       </div>`;
     }).join('') || '<div class="muted">No messages</div>';
     const chatView = document.getElementById('chatView');
     chatView.scrollTop = chatView.scrollHeight;
+    setChatActions();
   }
 
   document.querySelectorAll('.selectChat').forEach(btn => {
@@ -809,21 +1023,49 @@ async function loadChat() {
     document.getElementById('chatMsg').value = '';
     const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
     await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
+    refreshChatBadge();
     barkIfEnabled();
+  };
+
+  document.getElementById('chatMsg').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      document.getElementById('sendMsg').click();
+    }
+  });
+
+  document.getElementById('markChatReadBtn').onclick = async () => {
+    if (!activeChatId) return;
+    const res = await api(`/api/chats/${activeChatId}/read`, { method: 'PATCH' });
+    document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat marked as read.' : await readErrorMessage(res, 'The chat could not be marked as read.');
+    if (res?.ok) {
+      await loadChat(activeChatId);
+      refreshChatBadge();
+    }
+  };
+
+  document.getElementById('markChatUnreadBtn').onclick = async () => {
+    if (!activeChatId) return;
+    const res = await api(`/api/chats/${activeChatId}/unread`, { method: 'PATCH' });
+    document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat marked as unread.' : await readErrorMessage(res, 'The chat could not be marked as unread.');
+    if (res?.ok) {
+      await loadChat(activeChatId);
+      refreshChatBadge();
+    }
   };
 
   document.getElementById('archiveChatBtn').onclick = async () => {
     if (!activeChatId) return;
     const res = await api(`/api/chats/${activeChatId}/archive`, { method: 'PATCH' });
     document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat archived.' : await readErrorMessage(res, 'The chat could not be archived.');
-    if (res?.ok) await loadChat();
+    if (res?.ok) await loadChat(activeChatId);
   };
 
   document.getElementById('unarchiveChatBtn').onclick = async () => {
     if (!activeChatId) return;
     const res = await api(`/api/chats/${activeChatId}/unarchive`, { method: 'PATCH' });
     document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat restored.' : await readErrorMessage(res, 'The chat could not be restored.');
-    if (res?.ok) await loadChat();
+    if (res?.ok) await loadChat(activeChatId);
   };
 
   document.getElementById('deleteChatForMeBtn').onclick = async () => {
@@ -861,9 +1103,12 @@ async function loadChat() {
       : await readErrorMessage(res, 'The chat could not be created.');
     if (res?.ok) {
       await loadChat();
+      refreshChatBadge();
       barkIfEnabled();
     }
   };
+
+  refreshChatBadge();
 }
 
 async function loadOtherNations() {
@@ -882,18 +1127,96 @@ async function loadOtherNations() {
 
   const loadList = async (q = '') => {
     const res = await api('/api/nations?search=' + encodeURIComponent(q));
-    const payload = await res.json();
+    const payload = await parseJsonResponse(res, []);
     const list = extractList(payload);
     const box = document.getElementById('nationList');
-    box.innerHTML = list.map(n => `<button class="primary nationBtn" data-id="${n.id}" style="display:block; width:100%; margin-bottom:8px;">${n.name} (${n.player_name || 'Unassigned'})</button>`).join('');
+    box.innerHTML = list.map(n => `<button class="primary nationBtn" data-id="${n.id}" style="display:block; width:100%; margin-bottom:8px;">${escapeHtml(n.name)} (${escapeHtml(n.player_name || 'Unassigned')})</button>`).join('');
     document.querySelectorAll('.nationBtn').forEach(btn => btn.onclick = async () => {
       const detailRes = await api('/api/nations/' + btn.dataset.id);
-      const d = await detailRes.json();
+      if (!detailRes?.ok) {
+        document.getElementById('nationDetail').innerHTML = `<div class="danger">${escapeHtml(await readErrorMessage(detailRes, 'The nation details could not be loaded.'))}</div>`;
+        return;
+      }
+      const d = await parseJsonResponse(detailRes, {});
+      const visibility = d.visibility || {};
+      const resourceExtra = safeJsonParse(d.resources?.extra_json, {}) || {};
+      const refined = resourceExtra.refined || {};
+      const currencies = resourceExtra.currencies || {};
+      const terrainSqMiles = normalizeTerrainSquareMiles(d.terrain?.square_miles_json || {});
+      const terrainTotal = Math.max(1, Object.values(terrainSqMiles).reduce((sum, value) => sum + toFiniteNumber(value, 0), 0));
+      const sections = [];
+
+      const renderSection = (title, body) => `
+        <details open style="margin-top:10px;">
+          <summary>${escapeHtml(title)}</summary>
+          <div style="border:1px solid #c9d1db;border-radius:8px;padding:8px;margin-top:6px;">${body}</div>
+        </details>
+      `;
+
+      const overviewRows = [];
+      if (visibility.leader_name && d.nation?.leader_name) {
+        overviewRows.push(`<div class="res-kv"><span>Leader</span><span>${escapeHtml(d.nation.leader_name)}</span></div>`);
+      }
+      if (visibility.alliance_name && d.nation?.alliance_name) {
+        overviewRows.push(`<div class="res-kv"><span>Alliance</span><span>${escapeHtml(d.nation.alliance_name)}</span></div>`);
+      }
+      if (visibility.about_text && d.nation?.about_text) {
+        overviewRows.push(`<div style="margin-top:8px;white-space:pre-wrap;">${escapeHtml(d.nation.about_text)}</div>`);
+      }
+      if (overviewRows.length > 0) {
+        sections.push(renderSection('Overview', overviewRows.join('')));
+      }
+
+      if (visibility.resources_base && d.resources) {
+        sections.push(renderSection(
+          'Base Resources',
+          renderKVList({ cow: 'Cow', wood: 'Wood', ore: 'Ore', food: 'Food' }, d.resources, { showZero: false }) || '<div class="muted">No base resource data visible.</div>'
+        ));
+      }
+
+      if (visibility.resources_refined) {
+        sections.push(renderSection(
+          'Refined Resources',
+          [
+            `<div style="font-size:12px;color:#666;margin-bottom:4px;">Ore-derived</div>${renderKVList(ORE_REFS, refined, { showZero: false }) || '<div class="muted" style="margin-bottom:8px;">None</div>'}`,
+            `<div style="font-size:12px;color:#666;margin:8px 0 4px;">Wood-derived</div>${renderKVList(WOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="margin-bottom:8px;">None</div>'}`,
+            `<div style="font-size:12px;color:#666;margin:8px 0 4px;">Food-derived</div>${renderKVList(FOOD_REFS, refined, { showZero: false }) || '<div class="muted">None</div>'}`,
+          ].join('')
+        ));
+      }
+
+      if (visibility.resources_currencies) {
+        sections.push(renderSection('Currencies', renderKVList(CURRENCIES, currencies, { showZero: false }) || '<div class="muted">No currency data visible.</div>'));
+      }
+
+      if (visibility.terrain && d.terrain) {
+        const terrainHtml = Object.entries(terrainSqMiles)
+          .filter(([, value]) => toFiniteNumber(value, 0) > 0)
+          .map(([key, value]) => `<div class="res-kv"><span>${escapeHtml(labelTerrainKey(key))}</span><span>${toFiniteNumber(value, 0)} sq mi (${((toFiniteNumber(value, 0) / terrainTotal) * 100).toFixed(1)}%)</span></div>`)
+          .join('') || '<div class="muted">No terrain data visible.</div>';
+        sections.push(renderSection('Terrain', terrainHtml));
+      }
+
+      if (visibility.units) {
+        const units = Array.isArray(d.units) ? d.units : extractList(d.units);
+        const unitsHtml = units.length > 0
+          ? units.map(unit => `<div class="res-kv"><span>${escapeHtml(unit.display_name || unit.custom_name || 'Unit')} x${Number(unit.qty || 0)}</span><span>${escapeHtml(unit.class_name || unit.status || 'unit')}</span></div>`).join('')
+          : '<div class="muted">No unit data visible.</div>';
+        sections.push(renderSection('Units', unitsHtml));
+      }
+
+      if (visibility.buildings) {
+        const buildings = Array.isArray(d.buildings) ? d.buildings : extractList(d.buildings);
+        const buildingsHtml = buildings.length > 0
+          ? buildings.map(building => `<div class="res-kv"><span>${escapeHtml(building.display_name || building.code || 'Building')}</span><span>L${Number(building.level || 1)}${building.status ? ` (${escapeHtml(building.status)})` : ''}</span></div>`).join('')
+          : '<div class="muted">No building data visible.</div>';
+        sections.push(renderSection('Buildings', buildingsHtml));
+      }
+
       document.getElementById('nationDetail').innerHTML = `
-        <div><strong>${d.nation.name}</strong> (${d.nation.player_name || 'Unassigned'})</div>
-        <div>Leader: ${d.nation.leader_name || '-'}</div>
-        <div>Alliance: ${d.nation.alliance_name || '-'}</div>
-        <div>About: ${d.nation.about_text || '-'}</div>
+        <div><strong>${escapeHtml(d.nation?.name || 'Unknown Nation')}</strong> (${escapeHtml(d.nation?.player_name || 'Unassigned')})</div>
+        <div class="muted" style="margin-top:4px;">Visible data is controlled by the player visibility matrix.</div>
+        ${sections.join('') || '<div class="muted" style="margin-top:10px;">No other nation details are currently visible.</div>'}
       `;
       barkIfEnabled();
     });
@@ -907,12 +1230,14 @@ async function loadShop() {
   const isAdmin = user.role === 'admin';
   const calls = [api('/api/shop/categories'), api('/api/shop/items?per_page=300'), api('/api/me/buildings?status=built')];
   if (isAdmin) calls.push(api('/api/players'));
-  const [catRes, itemRes, buildingsRes, playersRes] = await Promise.all(calls);
+  if (isAdmin) calls.push(api('/api/admin/shop/item-templates'));
+  const [catRes, itemRes, buildingsRes, playersRes, templateRes] = await Promise.all(calls);
   const cats = await catRes.json();
   const itemsPayload = await itemRes.json();
   const allItems = extractList(itemsPayload);
   const myBuildings = await buildingsRes.json();
   const allPlayers = playersRes ? await playersRes.json() : [];
+  const itemTemplates = templateRes && templateRes.ok ? await templateRes.json() : [];
 
   const buildingCounts = {};
   (Array.isArray(myBuildings) ? myBuildings : []).forEach(b => {
@@ -962,8 +1287,14 @@ async function loadShop() {
           ${isAdmin ? `<hr><h3 style="margin:8px 0;">Add Item</h3>
             <label style="font-size:12px;">Category</label>
             <select id="newShopCategory">${cats.map(c => `<option value="${c.id}">${c.display_name}</option>`).join('')}</select>
+            <label style="font-size:12px;">Template (search by name)</label>
+            <input id="newShopTemplateSearch" list="newShopTemplateList" placeholder="Type to search units/structures/items">
+            <datalist id="newShopTemplateList">
+              ${itemTemplates.map((t, i) => `<option value="${t.name}" data-idx="${i}"></option>`).join('')}
+            </datalist>
             <label style="font-size:12px;">Name</label><input id="newShopName" placeholder="Display name">
             <label style="font-size:12px;">Description / Effects</label><textarea id="newShopDescription" rows="4"></textarea>
+            <label style="font-size:12px;">Product (Purchase Effect JSON)</label><textarea id="newShopProduct" rows="4">{}</textarea>
             <div class="row"><button class="primary" id="createShopItemBtn" style="width:100%;">Create Item</button></div>
             <span class="muted" id="createShopItemMsg"></span>` : ''}
         </div>
@@ -1075,6 +1406,7 @@ async function loadShop() {
       const costObj = (() => { try { return JSON.parse(i.cost_json || '{}'); } catch { return {}; } })();
       const maintenanceObj = (() => { try { return JSON.parse(i.maintenance_json || '{}'); } catch { return {}; } })();
       const yearlyObj = (() => { try { return JSON.parse(i.yearly_effect_json || '{}'); } catch { return {}; } })();
+      const effectObj = (() => { try { return JSON.parse(i.effect_json || '{}'); } catch { return {}; } })();
       const visArr  = (() => { try { return i.visibility_json ? JSON.parse(i.visibility_json) : null; } catch { return null; } })();
 
       if (isAdmin) {
@@ -1097,6 +1429,8 @@ async function loadShop() {
               <div style="margin-top:8px;">
                 <label style="font-size:12px;">Description / Effects</label>
                 <textarea id="desc-${i.id}" rows="4">${i.description_text || ''}</textarea>
+                <label style="font-size:12px;margin-top:8px;display:block;">Product (Purchase Effect JSON)</label>
+                <textarea id="effect-${i.id}" rows="4">${JSON.stringify(effectObj || {}, null, 2)}</textarea>
                 <label style="font-size:12px;">Cost</label>
                 ${costEditorRows(costObj, i.id)}
                 <label style="font-size:12px;margin-top:8px;display:block;">Maintenance Cost</label>
@@ -1138,7 +1472,12 @@ async function loadShop() {
       if (r.ok) {
         document.getElementById('shopPurchaseMsg').textContent = 'Purchase successful.';
         loadResources();
-        loadShop();
+        const reload = await api('/api/shop/items?per_page=300');
+        if (reload && reload.ok) {
+          const refreshed = extractList(await reload.json());
+          allItems.splice(0, allItems.length, ...refreshed);
+        }
+        renderItems(activeCategory || category);
       } else {
         let reason = 'Purchase failed.';
         try {
@@ -1161,7 +1500,14 @@ async function loadShop() {
       const maintenance_json = readDynRows('maint-rows', id);
       const yearly_effect_json = readDynRows('yearly-rows', id);
       const description_text = document.getElementById(`desc-${id}`).value;
-      const r = await api(`/api/admin/shop/items/${id}`, { method: 'PUT', body: JSON.stringify({ cost_json, maintenance_json, yearly_effect_json, description_text, visibility_json }) });
+      let effect_json = {};
+      try {
+        effect_json = safeJsonParse(document.getElementById(`effect-${id}`).value, {});
+        if (!effect_json || typeof effect_json !== 'object') effect_json = {};
+      } catch {
+        effect_json = {};
+      }
+      const r = await api(`/api/admin/shop/items/${id}`, { method: 'PUT', body: JSON.stringify({ cost_json, maintenance_json, yearly_effect_json, effect_json, description_text, visibility_json }) });
       const msgEl = document.getElementById(`edit-msg-${id}`);
       if (msgEl) msgEl.textContent = r.ok ? 'Saved' : 'Failed';
       if (r.ok) {
@@ -1186,11 +1532,31 @@ async function loadShop() {
   };
 
   document.querySelectorAll('.catBtn').forEach(btn => btn.onclick = () => renderItems(btn.dataset.code));
+
+  document.getElementById('newShopTemplateSearch')?.addEventListener('input', (event) => {
+    const term = (event.target.value || '').trim().toLowerCase();
+    if (!term) return;
+    const template = (itemTemplates || []).find(t => String(t.name || '').toLowerCase() === term)
+      || (itemTemplates || []).find(t => String(t.name || '').toLowerCase().includes(term));
+    if (!template) return;
+    document.getElementById('newShopName').value = template.name || '';
+    document.getElementById('newShopDescription').value = template.description_text || '';
+    document.getElementById('newShopProduct').value = JSON.stringify(template.effect_json || {}, null, 2);
+  });
+
   document.getElementById('createShopItemBtn')?.addEventListener('click', async () => {
+    let effect_json = {};
+    try {
+      effect_json = safeJsonParse(document.getElementById('newShopProduct').value, {});
+      if (!effect_json || typeof effect_json !== 'object') effect_json = {};
+    } catch {
+      effect_json = {};
+    }
     const payload = {
       category_id: Number(document.getElementById('newShopCategory').value),
       display_name: document.getElementById('newShopName').value.trim(),
       description_text: document.getElementById('newShopDescription').value,
+      effect_json,
       cost_json: {},
     };
     const r = await api('/api/admin/shop/items', { method: 'POST', body: JSON.stringify(payload) });
@@ -1489,6 +1855,7 @@ async function loadSettings() {
       <div class="setting-group">
         <h3 style="margin:0 0 8px 0;">Sound</h3>
         <label><input type="checkbox" id="goofySound"> Goofy Sound on actions</label>
+        <label><input type="checkbox" id="showUnreadChatBadge"> Show unread chat count on Chat tab</label>
       </div>
       <div class="row"><button class="primary" id="saveSettings">Save</button></div>
     </div>
@@ -1497,6 +1864,7 @@ async function loadSettings() {
   document.getElementById('theme').value = settings.theme;
   document.getElementById('cb').value = settings.color_blind_mode;
   document.getElementById('goofySound').checked = !!settings.dog_bark_enabled;
+  document.getElementById('showUnreadChatBadge').checked = settings.show_unread_chat_badge !== false;
   document.getElementById('fontMode').value = settings.font_mode || 'normal';
 
   document.getElementById('saveSettings').onclick = async () => {
@@ -1505,12 +1873,14 @@ async function loadSettings() {
       color_blind_mode: document.getElementById('cb').value,
       dog_bark_enabled: document.getElementById('goofySound').checked,
       font_mode: document.getElementById('fontMode').value,
+      show_unread_chat_badge: document.getElementById('showUnreadChatBadge').checked,
     };
     await api('/api/me/settings', { method: 'PATCH', body: JSON.stringify(payload) });
     settings = payload;
     setTheme(settings.theme);
     applyColorBlindMode(settings.color_blind_mode);
     setFontMode(settings.font_mode);
+    refreshChatBadge();
     barkIfEnabled();
   };
 }
@@ -1622,45 +1992,17 @@ async function loadResetPasswordPage() {
 }
 
 async function loadAllNations() {
-  const [res, notificationsRes] = await Promise.all([api('/api/admin/nations'), api('/api/admin/notifications')]);
+  const [res] = await Promise.all([api('/api/admin/nations')]);
   const payload = await res.json();
   const nations = extractList(payload);
-  const notifications = await notificationsRes.json();
-  const nationOwnerById = Object.fromEntries(nations.map(n => [Number(n.id), Number(n.owner_user_id || 0)]));
-
-  const parseMeta = (n) => {
-    try { return typeof n.meta_json === 'string' ? JSON.parse(n.meta_json) : (n.meta_json || {}); } catch { return {}; }
-  };
-  const notificationRows = (notifications || []).map(n => ({ ...n, _meta: parseMeta(n) }));
-  const types = Array.from(new Set(notificationRows.map(n => n.type).filter(Boolean))).sort();
-
-  const playerIds = Array.from(new Set(notificationRows.map(n => Number(n._meta.actor_user_id || n._meta.target_user_id || nationOwnerById[Number(n._meta.nation_id)] || 0)).filter(v => v > 0))).sort((a, b) => a - b);
 
   view.innerHTML = `
     <div class="card">
       <h2>All Nations (Admin)</h2>
-      <div class="twocol">
-        <div>
-          <div class="card" style="margin-top:0;">
-            <h3 style="margin-top:0;">Nation Stats Editor</h3>
-            <div id="adminNationEditor" class="list" style="margin-bottom:12px;">Select nation to edit.</div>
-          </div>
-        </div>
-        <div>
-          <div class="notify-panel" id="adminNotificationsPanel">
-            <h3 style="margin-top:0;">Notifications</h3>
-            <div class="row">
-              <select id="notifTypeFilter" style="max-width:220px;">
-                <option value="">All Types</option>
-                ${types.map(t => `<option value="${t}">${t}</option>`).join('')}
-              </select>
-              <select id="notifPlayerFilter" style="max-width:220px;">
-                <option value="">All Players</option>
-                ${playerIds.map(id => `<option value="${id}">Player #${id}</option>`).join('')}
-              </select>
-            </div>
-            <div class="list" id="adminNotifications" style="margin-top:8px;"></div>
-          </div>
+      <div>
+        <div class="card" style="margin-top:0;">
+          <h3 style="margin-top:0;">Nation Stats Editor</h3>
+          <div id="adminNationEditor" class="list" style="margin-bottom:12px;">Select nation to edit.</div>
         </div>
       </div>
       <div class="card">
@@ -1675,46 +2017,113 @@ async function loadAllNations() {
           </div>
         </div>
       </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;">Player Visibility Matrix</h3>
+        <p class="muted" style="margin-top:0;">Control what one player can see about another player in Other Nations.</p>
+        <div class="row" style="flex-wrap:wrap;">
+          <div style="min-width:260px;flex:1;">
+            <label style="font-size:12px;">Player View (viewer)</label>
+            <select id="visViewer"></select>
+          </div>
+          <div style="min-width:260px;flex:1;">
+            <label style="font-size:12px;">Player To Be Seen (subject)</label>
+            <select id="visSubject"></select>
+          </div>
+          <button class="primary" id="loadVisibilityRulesBtn" style="align-self:flex-end;">Load Rules</button>
+        </div>
+        <div id="visRuleGrid" class="list" style="margin-top:8px;max-height:260px;">Select players to load rules.</div>
+        <div class="row"><button class="primary" id="saveVisibilityRulesBtn">Save Visibility Rules</button><span class="muted" id="saveVisibilityMsg"></span></div>
+      </div>
     </div>
   `;
 
-  const renderNotifications = () => {
-    const typeFilter = document.getElementById('notifTypeFilter').value;
-    const playerFilter = Number(document.getElementById('notifPlayerFilter').value || 0);
-    const filtered = notificationRows.filter(n => {
-      if (typeFilter && n.type !== typeFilter) return false;
-      if (playerFilter) {
-        const actor = Number(n._meta.actor_user_id || 0);
-        const target = Number(n._meta.target_user_id || 0);
-        const nationOwner = Number(nationOwnerById[Number(n._meta.nation_id || 0)] || 0);
-        if (actor !== playerFilter && target !== playerFilter && nationOwner !== playerFilter) return false;
+  const playersRes = await api('/api/players');
+  const visFieldsRes = await api('/api/admin/visibility/fields');
+  const players = playersRes && playersRes.ok ? (await playersRes.json()) : [];
+  const visFields = visFieldsRes && visFieldsRes.ok ? (await visFieldsRes.json()) : [];
+
+  const visViewer = document.getElementById('visViewer');
+  const visSubject = document.getElementById('visSubject');
+  const playerOptions = (players || []).map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  visViewer.innerHTML = `<option value="">Select viewer</option>${playerOptions}`;
+  visSubject.innerHTML = `<option value="">Select subject</option>${playerOptions}`;
+
+  const renderVisGrid = (ruleMap = {}) => {
+    document.getElementById('visRuleGrid').innerHTML = visFields.map(field => `
+      <label style="display:flex;align-items:center;justify-content:space-between;padding:6px 4px;border-bottom:1px solid #d7dee7;">
+        <span>${field.label}</span>
+        <input type="checkbox" class="vis-rule-box" data-key="${field.key}" ${ruleMap[field.key] !== false ? 'checked' : ''}>
+      </label>
+    `).join('') || '<div class="muted">No visibility fields configured.</div>';
+  };
+  renderVisGrid();
+
+  const syncVisibilitySelectors = (changedField = '') => {
+    const viewerValue = visViewer.value;
+    const subjectValue = visSubject.value;
+
+    Array.from(visViewer.options).forEach(option => {
+      option.disabled = option.value !== '' && option.value === subjectValue;
+    });
+    Array.from(visSubject.options).forEach(option => {
+      option.disabled = option.value !== '' && option.value === viewerValue;
+    });
+
+    if (viewerValue !== '' && viewerValue === subjectValue) {
+      if (changedField === 'viewer') {
+        visSubject.value = '';
+      } else if (changedField === 'subject') {
+        visViewer.value = '';
       }
-      return true;
-    });
-
-    document.getElementById('adminNotifications').innerHTML = filtered.map(n => `<div class="notify-item">
-      <div class="notify-head">
-        <div>
-          <div style="font-weight:700;">${n.title}</div>
-          <div class="muted" style="font-size:12px;">${n.created_at || ''}</div>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <span class="notify-type">${n.type}</span>
-          <button class="primary deleteNotif" data-id="${n.id}" style="background:#8a1a1a;">Delete</button>
-        </div>
-      </div>
-      <div style="font-size:13px;white-space:pre-wrap;margin-top:8px;">${n.body}</div>
-    </div>`).join('') || '<div class="muted">No notifications</div>';
-
-    document.querySelectorAll('.deleteNotif').forEach(btn => btn.onclick = async () => {
-      const del = await api('/api/admin/notifications/' + btn.dataset.id, { method: 'DELETE' });
-      if (del.ok) loadAllNations();
-    });
+      document.getElementById('saveVisibilityMsg').textContent = 'Viewer and subject must be different players.';
+    }
   };
 
-  document.getElementById('notifTypeFilter').onchange = renderNotifications;
-  document.getElementById('notifPlayerFilter').onchange = renderNotifications;
-  renderNotifications();
+  visViewer.addEventListener('change', () => syncVisibilitySelectors('viewer'));
+  visSubject.addEventListener('change', () => syncVisibilitySelectors('subject'));
+  syncVisibilitySelectors();
+
+  document.getElementById('loadVisibilityRulesBtn').onclick = async () => {
+    const viewer = Number(visViewer.value || 0);
+    const subject = Number(visSubject.value || 0);
+    if (!viewer || !subject) {
+      document.getElementById('saveVisibilityMsg').textContent = 'Select both viewer and subject first.';
+      return;
+    }
+    const res = await api(`/api/admin/visibility/rules?viewer_user_id=${viewer}&subject_user_id=${subject}`);
+    if (!res || !res.ok) {
+      document.getElementById('saveVisibilityMsg').textContent = 'Failed to load rules.';
+      return;
+    }
+    const rows = await res.json();
+    const map = {};
+    rows.forEach(rule => { map[rule.field_key] = !!rule.is_allowed; });
+    renderVisGrid(map);
+    document.getElementById('saveVisibilityMsg').textContent = 'Rules loaded.';
+  };
+
+  document.getElementById('saveVisibilityRulesBtn').onclick = async () => {
+    const viewer = Number(visViewer.value || 0);
+    const subject = Number(visSubject.value || 0);
+    if (!viewer || !subject) {
+      document.getElementById('saveVisibilityMsg').textContent = 'Select both viewer and subject first.';
+      return;
+    }
+    if (viewer === subject) {
+      document.getElementById('saveVisibilityMsg').textContent = 'Viewer and subject must be different players.';
+      return;
+    }
+    const rules = Array.from(document.querySelectorAll('.vis-rule-box')).map(box => ({
+      field_key: box.dataset.key,
+      is_allowed: box.checked,
+    }));
+    const res = await api('/api/admin/visibility/rules', {
+      method: 'PUT',
+      body: JSON.stringify({ viewer_user_id: viewer, subject_user_id: subject, rules }),
+    });
+    document.getElementById('saveVisibilityMsg').textContent = res && res.ok ? 'Visibility rules saved.' : 'Failed to save rules.';
+  };
 
   const openEditor = async (id) => {
     const detailRes = await api('/api/nations/' + id);
@@ -1783,17 +2192,33 @@ async function loadAllNations() {
       <div class="row"><button class="primary" id="saveNation">Save Nation</button><span class="muted" id="saveNationMsg"></span></div>
 
       <hr style="margin:12px 0;">
+      <h3 style="margin:0 0 8px;">Owned Units / Buildings</h3>
+      <details open style="margin-bottom:8px;">
+        <summary>Units (${(d.units || []).length})</summary>
+        <div class="list" style="max-height:160px;">${(d.units || []).map(u => `<div>${u.display_name || 'Unit'} x${u.qty} (${u.status})</div>`).join('') || '<div class="muted">No units</div>'}</div>
+      </details>
+      <details open style="margin-bottom:8px;">
+        <summary>Buildings (${(d.buildings || []).length})</summary>
+        <div class="list" style="max-height:160px;">${(d.buildings || []).map(b => `<div>${b.display_name} L${b.level} (${b.status})</div>`).join('') || '<div class="muted">No buildings</div>'}</div>
+      </details>
+
+      <hr style="margin:12px 0;">
       <h3 style="margin:0 0 8px;">Add Unit</h3>
       <div id="unitCatArea" class="muted">Loading units…</div>
       <div class="row" style="margin-top:6px;"><button class="primary" id="addUnitBtn">Add Unit</button><span class="muted" id="addUnitMsg"></span></div>
     `;
 
-    // Load unit catalog for the admin unit-add form
+    const unitCatalogRes = await api('/api/admin/unit-catalog');
+    const unitCatalog = unitCatalogRes && unitCatalogRes.ok ? await unitCatalogRes.json() : [];
     document.getElementById('unitCatArea').innerHTML = `
-      <label style="font-size:13px;">Unit Catalog ID</label>
-      <input id="unitCatId" type="number" placeholder="e.g. 6" style="margin-bottom:4px;">
+      <label style="font-size:13px;">Unit</label>
+      <select id="unitCatId" style="margin-bottom:4px;">
+        ${unitCatalog.map(u => `<option value="${u.id}">${u.display_name} [${u.class_name || 'unit'}]</option>`).join('')}
+      </select>
       <label style="font-size:13px;">Quantity</label>
-      <input id="unitQty" type="number" value="1">
+      <input id="unitQty" type="number" value="1" min="1">
+      <label style="font-size:13px;">Status</label>
+      <select id="unitStatus"><option value="owned">Owned</option><option value="training">Training</option></select>
     `;
 
     document.getElementById('saveNation').onclick = async () => {
@@ -1843,9 +2268,13 @@ async function loadAllNations() {
     document.getElementById('addUnitBtn').onclick = async () => {
       const unitCatalogId = Number(document.getElementById('unitCatId').value);
       const qty = Number(document.getElementById('unitQty').value);
+      const status = document.getElementById('unitStatus').value;
       if (!unitCatalogId) { document.getElementById('addUnitMsg').textContent = 'Enter a unit catalog ID'; return; }
-      const r = await api('/api/admin/nations/' + id + '/units', { method: 'POST', body: JSON.stringify({ unit_catalog_id: unitCatalogId, qty, status: 'owned' }) });
+      const r = await api('/api/admin/nations/' + id + '/units', { method: 'POST', body: JSON.stringify({ unit_catalog_id: unitCatalogId, qty, status }) });
       document.getElementById('addUnitMsg').textContent = r.ok ? 'Added!' : 'Failed';
+      if (r.ok) {
+        openEditor(id);
+      }
       barkIfEnabled();
     };
   };
@@ -1856,6 +2285,181 @@ async function loadAllNations() {
     await api('/api/admin/nations', { method: 'POST', body: JSON.stringify({ name }) });
     loadAllNations();
     barkIfEnabled();
+  };
+}
+
+async function loadNotifications() {
+  const [notifRes, nationsRes] = await Promise.all([api('/api/admin/notifications'), api('/api/admin/nations')]);
+  const notifications = await notifRes.json();
+  const nations = extractList(await nationsRes.json());
+  const nationOwnerById = Object.fromEntries(nations.map(n => [Number(n.id), Number(n.owner_user_id || 0)]));
+
+  const parseMeta = (n) => {
+    try { return typeof n.meta_json === 'string' ? JSON.parse(n.meta_json) : (n.meta_json || {}); } catch { return {}; }
+  };
+  const rows = (notifications || []).map(n => ({ ...n, _meta: parseMeta(n) }));
+  const types = Array.from(new Set(rows.map(n => n.type).filter(Boolean))).sort();
+  const players = Array.from(new Set(rows.map(n => Number(n._meta.actor_user_id || n._meta.target_user_id || nationOwnerById[Number(n._meta.nation_id)] || 0)).filter(v => v > 0))).sort((a, b) => a - b);
+
+  const savedType = localStorage.getItem('azveria_notif_type') || '';
+  const savedPlayer = localStorage.getItem('azveria_notif_player') || '';
+  const savedText = localStorage.getItem('azveria_notif_text') || '';
+
+  view.innerHTML = `
+    <div class="card">
+      <h2>Notifications</h2>
+      <div class="notify-panel">
+        <div class="row" style="flex-wrap:wrap;">
+          <select id="notifTypeFilter" style="max-width:220px;">
+            <option value="">All Types</option>
+            ${types.map(t => `<option value="${t}" ${savedType === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
+          <select id="notifPlayerFilter" style="max-width:220px;">
+            <option value="">All Players</option>
+            ${players.map(id => `<option value="${id}" ${savedPlayer === String(id) ? 'selected' : ''}>Player #${id}</option>`).join('')}
+          </select>
+          <input id="notifTextFilter" placeholder="Search title/body" value="${savedText.replace(/"/g, '&quot;')}" style="max-width:260px;">
+          <button class="primary" id="notifClearFilters" style="background:#314f72;">Clear Filters</button>
+        </div>
+        <div class="list" id="adminNotifications" style="margin-top:8px;"></div>
+      </div>
+    </div>
+  `;
+
+  const renderNotifications = () => {
+    const typeFilter = document.getElementById('notifTypeFilter').value;
+    const playerFilter = Number(document.getElementById('notifPlayerFilter').value || 0);
+    const textFilter = (document.getElementById('notifTextFilter').value || '').trim().toLowerCase();
+
+    localStorage.setItem('azveria_notif_type', typeFilter);
+    localStorage.setItem('azveria_notif_player', document.getElementById('notifPlayerFilter').value || '');
+    localStorage.setItem('azveria_notif_text', document.getElementById('notifTextFilter').value || '');
+
+    const filtered = rows.filter(n => {
+      if (typeFilter && n.type !== typeFilter) return false;
+      if (playerFilter) {
+        const actor = Number(n._meta.actor_user_id || 0);
+        const target = Number(n._meta.target_user_id || 0);
+        const nationOwner = Number(nationOwnerById[Number(n._meta.nation_id || 0)] || 0);
+        if (actor !== playerFilter && target !== playerFilter && nationOwner !== playerFilter) return false;
+      }
+      if (textFilter) {
+        const hay = `${n.title || ''} ${n.body || ''}`.toLowerCase();
+        if (!hay.includes(textFilter)) return false;
+      }
+      return true;
+    });
+
+    document.getElementById('adminNotifications').innerHTML = filtered.map(n => `<details class="notify-item">
+      <summary class="notify-head">
+        <div>
+          <div style="font-weight:700;">${n.title}</div>
+          <div class="muted" style="font-size:12px;">${n.created_at || ''}</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span class="notify-type">${n.type}</span>
+          <button class="primary deleteNotif" data-id="${n.id}" style="background:#8a1a1a;" type="button">Delete</button>
+        </div>
+      </summary>
+      <div style="font-size:13px;white-space:pre-wrap;margin-top:8px;">${n.body}</div>
+    </details>`).join('') || '<div class="muted">No notifications</div>';
+
+    document.querySelectorAll('.deleteNotif').forEach(btn => btn.onclick = async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const del = await api('/api/admin/notifications/' + btn.dataset.id, { method: 'DELETE' });
+      if (del.ok) loadNotifications();
+    });
+  };
+
+  document.getElementById('notifTypeFilter').onchange = renderNotifications;
+  document.getElementById('notifPlayerFilter').onchange = renderNotifications;
+  document.getElementById('notifTextFilter').oninput = renderNotifications;
+  document.getElementById('notifClearFilters').onclick = () => {
+    document.getElementById('notifTypeFilter').value = '';
+    document.getElementById('notifPlayerFilter').value = '';
+    document.getElementById('notifTextFilter').value = '';
+    renderNotifications();
+  };
+
+  renderNotifications();
+}
+
+async function loadGameInformationRules() {
+  const listRes = await api('/api/admin/game-documents');
+  const docs = listRes && listRes.ok ? await listRes.json() : [];
+
+  view.innerHTML = `
+    <div class="card">
+      <h2>Game Information and Rules</h2>
+      <p class="muted">Select a document, view read-only text, then click Edit to modify and Save.</p>
+      <div class="row" style="flex-wrap:wrap;">
+        <div style="min-width:300px;flex:1;">
+          <label style="font-size:12px;">Document</label>
+          <select id="gameDocSelect">
+            <option value="">Select document</option>
+            ${docs.map(d => `<option value="${d.code}">${d.title}</option>`).join('')}
+          </select>
+        </div>
+        <button class="primary" id="gameDocEditBtn" style="align-self:flex-end;background:#314f72;" disabled>Edit</button>
+        <button class="primary" id="gameDocSaveBtn" style="align-self:flex-end;display:none;" disabled>Save</button>
+        <span class="muted" id="gameDocMsg"></span>
+      </div>
+      <textarea id="gameDocText" rows="22" readonly style="margin-top:8px;font-family:Consolas, 'Courier New', monospace;"></textarea>
+    </div>
+  `;
+
+  let currentCode = '';
+  let editMode = false;
+
+  const select = document.getElementById('gameDocSelect');
+  const text = document.getElementById('gameDocText');
+  const editBtn = document.getElementById('gameDocEditBtn');
+  const saveBtn = document.getElementById('gameDocSaveBtn');
+  const msg = document.getElementById('gameDocMsg');
+
+  const setMode = (isEdit) => {
+    editMode = isEdit;
+    text.readOnly = !isEdit;
+    editBtn.style.display = isEdit ? 'none' : 'inline-block';
+    saveBtn.style.display = isEdit ? 'inline-block' : 'none';
+    saveBtn.disabled = !currentCode;
+  };
+
+  select.onchange = async () => {
+    currentCode = select.value;
+    text.value = '';
+    msg.textContent = '';
+    editBtn.disabled = !currentCode;
+    if (!currentCode) {
+      setMode(false);
+      return;
+    }
+    const res = await api('/api/admin/game-documents/' + currentCode);
+    if (!res || !res.ok) {
+      msg.textContent = 'Failed to load document.';
+      return;
+    }
+    const doc = await res.json();
+    text.value = doc.content_text || '';
+    setMode(false);
+  };
+
+  editBtn.onclick = () => {
+    if (!currentCode) return;
+    setMode(true);
+  };
+
+  saveBtn.onclick = async () => {
+    if (!currentCode) return;
+    const res = await api('/api/admin/game-documents/' + currentCode, {
+      method: 'PUT',
+      body: JSON.stringify({ content_text: text.value }),
+    });
+    msg.textContent = res && res.ok ? 'Saved.' : 'Save failed.';
+    if (res && res.ok) {
+      setMode(false);
+    }
   };
 }
 
@@ -1891,7 +2495,7 @@ async function loadTimeTracker() {
         <input id="ttCurrentYear" type="number" min="1" step="1" value="${d.current_game_year}">
       </div>
       <div class="row">
-        <label><input id="ttApplyYearEffects" type="checkbox"> Apply income/maintenance when changing year</label>
+        <label><input id="ttApplyYearEffects" type="checkbox" ${settings?.apply_year_change_effects ? 'checked' : ''}> Apply income/maintenance when changing year</label>
       </div>
       <div class="row">
         <button class="primary" id="ttSave">Save Time Settings</button>
@@ -1903,15 +2507,21 @@ async function loadTimeTracker() {
   `;
 
   document.getElementById('ttSave').onclick = async () => {
+    const applyYearChangeEffects = document.getElementById('ttApplyYearEffects').checked;
     const payload = {
       auto_increment_enabled: document.getElementById('ttAuto').checked,
       hours_per_year: Number(document.getElementById('ttHoursPerYear').value || 48),
       elapsed_hours_in_year: Number(document.getElementById('ttElapsedHours').value || 0),
       current_game_year: Number(document.getElementById('ttCurrentYear').value || 1),
-      apply_year_change_effects: document.getElementById('ttApplyYearEffects').checked,
+      apply_year_change_effects: applyYearChangeEffects,
     };
     const save = await api('/api/admin/time-tracker', { method: 'PATCH', body: JSON.stringify(payload) });
     document.getElementById('ttMsg').textContent = save.ok ? 'Saved' : 'Failed';
+    settings.apply_year_change_effects = applyYearChangeEffects;
+    await api('/api/me/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ apply_year_change_effects: applyYearChangeEffects }),
+    });
     if (save.ok) loadTimeTracker();
     barkIfEnabled();
   };
@@ -1948,7 +2558,20 @@ async function init() {
     loadForcedPasswordReset();
     return;
   }
+  initMenuToggle();
   renderNav();
+}
+
+function initMenuToggle() {
+  const btn = document.getElementById('menuToggle');
+  const savedCollapsed = localStorage.getItem('azveria_menu_collapsed') === '1';
+  if (savedCollapsed) {
+    document.body.classList.add('menu-collapsed');
+  }
+  btn.addEventListener('click', () => {
+    document.body.classList.toggle('menu-collapsed');
+    localStorage.setItem('azveria_menu_collapsed', document.body.classList.contains('menu-collapsed') ? '1' : '0');
+  });
 }
 
 const helpSelect = document.getElementById('helpSelect');
@@ -1958,6 +2581,9 @@ helpSelect.addEventListener('change', async (e) => {
   }
   if (e.target.value === 'docs') {
     window.open(user.role === 'admin' ? '/docs/developer' : '/docs/player', '_blank');
+  }
+  if (e.target.value === 'report-issue') {
+    window.open('https://github.com/TheBuilderHero/AzveriaOnline/issues', '_blank', 'noopener,noreferrer');
   }
   if (e.target.value === 'reset-password') {
     await loadResetPasswordPage();

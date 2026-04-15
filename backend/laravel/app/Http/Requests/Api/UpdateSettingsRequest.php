@@ -18,6 +18,7 @@ class UpdateSettingsRequest extends FormRequest
             'color_blind_mode' => ['nullable', 'in:none,protanopia,deuteranopia,tritanopia'],
             'dog_bark_enabled' => ['nullable', 'boolean'],
             'font_mode' => ['nullable', 'in:normal,fun,cool_person'],
+            'show_unread_chat_badge' => ['nullable', 'boolean'],
         ];
     }
 }

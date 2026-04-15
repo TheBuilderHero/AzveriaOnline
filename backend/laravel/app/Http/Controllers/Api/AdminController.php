@@ -11,6 +11,8 @@ use App\Models\User;
 use App\Services\AccountService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
@@ -209,6 +211,206 @@ class AdminController extends Controller
         return response()->json(['message' => 'Unit added']);
     }
 
+    public function unitCatalog()
+    {
+        $rows = DB::table('unit_catalog')
+            ->select('id', 'code', 'display_name', 'class_name', 'unlocked_by_structure')
+            ->orderBy('display_name')
+            ->get();
+
+        return response()->json($rows);
+    }
+
+    public function visibilityFields()
+    {
+        return response()->json([
+            ['key' => 'leader_name', 'label' => 'Leader Name'],
+            ['key' => 'alliance_name', 'label' => 'Alliance Name'],
+            ['key' => 'about_text', 'label' => 'About Text'],
+            ['key' => 'resources_base', 'label' => 'Base Resources'],
+            ['key' => 'resources_refined', 'label' => 'Refined Resources'],
+            ['key' => 'resources_currencies', 'label' => 'Currencies'],
+            ['key' => 'terrain', 'label' => 'Terrain'],
+            ['key' => 'units', 'label' => 'Units'],
+            ['key' => 'buildings', 'label' => 'Buildings'],
+        ]);
+    }
+
+    public function visibilityRules(Request $request)
+    {
+        $data = $request->validate([
+            'viewer_user_id' => ['required', 'integer', 'exists:users,id'],
+            'subject_user_id' => ['required', 'integer', 'exists:users,id'],
+        ]);
+
+        $this->ensureDistinctVisibilityPair((int) $data['viewer_user_id'], (int) $data['subject_user_id']);
+
+        $rows = DB::table('player_visibility_rules')
+            ->where('viewer_user_id', (int) $data['viewer_user_id'])
+            ->where('subject_user_id', (int) $data['subject_user_id'])
+            ->get();
+
+        return response()->json($rows);
+    }
+
+    public function updateVisibilityRules(Request $request)
+    {
+        $data = $request->validate([
+            'viewer_user_id' => ['required', 'integer', 'exists:users,id'],
+            'subject_user_id' => ['required', 'integer', 'exists:users,id'],
+            'rules' => ['required', 'array'],
+            'rules.*.field_key' => ['required', 'string', 'max:80'],
+            'rules.*.is_allowed' => ['required', 'boolean'],
+        ]);
+
+        $viewer = (int) $data['viewer_user_id'];
+        $subject = (int) $data['subject_user_id'];
+
+        $this->ensureDistinctVisibilityPair($viewer, $subject);
+
+        DB::table('player_visibility_rules')
+            ->where('viewer_user_id', $viewer)
+            ->where('subject_user_id', $subject)
+            ->delete();
+
+        foreach ($data['rules'] as $rule) {
+            DB::table('player_visibility_rules')->insert([
+                'viewer_user_id' => $viewer,
+                'subject_user_id' => $subject,
+                'field_key' => (string) $rule['field_key'],
+                'is_allowed' => (int) ((bool) $rule['is_allowed']),
+                'updated_at' => now(),
+            ]);
+        }
+
+        return response()->json(['message' => 'Visibility rules saved']);
+    }
+
+    public function gameDocuments()
+    {
+        $rows = collect($this->gameDocumentDefinitions())
+            ->map(function (array $document) {
+                $path = $this->gameDocumentPath($document['filename']);
+                $updatedAt = File::exists($path) ? date('c', File::lastModified($path)) : null;
+
+                if ($updatedAt === null && Schema::hasTable('game_documents')) {
+                    $updatedAt = DB::table('game_documents')
+                        ->where('code', $document['code'])
+                        ->value('updated_at');
+                }
+
+                return [
+                    'code' => $document['code'],
+                    'title' => $document['title'],
+                    'updated_at' => $updatedAt,
+                ];
+            })
+            ->sortBy('title')
+            ->values();
+
+        return response()->json($rows);
+    }
+
+    public function gameDocument(string $code)
+    {
+        $document = $this->findGameDocument($code);
+        if ($document === null) {
+            return response()->json(['message' => 'Game information document not found'], 404);
+        }
+
+        $content = null;
+        $path = $this->gameDocumentPath($document['filename']);
+        if (File::exists($path)) {
+            $content = File::get($path);
+        } elseif (Schema::hasTable('game_documents')) {
+            $content = DB::table('game_documents')->where('code', $code)->value('content_text');
+        }
+
+        if ($content === null) {
+            return response()->json(['message' => 'Game information document not found'], 404);
+        }
+
+        return response()->json([
+            'code' => $document['code'],
+            'title' => $document['title'],
+            'content_text' => $content,
+            'updated_at' => File::exists($path) ? date('c', File::lastModified($path)) : null,
+        ]);
+    }
+
+    public function updateGameDocument(Request $request, string $code)
+    {
+        $data = $request->validate([
+            'content_text' => ['required', 'string'],
+            'title' => ['sometimes', 'string', 'max:200'],
+        ]);
+
+        $document = $this->findGameDocument($code);
+        if ($document === null) {
+            return response()->json(['message' => 'Game information document not found'], 404);
+        }
+
+        File::ensureDirectoryExists($this->gameDocumentRoot());
+        File::put($this->gameDocumentPath($document['filename']), $data['content_text']);
+
+        if (Schema::hasTable('game_documents')) {
+            DB::table('game_documents')->updateOrInsert(
+                ['code' => $code],
+                [
+                    'title' => $data['title'] ?? $document['title'],
+                    'content_text' => $data['content_text'],
+                    'updated_by_user_id' => $request->user()->id,
+                    'updated_at' => now(),
+                ]
+            );
+        }
+
+        return response()->json(['message' => 'Game information document saved']);
+    }
+
+    public function shopItemTemplates()
+    {
+        $templates = [];
+
+        $existingItems = DB::table('shop_items')
+            ->select('display_name', 'description_text', 'effect_json')
+            ->orderBy('display_name')
+            ->get();
+        foreach ($existingItems as $item) {
+            $templates[] = [
+                'name' => $item->display_name,
+                'description_text' => (string) ($item->description_text ?? ''),
+                'effect_json' => json_decode($item->effect_json ?? '{}', true) ?: new \stdClass(),
+                'source' => 'existing_shop_item',
+            ];
+        }
+
+        $units = DB::table('unit_catalog')->select('code', 'display_name', 'class_name')->orderBy('display_name')->get();
+        foreach ($units as $unit) {
+            $templates[] = [
+                'name' => 'Recruit ' . $unit->display_name,
+                'description_text' => 'Recruit one ' . $unit->display_name . ' (' . ($unit->class_name ?: 'unit') . ').',
+                'effect_json' => [
+                    'unit_code' => $unit->code,
+                    'qty' => 1,
+                ],
+                'source' => 'unit_catalog',
+            ];
+        }
+
+        $buildings = DB::table('building_catalog')->select('code', 'display_name')->orderBy('display_name')->get();
+        foreach ($buildings as $building) {
+            $templates[] = [
+                'name' => $building->display_name . ' (L1)',
+                'description_text' => 'Adds one level 1 ' . $building->display_name . ' structure.',
+                'effect_json' => new \stdClass(),
+                'source' => 'building_catalog',
+            ];
+        }
+
+        return response()->json($templates);
+    }
+
     public function createManagedAccount(Request $request)
     {
         $data = $request->validate([
@@ -308,7 +510,7 @@ class AdminController extends Controller
         foreach (array_unique($data['member_ids']) as $userId) {
             DB::table('chat_members')->updateOrInsert(
                 ['chat_id' => $chatId, 'user_id' => $userId],
-                []
+                ['archived_at' => null, 'deleted_at' => null]
             );
         }
 
@@ -448,6 +650,54 @@ class AdminController extends Controller
     {
         DB::table('admin_notifications')->where('id', $notificationId)->delete();
         return response()->json(['message' => 'Notification deleted']);
+    }
+
+    private function ensureDistinctVisibilityPair(int $viewerUserId, int $subjectUserId): void
+    {
+        if ($viewerUserId === $subjectUserId) {
+            throw ValidationException::withMessages([
+                'subject_user_id' => ['Viewer and subject must be different players.'],
+            ]);
+        }
+    }
+
+    private function findGameDocument(string $code): ?array
+    {
+        foreach ($this->gameDocumentDefinitions() as $document) {
+            if ($document['code'] === $code) {
+                return $document;
+            }
+        }
+
+        return null;
+    }
+
+    private function gameDocumentRoot(): string
+    {
+        return base_path('..' . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'docs' . DIRECTORY_SEPARATOR . 'game-information');
+    }
+
+    private function gameDocumentPath(string $filename): string
+    {
+        return $this->gameDocumentRoot() . DIRECTORY_SEPARATOR . $filename;
+    }
+
+    private function gameDocumentDefinitions(): array
+    {
+        return [
+            ['code' => 'reptonians', 'title' => 'Reptonians', 'filename' => 'reptonians.md'],
+            ['code' => 'elves', 'title' => 'Elves', 'filename' => 'elves.md'],
+            ['code' => 'kilonites', 'title' => 'Kilonites', 'filename' => 'kilonites.md'],
+            ['code' => 'goblins', 'title' => 'Goblins', 'filename' => 'goblins.md'],
+            ['code' => 'testudians', 'title' => 'Testudians', 'filename' => 'testudians.md'],
+            ['code' => 'zeptins', 'title' => 'Zeptins', 'filename' => 'zeptins.md'],
+            ['code' => 'centaurs', 'title' => 'Centaurs', 'filename' => 'centaurs.md'],
+            ['code' => 'dwarves', 'title' => 'Dwarves', 'filename' => 'dwarves.md'],
+            ['code' => 'humans', 'title' => 'Humans', 'filename' => 'humans.md'],
+            ['code' => 'structures_and_terrain', 'title' => 'Structures and Terrain', 'filename' => 'structures_and_terrain.md'],
+            ['code' => 'war_rules_and_such', 'title' => 'War Rules and Such', 'filename' => 'war_rules_and_such.md'],
+            ['code' => 'rules_and_resources', 'title' => 'Rules and Resources', 'filename' => 'rules_and_resources.md'],
+        ];
     }
 
     public function timeTracker()

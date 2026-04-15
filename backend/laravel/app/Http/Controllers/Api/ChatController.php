@@ -8,6 +8,7 @@ use App\Http\Requests\Api\StoreChatRequest;
 use App\Models\Chat;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ChatController extends Controller
 {
@@ -15,8 +16,9 @@ class ChatController extends Controller
     {
         $this->authorize('viewAny', Chat::class);
         $userId = (int) $request->user()->id;
+        $supportsLastReadTracking = $this->supportsLastReadTracking();
 
-        $chats = DB::table('chats as c')
+        $query = DB::table('chats as c')
             ->leftJoin('chat_members as cm', function ($j) use ($request) {
                 $j->on('c.id', '=', 'cm.chat_id')
                   ->where('cm.user_id', '=', $request->user()->id);
@@ -33,13 +35,29 @@ class ChatController extends Controller
                         });
                 });
             })
-            ->select('c.*', 'cm.archived_at as membership_archived_at', 'cm.deleted_at as membership_deleted_at')
+            ->select('c.*', 'cm.archived_at as membership_archived_at', 'cm.deleted_at as membership_deleted_at');
+
+        if ($supportsLastReadTracking) {
+            $query->addSelect('cm.last_read_message_id');
+        } else {
+            $query->selectRaw('NULL as last_read_message_id');
+        }
+
+        $chats = $query
             ->orderByDesc('c.updated_at')
             ->get()
-            ->map(function ($chat) use ($userId) {
+            ->map(function ($chat) use ($userId, $supportsLastReadTracking) {
                 $chat->is_archived = $chat->membership_archived_at !== null;
                 $chat->is_deleted = $chat->membership_deleted_at !== null;
                 $chat->can_manage_membership = !($chat->type === 'global' && $chat->created_by_user_id !== $userId);
+                $lastReadMessageId = $supportsLastReadTracking ? (int) ($chat->last_read_message_id ?? 0) : 0;
+                $chat->unread_messages = DB::table('chat_messages')
+                    ->where('chat_id', $chat->id)
+                    ->when($supportsLastReadTracking, function ($messageQuery) use ($lastReadMessageId) {
+                        $messageQuery->where('id', '>', $lastReadMessageId);
+                    })
+                    ->where('sender_user_id', '!=', $userId)
+                    ->count();
                 return $chat;
             })
             ->values();
@@ -50,6 +68,10 @@ class ChatController extends Controller
     public function store(StoreChatRequest $request)
     {
         $data = $request->validated();
+        $memberState = ['archived_at' => null, 'deleted_at' => null];
+        if ($this->supportsLastReadTracking()) {
+            $memberState['last_read_message_id'] = null;
+        }
 
         $chatId = DB::table('chats')->insertGetId([
             'name' => $data['name'],
@@ -63,7 +85,7 @@ class ChatController extends Controller
         foreach ($memberIds as $userId) {
             DB::table('chat_members')->updateOrInsert(
                 ['chat_id' => $chatId, 'user_id' => $userId],
-                ['archived_at' => null, 'deleted_at' => null]
+                $memberState
             );
         }
 
@@ -86,11 +108,54 @@ class ChatController extends Controller
         return response()->json($messages);
     }
 
+    public function markRead(Request $request, int $chatId)
+    {
+        $chat = Chat::findOrFail($chatId);
+        $this->authorize('view', $chat);
+
+        if (!$this->supportsLastReadTracking()) {
+            return response()->json(['message' => 'Chat read tracking is not available until the latest manual upgrade is applied.'], 409);
+        }
+
+        DB::table('chat_members')->updateOrInsert(
+            ['chat_id' => $chatId, 'user_id' => $request->user()->id],
+            [
+                'archived_at' => null,
+                'deleted_at' => null,
+                'last_read_message_id' => $this->latestMessageId($chatId),
+            ]
+        );
+
+        return response()->json(['message' => 'Chat marked as read']);
+    }
+
+    public function markUnread(Request $request, int $chatId)
+    {
+        $chat = Chat::findOrFail($chatId);
+        $this->authorize('view', $chat);
+
+        if (!$this->supportsLastReadTracking()) {
+            return response()->json(['message' => 'Chat read tracking is not available until the latest manual upgrade is applied.'], 409);
+        }
+
+        DB::table('chat_members')->updateOrInsert(
+            ['chat_id' => $chatId, 'user_id' => $request->user()->id],
+            [
+                'archived_at' => null,
+                'deleted_at' => null,
+                'last_read_message_id' => 0,
+            ]
+        );
+
+        return response()->json(['message' => 'Chat marked as unread']);
+    }
+
     public function send(SendChatMessageRequest $request, int $chatId)
     {
         $chat = Chat::findOrFail($chatId);
         $this->authorize('sendMessage', $chat);
         $data = $request->validated();
+        $memberState = ['archived_at' => null, 'deleted_at' => null];
 
         // Auto-add to global chat membership on first message
         if ($chat->type === 'global') {
@@ -99,17 +164,15 @@ class ChatController extends Controller
                 ->where('user_id', $request->user()->id)
                 ->exists();
             if (!$isMember) {
-                DB::table('chat_members')->insert([
+                DB::table('chat_members')->insert(array_merge([
                     'chat_id' => $chatId,
                     'user_id' => $request->user()->id,
-                    'archived_at' => null,
-                    'deleted_at' => null,
-                ]);
+                ], $memberState));
             } else {
                 DB::table('chat_members')
                     ->where('chat_id', $chatId)
                     ->where('user_id', $request->user()->id)
-                    ->update(['archived_at' => null, 'deleted_at' => null]);
+                    ->update($memberState);
             }
         }
 
@@ -121,6 +184,11 @@ class ChatController extends Controller
         ]);
 
         DB::table('chats')->where('id', $chatId)->update(['updated_at' => now()]);
+
+        // If a user deleted this chat previously, a new message should make it visible again.
+        DB::table('chat_members')
+            ->where('chat_id', $chatId)
+            ->update(['deleted_at' => null]);
 
         return response()->json(['id' => $id, 'message' => 'Sent'], 201);
     }
@@ -162,5 +230,21 @@ class ChatController extends Controller
         );
 
         return response()->json(['message' => 'Chat removed from your list']);
+    }
+
+    private function latestMessageId(int $chatId): int
+    {
+        return (int) (DB::table('chat_messages')->where('chat_id', $chatId)->max('id') ?? 0);
+    }
+
+    private function supportsLastReadTracking(): bool
+    {
+        static $supportsLastReadTracking = null;
+
+        if ($supportsLastReadTracking === null) {
+            $supportsLastReadTracking = Schema::hasColumn('chat_members', 'last_read_message_id');
+        }
+
+        return $supportsLastReadTracking;
     }
 }
