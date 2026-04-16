@@ -4,8 +4,8 @@ return [
     'about' => [
         'title' => 'About Azveria Online',
         'subtitle' => 'A browser-based strategy sandbox for managing nations, resources, diplomacy, and live communications.',
-        'website_version' => '1.1.0 Beta',
-        'game_version' => 'Azveria Ruleset v1',
+        'website_version' => '1.0.0.1 Alpha',
+        'game_version' => 'Azveria Ruleset v1.0 Alpha',
         'admin' => 'Isaac',
         'developer' => 'Dakota',
         'sections' => [
