@@ -166,10 +166,13 @@ class AdminController extends Controller
                 $terrain?->square_miles_json ? (json_decode($terrain->square_miles_json, true) ?: []) : [],
                 $data['terrain_square_miles']
             );
-            DB::table('nation_terrain_stats')->where('nation_id', $nationId)->update(array_merge(
-                $this->accounts->buildTerrainStatsPayload($sqMiles),
-                ['updated_at' => now()]
-            ));
+            DB::table('nation_terrain_stats')->updateOrInsert(
+                ['nation_id' => $nationId],
+                array_merge(
+                    $this->accounts->buildTerrainStatsPayload($sqMiles),
+                    ['updated_at' => now()]
+                )
+            );
         }
 
         return response()->json(['message' => 'Nation updated']);

@@ -189,6 +189,9 @@ class MeController extends Controller
             $payload['font_mode'] = $extra['font_mode'] ?? 'normal';
             $payload['show_unread_chat_badge'] = (bool) ($extra['show_unread_chat_badge'] ?? true);
             $payload['apply_year_change_effects'] = (bool) ($extra['apply_year_change_effects'] ?? false);
+            $payload['alliance_color_overrides'] = is_array($extra['alliance_color_overrides'] ?? null)
+                ? $extra['alliance_color_overrides']
+                : [];
             return response()->json($payload);
         }
 
@@ -197,7 +200,7 @@ class MeController extends Controller
             'theme' => 'light',
             'color_blind_mode' => 'none',
             'dog_bark_enabled' => 0,
-            'extra_json' => json_encode(['font_mode' => 'normal', 'show_unread_chat_badge' => true, 'apply_year_change_effects' => false]),
+            'extra_json' => json_encode(['font_mode' => 'normal', 'show_unread_chat_badge' => true, 'apply_year_change_effects' => false, 'alliance_color_overrides' => []]),
             'updated_at' => now(),
         ]);
         $created = DB::table('user_settings')->where('user_id', $request->user()->id)->first();
@@ -205,6 +208,7 @@ class MeController extends Controller
         $payload['font_mode'] = 'normal';
         $payload['show_unread_chat_badge'] = true;
         $payload['apply_year_change_effects'] = false;
+        $payload['alliance_color_overrides'] = [];
         return response()->json($payload);
     }
 
@@ -221,6 +225,9 @@ class MeController extends Controller
         $extra['apply_year_change_effects'] = array_key_exists('apply_year_change_effects', $data)
             ? (bool) $data['apply_year_change_effects']
             : (bool) ($current['apply_year_change_effects'] ?? false);
+        $extra['alliance_color_overrides'] = array_key_exists('alliance_color_overrides', $data)
+            ? ($data['alliance_color_overrides'] ?? [])
+            : (($extra['alliance_color_overrides'] ?? null) ?: []);
 
         DB::table('user_settings')->where('user_id', $request->user()->id)->update([
             'theme' => $data['theme'] ?? $current['theme'],

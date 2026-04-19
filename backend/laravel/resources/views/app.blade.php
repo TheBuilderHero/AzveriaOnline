@@ -10,6 +10,8 @@
       --bg-alt: #e2ebf6;
       --panel: #ffffff;
       --text: #1f252c;
+      --muted: #666666;
+      --border: #bfc8d2;
       --accent: #9b5a1e;
       --menu: #20354d;
       --menu-text: #f0f5fb;
@@ -20,6 +22,8 @@
       --bg-alt: #1e2229;
       --panel: #242a33;
       --text: #e9eef5;
+      --muted: #b9c4d2;
+      --border: #4b5663;
       --accent: #d38f39;
       --menu: #0f141a;
       --menu-text: #dce8f6;
@@ -119,6 +123,37 @@
     .notify-head { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
     .notify-type { font-size:11px; background:#314f72; color:#fff; border-radius:999px; padding:2px 8px; }
     .setting-group { border: 1px solid #c9d1db; border-radius: 10px; padding: 10px; margin-top: 10px; }
+    .map-shell { display:grid; grid-template-columns: 1fr 300px; gap:12px; }
+    .map-stage-wrap { position:relative; border:1px solid #c9d1db; border-radius:12px; background:#0f1520; height:72vh; min-height:480px; overflow:hidden; }
+    .map-stage-controls { position:absolute; left:12px; right:12px; top:10px; display:flex; justify-content:space-between; align-items:flex-start; z-index:4; pointer-events:none; }
+    .map-stage-controls > * { pointer-events:auto; }
+    .map-top-tools { display:flex; gap:8px; align-items:center; }
+    .map-canvas { width:100%; height:100%; display:block; cursor:grab; }
+    .map-canvas.dragging { cursor:grabbing; }
+    .map-floating { position:absolute; z-index:5; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px; backdrop-filter: blur(2px); }
+    .map-info-box { left:12px; top:56px; width:260px; }
+    .map-bottom-center { position:absolute; left:50%; bottom:10px; transform:translateX(-50%); z-index:5; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px 10px; min-width:240px; }
+    .map-bottom-right { position:absolute; right:10px; bottom:10px; z-index:5; display:flex; gap:8px; align-items:flex-end; }
+    .map-bottom-left { position:absolute; left:10px; bottom:10px; z-index:5; min-width:260px; }
+    .map-scroll-list { max-height:200px; overflow:auto; border:1px solid #c9d1db; border-radius:8px; padding:8px; background:var(--panel); }
+    .map-type-item { display:block; width:100%; text-align:left; margin-bottom:6px; }
+    .map-type-item.active { outline:2px solid var(--accent); }
+    .map-side-panel { border:1px solid #c9d1db; border-radius:10px; padding:10px; background:var(--panel); }
+    .map-side-panel h3 { margin:0 0 8px 0; }
+    .map-admin-actions { display:flex; gap:8px; justify-content:flex-end; margin-bottom:8px; }
+    .map-right-external { display:flex; justify-content:flex-end; gap:8px; margin-bottom:8px; }
+    .terrain-color-pop { width:280px; max-height:280px; overflow:auto; }
+    .terrain-color-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:4px; }
+    .terrain-color-row input[type="color"] { width:48px; min-width:48px; height:30px; padding:0; border:1px solid #bfc8d2; border-radius:6px; background:transparent; }
+    .map-editor-toolbar { display:flex; gap:8px; align-items:center; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px; }
+    .map-editor-header { display:flex; justify-content:flex-start; gap:10px; align-items:flex-start; flex-wrap:wrap; margin-bottom:10px; }
+    .map-small-label { font-size:12px; color:var(--muted); }
+    @media (max-width: 1100px) {
+      .map-shell { grid-template-columns: 1fr; }
+      .map-stage-wrap { height:62vh; min-height:420px; }
+      .map-right-external { justify-content:flex-start; }
+      .map-editor-header { flex-direction:column; }
+    }
   </style>
 </head>
 <body>
@@ -178,7 +213,7 @@ const api = async (url, opts = {}) => {
   }
 };
 
-let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal' };
+let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal', alliance_color_overrides: {} };
 let ws = null;
 let wsAuthToken = null;
 let wsAuthTokenExpiresAt = 0;
@@ -690,217 +725,1743 @@ async function loadAnnouncements() {
 }
 
 async function loadMap() {
-  const [layersRes, terrainRes, nationsRes] = await Promise.all([
+  const [layersRes, terrainRes, nationsRes, editorStateRes] = await Promise.all([
     api('/api/maps/layers'),
     api('/api/me/terrain-square-miles'),
-    api('/api/nations?per_page=200')
+    api('/api/nations?per_page=400'),
+    api('/api/maps/editor-state'),
   ]);
-  const layers = await layersRes.json();
-  const terrain = await terrainRes.json();
-  const nations = extractList(await nationsRes.json());
 
-  const initial = layers.find(l => l.layer_type === 'main') || layers[0] || { image_path: '' };
+  const layers = layersRes && layersRes.ok ? await parseJsonResponse(layersRes, []) : [];
+  const myTerrainSqMiles = terrainRes && terrainRes.ok ? await parseJsonResponse(terrainRes, {}) : {};
+  const nations = extractList(await parseJsonResponse(nationsRes, { data: [] }));
+  const editorState = editorStateRes && editorStateRes.ok ? await parseJsonResponse(editorStateRes, {}) : {};
+
+  const layerByType = Object.fromEntries((layers || []).map(l => [l.layer_type, l.image_path]));
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  const TERRAIN_KEYS = ['grassland', 'forest', 'mountain', 'desert', 'tundra', 'magic_grassland', 'water'];
+  const TERRAIN_CODES = Object.fromEntries(TERRAIN_KEYS.map((k, i) => [k, i]));
+  const CODE_TO_TERRAIN = Object.fromEntries(TERRAIN_KEYS.map((k, i) => [i, k]));
+  const baseTerrainPalette = {
+    none: {
+      grassland: '#8fe388',
+      forest: '#2e7a3d',
+      mountain: '#4d3269',
+      desert: '#d8c55a',
+      tundra: 'rgba(0,0,0,0)',
+      magic_grassland: '#7d2323',
+      water: '#357ec7',
+    },
+    protanopia: {
+      grassland: '#8fc67e',
+      forest: '#3e7d4f',
+      mountain: '#57508b',
+      desert: '#d7be7a',
+      tundra: 'rgba(0,0,0,0)',
+      magic_grassland: '#6d4b28',
+      water: '#2f7dc9',
+    },
+    deuteranopia: {
+      grassland: '#b1c76b',
+      forest: '#637d39',
+      mountain: '#5b4f86',
+      desert: '#d8be74',
+      tundra: 'rgba(0,0,0,0)',
+      magic_grassland: '#8b4631',
+      water: '#2c7dc1',
+    },
+    tritanopia: {
+      grassland: '#88b65f',
+      forest: '#376a40',
+      mountain: '#7e5f4f',
+      desert: '#bfa26b',
+      tundra: 'rgba(0,0,0,0)',
+      magic_grassland: '#7d3e2e',
+      water: '#4a84b8',
+    },
+  };
+
+  let mapWidth = clamp(toFiniteNumber(editorState.width, 1200), 100, 5000);
+  let mapHeight = clamp(toFiniteNumber(editorState.height, 700), 100, 5000);
+  let terrainStrokes = Array.isArray(editorState.terrain_strokes) ? editorState.terrain_strokes.slice() : [];
+  let politicalStrokes = Array.isArray(editorState.political_strokes) ? editorState.political_strokes.slice() : [];
+  let politicalNationMeta = Array.isArray(editorState.political_nations) ? editorState.political_nations.slice() : [];
+  let editorBackgroundPath = editorState.editor_background_path || null;
+  let editorBackgroundOpacity = clamp(toFiniteNumber(editorState.editor_background_opacity, 100), 0, 100) / 100;
+  let terrainGrid = new Uint8Array(mapWidth * mapHeight);
+  let ownerGrid = new Int32Array(mapWidth * mapHeight);
+
+  const politicalNationMap = new Map();
+  nations.forEach(n => {
+    politicalNationMap.set(Number(n.id), {
+      id: Number(n.id),
+      name: n.name,
+      alliance_name: n.alliance_name || '',
+      races: [],
+      dirty: false,
+    });
+  });
+  (politicalNationMeta || []).forEach(n => {
+    const id = Number(n.id || 0);
+    if (!id) return;
+    const existing = politicalNationMap.get(id) || { id, name: n.name || `Nation ${id}`, alliance_name: '', races: [], dirty: false };
+    existing.name = n.name || existing.name;
+    existing.alliance_name = n.alliance_name || existing.alliance_name || '';
+    existing.races = Array.isArray(n.races) ? n.races : [];
+    politicalNationMap.set(id, existing);
+  });
+
+  const politicalNationsArray = () => Array.from(politicalNationMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+
   view.innerHTML = `
     <div class="card">
       <h2>Map</h2>
-      <div class="twocol">
+      <div class="map-right-external" id="mapAdminButtons">
+        ${user.role === 'admin' ? '<button class="primary" id="openTerrainEditorBtn">Terrain Editor</button><button class="primary" id="openPoliticalEditorBtn">Political Editor</button><button class="primary" id="recalcTerrainStatsBtn" style="background:#2f6a41;">Recalculate Terrain Stats</button><button class="primary" id="resetMapBtn" style="background:#8a1a1a;">Reset Map</button>' : ''}
+      </div>
+      <div class="map-shell">
         <div>
-          <div id="mapViewport" style="position:relative;overflow:hidden;border:1px solid #ccc;border-radius:8px;max-height:70vh;height:70vh;background:#111;">
-            <img id="mapImage" src="/storage/${initial.image_path}" alt="Map" style="position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;transform-origin:center center;user-select:none;cursor:grab;" />
-            <button id="resetMapBtn" class="primary" style="display:none;position:absolute;right:8px;top:8px;z-index:2;">Reset View</button>
-            <div class="zoom-control"><input id="mapZoomSlider" type="range" min="1" max="6" step="0.1" value="1"></div>
+          <div class="map-editor-header" id="mapTopControls"></div>
+          <div class="map-stage-wrap" id="mapStageWrap">
+            <canvas id="mapCanvas" class="map-canvas"></canvas>
+            <button class="primary map-floating" id="mapFullscreenBtn" style="right:10px;top:10px;">Fullscreen</button>
+            <div class="map-floating map-info-box" id="mapNationInfo" style="display:none;"></div>
+            <div class="map-bottom-left" id="mapBottomLeftTools" style="display:none;"></div>
+            <div class="map-bottom-center">
+              <label class="map-small-label" for="mapZoomPercent">Zoom</label>
+              <input id="mapZoomPercent" type="range" min="-25" max="100" step="1" value="0">
+            </div>
+            <div class="map-bottom-right">
+              <div class="map-floating" style="position:relative;right:auto;bottom:auto;display:flex;gap:8px;align-items:center;">
+                <label class="map-small-label" for="terrainOpacity">Terrain Opacity</label>
+                <input id="terrainOpacity" type="range" min="0" max="100" value="55">
+              </div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px;justify-content:space-between;flex-wrap:wrap;">
+            <div id="mapSaveArea"></div>
+            <span class="muted" id="mapStatusMsg"></span>
           </div>
         </div>
         <div>
-          <h3>Layers</h3>
-          ${layers.map(l => `<button class="primary layerBtn" data-path="${l.image_path}" style="display:block; width:100%; margin-bottom:8px;">${l.layer_type}</button>`).join('')}
-          <h3>Terrain Sq Miles</h3>
-          <label style="font-size:13px;">View Nation</label>
-          <select id="mapNationSelect" style="margin-bottom:8px;">
-            <option value="me">My Nation</option>
-            ${nations.map(n => `<option value="${n.id}">${n.name}</option>`).join('')}
-          </select>
-          <div class="list" id="mapTerrainStats"></div>
-          ${user.role === 'admin' ? `<h3>Admin Upload</h3>
-            <label style="font-size:13px;">Layer Type</label>
-            <select id="layerType" style="margin-bottom:6px;"><option value="main">Main</option><option value="terrain">Terrain</option><option value="political">Political</option></select>
-            <label style="font-size:13px;">Image File</label>
-            <input type="file" id="layerFile" accept="image/*" style="margin-bottom:6px;">
-            <button class="primary" id="saveLayer">Upload Layer</button>
-            <span id="uploadMsg" class="muted" style="display:block;margin-top:4px;"></span>` : ''}
+          <div class="map-side-panel" id="mapSidePanel"></div>
         </div>
       </div>
     </div>
   `;
 
-  const renderTerrainStats = (sqMiles) => {
-    const normalized = normalizeTerrainSquareMiles(sqMiles);
-    const total = Math.max(1, Object.values(normalized).reduce((sum, val) => sum + toFiniteNumber(val, 0), 0));
-    document.getElementById('mapTerrainStats').innerHTML = Object.entries(normalized).map(([k, v]) => {
-      const value = toFiniteNumber(v, 0);
-      const pct = ((value / total) * 100).toFixed(1);
-      return `<div>${labelTerrainKey(k)}: ${value} (${pct}%)</div>`;
-    }).join('') || '<div class="muted">No data</div>';
-  };
-  renderTerrainStats(terrain);
+  const stage = document.getElementById('mapStageWrap');
+  const canvas = document.getElementById('mapCanvas');
+  const ctx = canvas.getContext('2d');
+  const mapNationInfo = document.getElementById('mapNationInfo');
+  const mapFullscreenBtn = document.getElementById('mapFullscreenBtn');
+  const mapSidePanel = document.getElementById('mapSidePanel');
+  const mapTopControls = document.getElementById('mapTopControls');
+  const mapBottomLeftTools = document.getElementById('mapBottomLeftTools');
+  const mapBottomRight = stage.querySelector('.map-bottom-right');
+  const mapSaveArea = document.getElementById('mapSaveArea');
+  const mapStatusMsg = document.getElementById('mapStatusMsg');
 
-  document.querySelectorAll('.layerBtn').forEach(btn => btn.onclick = () => {
-    document.getElementById('mapImage').src = '/storage/' + btn.dataset.path;
-    resetMapView();
-    barkIfEnabled();
-  });
-
-  document.getElementById('mapNationSelect').onchange = async (e) => {
-    if (e.target.value === 'me') {
-      renderTerrainStats(terrain);
-      return;
-    }
-    const detailRes = await api('/api/nations/' + e.target.value);
-    const detail = await detailRes.json();
-    const sqMiles = normalizeTerrainSquareMiles(detail.terrain?.square_miles_json || {});
-    renderTerrainStats(sqMiles);
-  };
-
-  const mapViewport = document.getElementById('mapViewport');
-  const mapImage = document.getElementById('mapImage');
-  const resetMapBtn = document.getElementById('resetMapBtn');
-  const mapZoomSlider = document.getElementById('mapZoomSlider');
-  const zoomControl = mapViewport.querySelector('.zoom-control');
-  let mapScale = 1;
-  let mapX = 0;
-  let mapY = 0;
+  let mode = 'view';
+  const minZoomPct = -25;
+  const maxZoomPct = 100;
+  const terrainDefaultBrushSize = 50;
+  const politicalDefaultBrushSize = 8;
+  let mapType = 'political';
+  let terrainFilterEnabled = false;
+  let terrainOpacity = 0.55;
+  let selectedTerrainType = 'grassland';
+  let selectedTool = 'brush';
+  let brushSize = terrainDefaultBrushSize;
+  let politicalEditNationId = 0;
+  let politicalRemoveMode = false;
+  let territoryEditing = false;
+  let zoomPct = 0;
+  let panX = 0;
+  let panY = 0;
   let dragging = false;
-  let pointerId = null;
-  let startX = 0;
-  let startY = 0;
+  let downPoint = null;
+  let transform = { scale: 1, originX: 0, originY: 0 };
+  let unsavedChanges = false;
+  let renderScheduled = false;
+  const scheduleRender = () => {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(() => { renderScheduled = false; render(); });
+  };
+  let politicalNeedsPostPaintBorderUpdate = false;
+  let colorOverrides = (editorState.terrain_color_overrides && typeof editorState.terrain_color_overrides === 'object')
+    ? { ...editorState.terrain_color_overrides }
+    : {};
+  let selectedNationId = 0;
+  let labelCache = [];
+  let lastPaintPoint = null;
+  let outlinePoints = [];
+  let outlineClosed = false;
 
-  const applyMapTransform = () => {
-    mapImage.style.transform = `translate(${mapX}px, ${mapY}px) scale(${mapScale})`;
-    resetMapBtn.style.display = (mapScale !== 1 || mapX !== 0 || mapY !== 0) ? 'inline-block' : 'none';
-    mapZoomSlider.value = String(mapScale.toFixed(1));
+  const terrainColorControlsHtml = () => {
+    const palette = getPalette();
+    return `
+      <details open>
+        <summary>Terrain Colors</summary>
+        ${TERRAIN_KEYS.map(key => `
+          <div class="terrain-color-row">
+            <label style="font-size:12px;">${labelTerrainKey(key)}</label>
+            <input type="color" class="terrainColorInput" data-key="${key}" value="${palette[key].startsWith('#') ? palette[key] : '#cccccc'}">
+          </div>
+        `).join('')}
+      </details>
+    `;
   };
 
-  const resetMapView = () => {
-    releaseMapPointer();
-    mapScale = 1;
-    mapX = 0;
-    mapY = 0;
-    mapImage.style.transform = 'translate(0px, 0px) scale(1)';
-    applyMapTransform();
+  const bindTerrainColorInputs = (root = document) => {
+    root.querySelectorAll('.terrainColorInput').forEach(input => {
+      input.addEventListener('input', () => {
+        colorOverrides[input.dataset.key] = input.value;
+        terrainLayerDirty = true;
+        waterLayerDirty = true;
+        render();
+      });
+    });
   };
 
-  mapImage.addEventListener('dragstart', (e) => e.preventDefault());
-
-  mapViewport.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const delta = e.deltaY < 0 ? 0.1 : -0.1;
-    mapScale = Number(Math.max(1, Math.min(6, mapScale + delta)).toFixed(1));
-    if (mapScale === 1) {
-      mapX = 0;
-      mapY = 0;
-    }
-    applyMapTransform();
-  }, { passive: false });
-
-  mapViewport.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.zoom-control') || e.target.closest('#resetMapBtn')) {
-      return;
-    }
-    if (mapScale <= 1) {
-      return;
-    }
-    dragging = true;
-    pointerId = e.pointerId;
-    mapViewport.setPointerCapture(pointerId);
-    startX = e.clientX - mapX;
-    startY = e.clientY - mapY;
-    mapImage.style.cursor = 'grabbing';
-    e.preventDefault();
-  });
-
-  mapViewport.addEventListener('pointermove', (e) => {
-    if (!dragging || mapScale <= 1) {
-      return;
-    }
-    mapX = e.clientX - startX;
-    mapY = e.clientY - startY;
-    applyMapTransform();
-  });
-
-  const releaseMapPointer = () => {
-    dragging = false;
-    if (pointerId !== null) {
-      try { mapViewport.releasePointerCapture(pointerId); } catch {}
-      pointerId = null;
-    }
-    mapImage.style.cursor = 'grab';
+  const imageCache = new Map();
+  const normalizeStoragePath = (path) => String(path || '').replace(/^\/?storage\//, '').trim();
+  const loadImage = (path) => {
+    if (!path) return Promise.resolve(null);
+    if (imageCache.has(path)) return imageCache.get(path);
+    const p = new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = path.startsWith('/storage/') ? path : `/storage/${path}`;
+    });
+    imageCache.set(path, p);
+    return p;
   };
 
-  mapViewport.addEventListener('pointerup', releaseMapPointer);
-  mapViewport.addEventListener('pointercancel', releaseMapPointer);
-  mapViewport.addEventListener('pointerleave', () => {
-    if (dragging && pointerId === null) {
-      releaseMapPointer();
-    }
-  });
+  const layerImages = {
+    main: await loadImage(layerByType.main || ''),
+    terrain: await loadImage(layerByType.terrain || ''),
+    political: await loadImage(layerByType.political || ''),
+  };
+  const mainLayerPathNormalized = normalizeStoragePath(layerByType.main || '');
+  let editorBgImage = editorBackgroundPath
+    ? await loadImage(String(editorBackgroundPath).replace(/^\/storage\//, ''))
+    : null;
 
-  resetMapBtn.onclick = resetMapView;
-  mapZoomSlider.oninput = (e) => {
-    mapScale = Number(e.target.value);
-    if (mapScale === 1) {
-      mapX = 0;
-      mapY = 0;
-    }
-    applyMapTransform();
+  const getPalette = () => {
+    const modeKey = settings.color_blind_mode || 'none';
+    const base = baseTerrainPalette[modeKey] || baseTerrainPalette.none;
+    return { ...base, ...colorOverrides };
   };
 
-  ['pointerdown', 'pointermove', 'pointerup', 'click', 'wheel', 'mousedown'].forEach(evt => {
-    zoomControl.addEventListener(evt, (e) => {
-      e.stopPropagation();
-    }, { passive: false });
-    resetMapBtn.addEventListener(evt, (e) => {
-      e.stopPropagation();
-    }, { passive: false });
-  });
+  const idx = (x, y) => (y * mapWidth) + x;
+  const inBounds = (x, y) => x >= 0 && y >= 0 && x < mapWidth && y < mapHeight;
+  const pointDistance = (a, b) => Math.hypot((a?.x || 0) - (b?.x || 0), (a?.y || 0) - (b?.y || 0));
 
-  applyMapTransform();
+  const terrainLayerCanvas = document.createElement('canvas');
+  const terrainLayerCtx = terrainLayerCanvas.getContext('2d');
+  const waterLayerCanvas = document.createElement('canvas');
+  const waterLayerCtx = waterLayerCanvas.getContext('2d');
+  const politicalLayerCanvas = document.createElement('canvas');
+  const politicalLayerCtx = politicalLayerCanvas.getContext('2d');
 
-  if (user.role === 'admin') {
-    document.getElementById('saveLayer').onclick = async () => {
-      const layerType = document.getElementById('layerType').value;
-      const fileInput = document.getElementById('layerFile');
-      const msgEl = document.getElementById('uploadMsg');
-      if (!fileInput.files.length) {
-        msgEl.textContent = 'Please select a file first.';
-        return;
+  let terrainLayerDirty = true;
+  let waterLayerDirty = true;
+  let politicalLayerDirty = true;
+  let politicalNeedsFullRebuild = false;
+  let lastPaletteSignature = '';
+  let lastPoliticalVisualKey = '';
+
+  const resizeLayerCanvases = () => {
+    terrainLayerCanvas.width = mapWidth;
+    terrainLayerCanvas.height = mapHeight;
+    waterLayerCanvas.width = mapWidth;
+    waterLayerCanvas.height = mapHeight;
+    politicalLayerCanvas.width = mapWidth;
+    politicalLayerCanvas.height = mapHeight;
+    terrainLayerDirty = true;
+    waterLayerDirty = true;
+    politicalLayerDirty = true;
+  };
+
+  const parseColorToRgb = (color) => {
+    if (!color) return { r: 255, g: 255, b: 255 };
+    const hex = /^#([0-9a-f]{6})$/i.exec(color);
+    if (hex) {
+      return {
+        r: parseInt(hex[1].slice(0, 2), 16),
+        g: parseInt(hex[1].slice(2, 4), 16),
+        b: parseInt(hex[1].slice(4, 6), 16),
+      };
+    }
+    const hsl = /^hsl\((\d+)\s+(\d+)%\s+(\d+)%\)$/i.exec(String(color).trim());
+    if (!hsl) return { r: 255, g: 255, b: 255 };
+    const h = (Number(hsl[1]) % 360) / 360;
+    const s = Number(hsl[2]) / 100;
+    const l = Number(hsl[3]) / 100;
+    const hue2rgb = (p, q, t) => {
+      let tt = t;
+      if (tt < 0) tt += 1;
+      if (tt > 1) tt -= 1;
+      if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+      if (tt < 1 / 2) return q;
+      if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    return {
+      r: Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+      g: Math.round(hue2rgb(p, q, h) * 255),
+      b: Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
+    };
+  };
+
+  const pointInPolygon = (x, y, points) => {
+    let inside = false;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const xi = points[i].x;
+      const yi = points[i].y;
+      const xj = points[j].x;
+      const yj = points[j].y;
+      const intersects = ((yi > y) !== (yj > y))
+        && (x < (xj - xi) * (y - yi) / ((yj - yi) || 0.00001) + xi);
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  };
+
+  const getNationById = (id) => politicalNationMap.get(Number(id)) || null;
+  const firstLetterName = (name) => {
+    const s = (name || '').trim();
+    return s ? `${s.charAt(0).toUpperCase()}.` : 'N.';
+  };
+
+  const applyTerrainOperationToGrid = (op, targetGrid = terrainGrid) => {
+    const code = TERRAIN_CODES[op.terrain] ?? TERRAIN_CODES.grassland;
+    const x = Math.floor(op.x);
+    const y = Math.floor(op.y);
+    if (!inBounds(x, y)) return;
+
+    if (op.tool === 'fill') {
+      const start = idx(x, y);
+      const oldCode = targetGrid[start];
+      if (oldCode === code) return;
+      const q = [start];
+      targetGrid[start] = code;
+      while (q.length) {
+        const p = q.pop();
+        const px = p % mapWidth;
+        const py = Math.floor(p / mapWidth);
+        const nbs = [[px - 1, py], [px + 1, py], [px, py - 1], [px, py + 1]];
+        for (const [nx, ny] of nbs) {
+          if (!inBounds(nx, ny)) continue;
+          const ni = idx(nx, ny);
+          if (targetGrid[ni] !== oldCode) continue;
+          targetGrid[ni] = code;
+          q.push(ni);
+        }
       }
-      msgEl.textContent = 'Uploading…';
-      const formData = new FormData();
-      formData.append('image_file', fileInput.files[0]);
-      const res = await fetch(`/api/admin/maps/layers/${layerType}`, {
+      return;
+    }
+
+    const r = clamp(Math.floor(op.size || 50), 1, 200);
+    for (let yy = y - r; yy <= y + r; yy++) {
+      for (let xx = x - r; xx <= x + r; xx++) {
+        if (!inBounds(xx, yy)) continue;
+        const dx = xx - x;
+        const dy = yy - y;
+        if ((dx * dx) + (dy * dy) > r * r) continue;
+        targetGrid[idx(xx, yy)] = code;
+      }
+    }
+  };
+
+  const rebuildTerrainFromStrokes = () => {
+    terrainGrid = new Uint8Array(mapWidth * mapHeight);
+    terrainStrokes.forEach(op => applyTerrainOperationToGrid(op, terrainGrid));
+    terrainLayerDirty = true;
+    waterLayerDirty = true;
+  };
+
+  const applyPoliticalOperationToGrid = (op, targetGrid = ownerGrid) => {
+    const x = Math.floor(op.x);
+    const y = Math.floor(op.y);
+    if (!inBounds(x, y)) return;
+    const newId = op.remove ? 0 : Number(op.nation_id || 0);
+
+    if (op.tool === 'fill') {
+      const start = idx(x, y);
+      const oldId = targetGrid[start];
+      if (op.remove && oldId === 0) return;
+      if (!op.remove && oldId === newId) return;
+      if (!op.remove && terrainGrid[start] === TERRAIN_CODES.water) return;
+      const q = [start];
+      targetGrid[start] = newId;
+      while (q.length) {
+        const p = q.pop();
+        const px = p % mapWidth;
+        const py = Math.floor(p / mapWidth);
+        const nbs = [[px - 1, py], [px + 1, py], [px, py - 1], [px, py + 1]];
+        for (const [nx, ny] of nbs) {
+          if (!inBounds(nx, ny)) continue;
+          const ni = idx(nx, ny);
+          if (targetGrid[ni] !== oldId) continue;
+          if (!op.remove && terrainGrid[ni] === TERRAIN_CODES.water) continue;
+          targetGrid[ni] = newId;
+          q.push(ni);
+        }
+      }
+      return;
+    }
+
+    const r = clamp(Math.floor(op.size || 50), 1, 200);
+    for (let yy = y - r; yy <= y + r; yy++) {
+      for (let xx = x - r; xx <= x + r; xx++) {
+        if (!inBounds(xx, yy)) continue;
+        const dx = xx - x;
+        const dy = yy - y;
+        if ((dx * dx) + (dy * dy) > r * r) continue;
+        const ii = idx(xx, yy);
+        if (!op.remove && terrainGrid[ii] === TERRAIN_CODES.water) continue;
+        if (!op.remove && targetGrid[ii] && targetGrid[ii] !== newId) continue;
+        targetGrid[ii] = newId;
+      }
+    }
+  };
+
+  const rebuildPoliticalFromStrokes = () => {
+    ownerGrid = new Int32Array(mapWidth * mapHeight);
+    politicalStrokes.forEach(op => applyPoliticalOperationToGrid(op, ownerGrid));
+    politicalLayerDirty = true;
+    politicalNeedsFullRebuild = false;
+  };
+
+  const rebuildRasterLayers = (palette) => {
+    const paletteSignature = JSON.stringify(palette);
+    if (paletteSignature !== lastPaletteSignature) {
+      terrainLayerDirty = true;
+      waterLayerDirty = true;
+      lastPaletteSignature = paletteSignature;
+    }
+
+    if (terrainLayerDirty) {
+      const rgbByCode = new Array(TERRAIN_KEYS.length);
+      for (let code = 0; code < TERRAIN_KEYS.length; code++) {
+        const key = CODE_TO_TERRAIN[code];
+        rgbByCode[code] = (key === 'tundra' || key === 'water') ? null : parseColorToRgb(palette[key] || '#ffffff');
+      }
+      const img = terrainLayerCtx.createImageData(mapWidth, mapHeight);
+      for (let i = 0; i < terrainGrid.length; i++) {
+        const rgb = rgbByCode[terrainGrid[i]];
+        if (!rgb) continue;
+        const p = i * 4;
+        img.data[p] = rgb.r;
+        img.data[p + 1] = rgb.g;
+        img.data[p + 2] = rgb.b;
+        img.data[p + 3] = 255;
+      }
+      terrainLayerCtx.putImageData(img, 0, 0);
+      terrainLayerDirty = false;
+    }
+
+    if (waterLayerDirty) {
+      const img = waterLayerCtx.createImageData(mapWidth, mapHeight);
+      const rgb = parseColorToRgb(palette.water || '#357ec7');
+      for (let i = 0; i < terrainGrid.length; i++) {
+        if (terrainGrid[i] !== TERRAIN_CODES.water) continue;
+        const p = i * 4;
+        img.data[p] = rgb.r;
+        img.data[p + 1] = rgb.g;
+        img.data[p + 2] = rgb.b;
+        img.data[p + 3] = 255;
+      }
+      waterLayerCtx.putImageData(img, 0, 0);
+      waterLayerDirty = false;
+    }
+
+    const politicalVisualKey = `${mapType}|${mode}`;
+    if (politicalVisualKey !== lastPoliticalVisualKey) {
+      politicalLayerDirty = true;
+      lastPoliticalVisualKey = politicalVisualKey;
+    }
+
+    if (politicalLayerDirty) {
+      politicalLayerCtx.clearRect(0, 0, mapWidth, mapHeight);
+      const img = politicalLayerCtx.createImageData(mapWidth, mapHeight);
+      const nationRgbCache = new Map();
+      const getNationRgb = (ownerId) => {
+        if (nationRgbCache.has(ownerId)) return nationRgbCache.get(ownerId);
+        let color = '#ffffff';
+        if (mapType === 'alliance' || mode === 'political-editor') {
+          const nation = getNationById(ownerId);
+          color = nation?.alliance_name ? mapAllianceColor(nation.alliance_name) : '#7d7d7d';
+          if (mapType === 'alliance' && !nation?.alliance_name) color = '#7d7d7d';
+        }
+        const rgb = parseColorToRgb(color);
+        nationRgbCache.set(ownerId, rgb);
+        return rgb;
+      };
+      for (let i = 0; i < ownerGrid.length; i++) {
+        const owner = ownerGrid[i];
+        if (!owner) continue;
+        const rgb = getNationRgb(owner);
+        const p = i * 4;
+        img.data[p] = rgb.r;
+        img.data[p + 1] = rgb.g;
+        img.data[p + 2] = rgb.b;
+        img.data[p + 3] = 210;
+      }
+      politicalLayerCtx.putImageData(img, 0, 0);
+
+      const borderPrimary = mode === 'political-editor' ? 'rgba(0,0,0,0.98)' : 'rgba(0,0,0,0.9)';
+      const borderHighlight = mode === 'political-editor' ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.78)';
+      politicalLayerCtx.fillStyle = borderPrimary;
+      for (let y = 1; y < mapHeight - 1; y++) {
+        for (let x = 1; x < mapWidth - 1; x++) {
+          const c = ownerGrid[idx(x, y)];
+          if (!c) continue;
+          if (ownerGrid[idx(x + 1, y)] !== c || ownerGrid[idx(x - 1, y)] !== c || ownerGrid[idx(x, y + 1)] !== c || ownerGrid[idx(x, y - 1)] !== c) {
+            politicalLayerCtx.fillRect(x, y, 1, 1);
+            politicalLayerCtx.fillStyle = borderHighlight;
+            politicalLayerCtx.fillRect(x + 0.22, y + 0.22, 0.56, 0.56);
+            politicalLayerCtx.fillStyle = borderPrimary;
+          }
+        }
+      }
+      politicalLayerDirty = false;
+    }
+  };
+
+  const nationPixelCount = (nationId) => {
+    const idNum = Number(nationId);
+    let c = 0;
+    for (let i = 0; i < ownerGrid.length; i++) if (ownerGrid[i] === idNum) c++;
+    return c;
+  };
+
+  const terrainPixelBreakdownForNation = (nationId) => {
+    const idNum = Number(nationId);
+    const out = Object.fromEntries(TERRAIN_KEYS.map(k => [k, 0]));
+    const waterCode = TERRAIN_CODES.water;
+    for (let i = 0; i < ownerGrid.length; i++) {
+      if (ownerGrid[i] !== idNum) continue;
+      const key = CODE_TO_TERRAIN[terrainGrid[i]] || 'grassland';
+      if (key === 'water') continue; // nations don't own water tiles
+      out[key] += 1;
+    }
+    // Water stat = land pixels of this nation that border a water tile (coastline pixels).
+    const waterSet = new Set();
+    for (let i = 0; i < ownerGrid.length; i++) {
+      if (ownerGrid[i] !== idNum) continue;
+      if (terrainGrid[i] === waterCode) continue; // skip water tiles owned by nation (shouldn't happen)
+      const x = i % mapWidth;
+      const y = Math.floor(i / mapWidth);
+      if (
+        (x > 0           && terrainGrid[i - 1] === waterCode) ||
+        (x < mapWidth-1  && terrainGrid[i + 1] === waterCode) ||
+        (y > 0           && terrainGrid[i - mapWidth] === waterCode) ||
+        (y < mapHeight-1 && terrainGrid[i + mapWidth] === waterCode)
+      ) {
+        waterSet.add(i);
+      }
+    }
+    out.water = waterSet.size;
+    return out;
+  };
+
+  const normalizeTerrainColorStats = (raw) => {
+    const parsed = safeJsonParse(raw, raw) || {};
+    const source = (typeof parsed === 'string') ? (safeJsonParse(parsed, {}) || {}) : parsed;
+    const out = Object.fromEntries(TERRAIN_KEYS.map(k => [k, 0]));
+
+    out.grassland = toFiniteNumber(source.grassland, 0);
+    out.forest = toFiniteNumber(source.forest, 0) + toFiniteNumber(source.hills, 0);
+    out.mountain = toFiniteNumber(source.mountain, 0);
+    out.desert = toFiniteNumber(source.desert, 0);
+    out.tundra = toFiniteNumber(source.tundra, 0);
+    out.magic_grassland = toFiniteNumber(source.magic_grassland, 0);
+    out.water = toFiniteNumber(source.water, 0)
+      + toFiniteNumber(source.freshwater, 0)
+      + toFiniteNumber(source.seafront ?? source.sea_front ?? source.seaFront, 0);
+
+    return out;
+  };
+
+  const normalizeAllianceColorOverrides = (raw) => {
+    if (!raw || typeof raw !== 'object') return {};
+    const out = {};
+    Object.entries(raw).forEach(([k, v]) => {
+      const key = String(k || '').trim().toLowerCase();
+      const color = String(v || '').trim();
+      if (!key) return;
+      if (/^#[0-9A-Fa-f]{6}$/.test(color)) out[key] = color;
+    });
+    return out;
+  };
+
+  let allianceColorOverrides = normalizeAllianceColorOverrides(settings.alliance_color_overrides || {});
+
+  const mapAllianceColor = (name) => {
+    const s = String(name || '').trim().toLowerCase();
+    if (!s) return '#808080';
+    if (allianceColorOverrides[s]) return allianceColorOverrides[s];
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0;
+    const hue = Math.abs(hash) % 360;
+    return `hsl(${hue} 68% 54%)`;
+  };
+
+  const toWorld = (clientX, clientY) => {
+    const rect = canvas.getBoundingClientRect();
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
+    const wx = Math.floor((sx - transform.originX) / transform.scale);
+    const wy = Math.floor((sy - transform.originY) / transform.scale);
+    return { wx, wy, sx, sy };
+  };
+
+  const computeLabels = () => {
+    const visited = new Uint8Array(ownerGrid.length);
+    const labels = [];
+    for (let i = 0; i < ownerGrid.length; i++) {
+      const owner = ownerGrid[i];
+      if (!owner || visited[i]) continue;
+      const queue = [i];
+      visited[i] = 1;
+      let sumX = 0;
+      let sumY = 0;
+      let count = 0;
+      while (queue.length) {
+        const p = queue.pop();
+        const x = p % mapWidth;
+        const y = Math.floor(p / mapWidth);
+        sumX += x;
+        sumY += y;
+        count++;
+        const nbs = [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]];
+        for (const [nx, ny] of nbs) {
+          if (!inBounds(nx, ny)) continue;
+          const ni = idx(nx, ny);
+          if (visited[ni] || ownerGrid[ni] !== owner) continue;
+          visited[ni] = 1;
+          queue.push(ni);
+        }
+      }
+      const meta = getNationById(owner);
+      const full = meta?.name || `Nation ${owner}`;
+      const name = count < full.length * 70 ? firstLetterName(full) : full;
+      labels.push({ owner, x: sumX / count, y: sumY / count, size: count, name });
+    }
+    labelCache = labels;
+  };
+
+  const resizeCanvas = () => {
+    const rect = stage.getBoundingClientRect();
+    canvas.width = Math.max(200, Math.floor(rect.width));
+    canvas.height = Math.max(200, Math.floor(rect.height));
+  };
+
+  const render = () => {
+    if (!canvas.width || !canvas.height) resizeCanvas();
+    const viewW = canvas.width;
+    const viewH = canvas.height;
+    const fitScale = Math.min(viewW / mapWidth, viewH / mapHeight);
+    const factor = zoomPct >= 0
+      ? 1 + (zoomPct / 100) * 79
+      : Math.max(0.55, 1 + (zoomPct / 100));
+    const scale = fitScale * factor;
+    transform.scale = scale;
+    transform.originX = ((viewW - mapWidth * scale) / 2) + panX;
+    transform.originY = ((viewH - mapHeight * scale) / 2) + panY;
+
+    ctx.clearRect(0, 0, viewW, viewH);
+    ctx.fillStyle = '#0f1520';
+    ctx.fillRect(0, 0, viewW, viewH);
+
+    ctx.save();
+    ctx.translate(transform.originX, transform.originY);
+    ctx.scale(scale, scale);
+
+    if ((mode === 'terrain-editor' || mode === 'political-editor') && editorBgImage) {
+      ctx.globalAlpha = editorBackgroundOpacity;
+      ctx.drawImage(editorBgImage, 0, 0, mapWidth, mapHeight);
+      ctx.globalAlpha = 1;
+    } else if (layerImages.main && mainLayerPathNormalized !== normalizeStoragePath(editorBackgroundPath || '')) {
+      ctx.drawImage(layerImages.main, 0, 0, mapWidth, mapHeight);
+    }
+
+    const palette = getPalette();
+    rebuildRasterLayers(palette);
+
+    if (mapType === 'political' || mapType === 'alliance' || mode === 'political-editor') {
+      ctx.drawImage(politicalLayerCanvas, 0, 0);
+    }
+
+    if (terrainFilterEnabled || mode === 'terrain-editor' || mode === 'political-editor') {
+      ctx.globalAlpha = terrainOpacity;
+      ctx.drawImage(terrainLayerCanvas, 0, 0);
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.drawImage(waterLayerCanvas, 0, 0);
+
+    if (mapType === 'political' || mapType === 'alliance' || mode === 'political-editor') {
+      if (!labelCache.length) computeLabels();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      labelCache.forEach(label => {
+        const size = clamp(Math.floor(Math.sqrt(label.size) / 3), 10, 28);
+        ctx.font = `${size}px Trebuchet MS`;
+        ctx.lineWidth = Math.max(2, size / 6);
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillStyle = '#f8f8f8';
+        ctx.strokeText(label.name, label.x, label.y);
+        ctx.fillText(label.name, label.x, label.y);
+      });
+    }
+
+    if (mode === 'political-editor' && outlinePoints.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(outlinePoints[0].x, outlinePoints[0].y);
+      for (let i = 1; i < outlinePoints.length; i++) {
+        ctx.lineTo(outlinePoints[i].x, outlinePoints[i].y);
+      }
+      if (outlineClosed) {
+        ctx.closePath();
+      }
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = outlineClosed ? 'rgba(60,220,120,0.95)' : 'rgba(255,215,0,0.95)';
+      ctx.setLineDash(outlineClosed ? [] : [4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+  };
+
+  const setNationInfo = (nationId) => {
+    selectedNationId = Number(nationId || 0);
+    if (!selectedNationId) {
+      mapNationInfo.style.display = 'none';
+      mapNationInfo.innerHTML = '';
+      return;
+    }
+    const n = getNationById(selectedNationId);
+    const pixels = nationPixelCount(selectedNationId);
+    const races = (n?.races || []).join(', ') || '-';
+    mapNationInfo.style.display = 'block';
+    mapNationInfo.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+        <strong>${esc(n?.name || `Nation ${selectedNationId}`)}</strong>
+        <button class="primary" id="closeNationInfoBtn" style="padding:2px 8px;">X</button>
+      </div>
+      <div class="map-small-label" style="margin-top:4px;">Alliance: ${esc(n?.alliance_name || '-')}</div>
+      <div class="map-small-label">Races: ${esc(races)}</div>
+      <div class="map-small-label">Owned Terrain (pixels): ${pixels.toLocaleString()}</div>
+    `;
+    document.getElementById('closeNationInfoBtn').onclick = () => setNationInfo(0);
+  };
+
+  const setMode = (nextMode) => {
+    if (mode === nextMode) return;
+    if (unsavedChanges && (mode === 'terrain-editor' || mode === 'political-editor')) {
+      const proceed = window.confirm('Discard unsaved map editor changes?');
+      if (!proceed) return;
+    }
+    mode = nextMode;
+    territoryEditing = false;
+    lastPaintPoint = null;
+    outlinePoints = [];
+    outlineClosed = false;
+    if (mode === 'terrain-editor') {
+      selectedTool = 'brush';
+      brushSize = terrainDefaultBrushSize;
+    }
+    if (mode === 'political-editor') {
+      selectedTool = 'brush';
+      brushSize = politicalDefaultBrushSize;
+    }
+    if (mode !== 'terrain-editor' && politicalNeedsFullRebuild) {
+      rebuildPoliticalFromStrokes();
+      labelCache = [];
+    }
+    politicalLayerDirty = true;
+    mapStatusMsg.textContent = '';
+    renderSidebar();
+    renderTopEditorControls();
+    renderBottomTools();
+    mapFullscreenBtn.style.display = mode === 'view' ? 'inline-block' : 'none';
+    render();
+  };
+
+  const renderTopEditorControls = () => {
+    if (mode === 'view') {
+      mapTopControls.innerHTML = '';
+      return;
+    }
+    mapTopControls.innerHTML = `
+      <div class="map-editor-toolbar">
+        <span class="map-small-label">Grid</span>
+        <input id="mapGridHeight" type="number" min="100" max="5000" value="${mapHeight}" style="width:90px;">
+        <input id="mapGridWidth" type="number" min="100" max="5000" value="${mapWidth}" style="width:90px;">
+        <button class="primary" id="applyGridBtn">Apply</button>
+      </div>
+      <div class="map-editor-toolbar">
+        <label class="map-small-label">Reference Image</label>
+        <input id="editorBgUpload" type="file" accept="image/*" style="max-width:180px;">
+        <label class="map-small-label" for="editorBgOpacity">Reference Opacity</label>
+        <input id="editorBgOpacity" type="range" min="0" max="100" value="${Math.round(editorBackgroundOpacity * 100)}" style="width:120px;">
+        <span class="map-small-label" id="editorBgOpacityLabel">${Math.round(editorBackgroundOpacity * 100)}%</span>
+      </div>
+    `;
+
+    document.getElementById('applyGridBtn').onclick = () => {
+      const nh = clamp(toFiniteNumber(document.getElementById('mapGridHeight').value, mapHeight), 100, 5000);
+      const nw = clamp(toFiniteNumber(document.getElementById('mapGridWidth').value, mapWidth), 100, 5000);
+      mapWidth = nw;
+      mapHeight = nh;
+      resizeLayerCanvases();
+      terrainGrid = new Uint8Array(mapWidth * mapHeight);
+      terrainGrid.fill(TERRAIN_CODES.water);
+      ownerGrid = new Int32Array(mapWidth * mapHeight);
+      terrainStrokes = [{ tool: 'fill', terrain: 'water', x: 0, y: 0 }];
+      politicalStrokes = [];
+      politicalNeedsFullRebuild = false;
+      terrainLayerDirty = true;
+      waterLayerDirty = true;
+      politicalLayerDirty = true;
+      labelCache = [];
+      unsavedChanges = true;
+      resizeCanvas();
+      render();
+      mapStatusMsg.textContent = 'Grid resized and reset to all water.';
+    };
+
+    document.getElementById('editorBgUpload').onchange = async (e) => {
+      if (!e.target.files || !e.target.files.length) return;
+      const fd = new FormData();
+      fd.append('image_file', e.target.files[0]);
+      const response = await fetch('/api/admin/maps/editor-reference', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
-        body: formData,
+        body: fd,
       });
-      if (res.ok) {
-        msgEl.textContent = 'Uploaded!';
-      } else {
-        let detail = 'Upload failed.';
-        try {
-          const payload = await res.json();
-          detail = payload.detail ? `${payload.message} (${payload.detail})` : (payload.message || detail);
-        } catch {}
-        const selected = fileInput.files[0];
-        if (selected) {
-          const mb = (selected.size / (1024 * 1024)).toFixed(2);
-          detail += ` File: ${selected.name} (${mb} MB).`;
-        }
-        msgEl.textContent = detail;
+      if (!response.ok) {
+        mapStatusMsg.textContent = 'Reference upload failed.';
+        return;
       }
-      if (res.ok) setTimeout(loadMap, 800);
-      barkIfEnabled();
+      const payload = await response.json();
+      editorBackgroundPath = payload.image_path || null;
+      editorBgImage = editorBackgroundPath ? await loadImage(editorBackgroundPath) : null;
+      render();
+      mapStatusMsg.textContent = 'Reference image uploaded.';
+    };
+
+    const bgOpacityInput = document.getElementById('editorBgOpacity');
+    const bgOpacityLabel = document.getElementById('editorBgOpacityLabel');
+    bgOpacityInput.oninput = (e) => {
+      const pct = clamp(toFiniteNumber(e.target.value, 100), 0, 100);
+      editorBackgroundOpacity = pct / 100;
+      bgOpacityLabel.textContent = `${pct}%`;
+      render();
+    };
+  };
+
+  const renderBottomTools = () => {
+    mapBottomLeftTools.style.display = (mode === 'terrain-editor' || mode === 'political-editor') ? 'block' : 'none';
+    mapBottomRight.innerHTML = `
+      <div class="map-floating" style="position:relative;right:auto;bottom:auto;display:flex;gap:8px;align-items:center;">
+        <label class="map-small-label" for="terrainOpacity">Terrain Opacity</label>
+        <input id="terrainOpacity" type="range" min="0" max="100" value="${Math.round(terrainOpacity * 100)}">
+      </div>
+    `;
+    const opacityInput = document.getElementById('terrainOpacity');
+    opacityInput.oninput = (e) => {
+      terrainOpacity = clamp(toFiniteNumber(e.target.value, 55), 0, 100) / 100;
+      render();
+    };
+    if (mode === 'view') {
+      mapBottomLeftTools.innerHTML = '';
+      return;
+    }
+    mapBottomLeftTools.innerHTML = `
+      <div class="map-floating" style="position:relative;left:auto;bottom:auto;display:flex;gap:8px;align-items:center;">
+        <label class="map-small-label">Tool</label>
+        <select id="mapToolSelect" style="width:115px;"><option value="move">Move</option><option value="brush">Brush</option><option value="fill">Bucket</option><option value="outline">Outline</option></select>
+        <label class="map-small-label">Size</label>
+        <input id="mapBrushSize" type="range" min="1" max="200" value="${brushSize}">
+        <span class="map-small-label" id="mapBrushSizeLabel">${brushSize}px</span>
+      </div>
+    `;
+    document.getElementById('mapToolSelect').value = selectedTool;
+    document.getElementById('mapToolSelect').onchange = (e) => {
+      selectedTool = e.target.value;
+      if (selectedTool === 'outline') {
+        outlinePoints = [];
+        outlineClosed = false;
+      }
+      canvas.style.cursor = selectedTool === 'move' ? 'grab' : 'crosshair';
+      renderSidebar();
+      render();
+    };
+    document.getElementById('mapBrushSize').oninput = (e) => {
+      brushSize = clamp(toFiniteNumber(e.target.value, brushSize), 1, 200);
+      document.getElementById('mapBrushSizeLabel').textContent = `${brushSize}px`;
+    };
+
+    if (mode === 'terrain-editor') {
+      mapBottomRight.innerHTML = `
+        <div class="map-floating" style="position:relative;right:auto;bottom:auto;max-width:280px;">
+          <div class="map-small-label" style="margin-bottom:6px;">Terrain Types</div>
+          <div class="map-scroll-list" style="max-height:160px;">
+            ${TERRAIN_KEYS.map(k => `<button class="primary mapTerrainSelectBR" data-key="${k}" style="display:block;width:100%;margin-bottom:6px;${selectedTerrainType === k ? 'outline:2px solid var(--accent);' : ''}">${labelTerrainKey(k)}</button>`).join('')}
+          </div>
+        </div>
+      `;
+      mapBottomRight.querySelectorAll('.mapTerrainSelectBR').forEach(btn => {
+        btn.onclick = () => {
+          selectedTerrainType = btn.dataset.key;
+          renderBottomTools();
+        };
+      });
+    } else if (mode === 'political-editor') {
+      mapBottomRight.innerHTML = `
+        <div class="map-floating" style="position:relative;right:auto;bottom:auto;display:flex;gap:8px;align-items:center;">
+          <label class="map-small-label" for="terrainOpacity">Terrain Opacity</label>
+          <input id="terrainOpacity" type="range" min="0" max="100" value="${Math.round(terrainOpacity * 100)}">
+        </div>
+      `;
+      const pOpacityInput = document.getElementById('terrainOpacity');
+      pOpacityInput.oninput = (e) => {
+        terrainOpacity = clamp(toFiniteNumber(e.target.value, 55), 0, 100) / 100;
+        render();
+      };
+    }
+
+    canvas.style.cursor = selectedTool === 'move' ? 'grab' : 'crosshair';
+  };
+
+  const assignOutlinedLandToNation = () => {
+    if (mode !== 'political-editor' || !territoryEditing || !politicalEditNationId) {
+      mapStatusMsg.textContent = 'Enable Political territory editing first.';
+      return;
+    }
+    if (outlinePoints.length < 3 || !outlineClosed) {
+      mapStatusMsg.textContent = 'Cannot assign: outline is not fully encapsulated (closed).';
+      return;
+    }
+
+    const minX = Math.max(0, Math.floor(Math.min(...outlinePoints.map(p => p.x))));
+    const maxX = Math.min(mapWidth - 1, Math.ceil(Math.max(...outlinePoints.map(p => p.x))));
+    const minY = Math.max(0, Math.floor(Math.min(...outlinePoints.map(p => p.y))));
+    const maxY = Math.min(mapHeight - 1, Math.ceil(Math.max(...outlinePoints.map(p => p.y))));
+
+    let seed = null;
+    for (let y = minY; y <= maxY && !seed; y++) {
+      for (let x = minX; x <= maxX && !seed; x++) {
+        if (!pointInPolygon(x + 0.5, y + 0.5, outlinePoints)) continue;
+        if (terrainGrid[idx(x, y)] === TERRAIN_CODES.water) continue;
+        if (ownerGrid[idx(x, y)] !== 0) continue;
+        seed = { x, y };
+      }
+    }
+
+    if (!seed) {
+      mapStatusMsg.textContent = 'No unowned enclosed land found inside outline.';
+      return;
+    }
+
+    const q = [seed];
+    const visited = new Uint8Array(mapWidth * mapHeight);
+    visited[idx(seed.x, seed.y)] = 1;
+    let leaksToEdge = false;
+
+    while (q.length) {
+      const p = q.pop();
+      if (p.x <= 0 || p.y <= 0 || p.x >= mapWidth - 1 || p.y >= mapHeight - 1) {
+        leaksToEdge = true;
+        break;
+      }
+      const neighbors = [[p.x - 1, p.y], [p.x + 1, p.y], [p.x, p.y - 1], [p.x, p.y + 1]];
+      for (const [nx, ny] of neighbors) {
+        if (!inBounds(nx, ny)) continue;
+        const nIndex = idx(nx, ny);
+        if (visited[nIndex]) continue;
+        if (ownerGrid[nIndex] !== 0) continue;
+        if (terrainGrid[nIndex] === TERRAIN_CODES.water) continue;
+        visited[nIndex] = 1;
+        q.push({ x: nx, y: ny });
+      }
+    }
+
+    if (leaksToEdge) {
+      mapStatusMsg.textContent = 'Cannot assign: outline does not fully encapsulate a region.';
+      return;
+    }
+
+    commitPaintOperation({
+      tool: 'fill',
+      nation_id: politicalEditNationId,
+      remove: false,
+      x: seed.x,
+      y: seed.y,
+      size: brushSize,
+    });
+
+    outlinePoints = [];
+    outlineClosed = false;
+    mapStatusMsg.textContent = 'Encapsulated region assigned to selected nation.';
+    renderSidebar();
+    render();
+  };
+
+  const syncNationTerrainStats = async () => {
+    const nationPayload = politicalNationsArray().map(n => ({
+      id: n.id,
+      name: n.name,
+      alliance_name: n.alliance_name || '',
+      races: n.races || [],
+      pixels: nationPixelCount(n.id),
+    }));
+
+    let failedNationUpdates = 0;
+    for (const nation of nationPayload) {
+      const breakdown = terrainPixelBreakdownForNation(nation.id);
+      const terrainPayload = {
+        grassland: breakdown.grassland,
+        mountain: breakdown.mountain,
+        forest: breakdown.forest,
+        water: breakdown.water,
+        tundra: breakdown.tundra,
+        magic_grassland: breakdown.magic_grassland,
+        freshwater: breakdown.water,
+        hills: breakdown.forest,
+        desert: breakdown.desert,
+        seafront: breakdown.water,
+      };
+      const nationSaveRes = await api('/api/admin/nations/' + nation.id, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: nation.name,
+          alliance_name: nation.alliance_name,
+          terrain_square_miles: terrainPayload,
+        }),
+      });
+      if (!nationSaveRes || !nationSaveRes.ok) {
+        failedNationUpdates++;
+      }
+    }
+
+    return {
+      ok: failedNationUpdates === 0,
+      failedNationUpdates,
+      updatedCount: nationPayload.length,
+    };
+  };
+
+  const renderSidebar = () => {
+    if (mode === 'terrain-editor') {
+      mapSidePanel.innerHTML = `
+        <h3>Terrain Editor</h3>
+        <div class="map-scroll-list">
+          ${TERRAIN_KEYS.map(k => `<button class="primary mapTerrainSelect" data-key="${k}" style="display:block;width:100%;margin-bottom:6px;${selectedTerrainType === k ? 'outline:2px solid var(--accent);' : ''}">${labelTerrainKey(k)}</button>`).join('')}
+        </div>
+        <div class="setting-group" style="margin-top:8px;">
+          ${terrainColorControlsHtml()}
+        </div>
+        <div class="row"><button class="primary" id="exitTerrainEditorBtn">Exit Editor</button></div>
+      `;
+      mapSidePanel.querySelectorAll('.mapTerrainSelect').forEach(btn => {
+        btn.onclick = () => {
+          selectedTerrainType = btn.dataset.key;
+          renderSidebar();
+        };
+      });
+      bindTerrainColorInputs(mapSidePanel);
+      document.getElementById('exitTerrainEditorBtn').onclick = () => setMode('view');
+    } else if (mode === 'political-editor') {
+      const rows = politicalNationsArray();
+      const selected = getNationById(politicalEditNationId);
+      mapSidePanel.innerHTML = `
+        <h3>Political Editor</h3>
+        <div class="row" style="margin-top:0;">
+          <button class="primary" id="addPoliticalNationBtn">Add Nation</button>
+          <button class="primary" id="removePoliticalNationBtn" ${!politicalEditNationId ? 'disabled' : ''}>Remove From Map</button>
+        </div>
+        <div class="map-scroll-list" style="margin-top:8px;">
+          ${rows.map(n => `<button class="primary politicalNationPick" data-id="${n.id}" style="display:block;width:100%;margin-bottom:6px;${Number(n.id) === Number(politicalEditNationId) ? 'outline:2px solid var(--accent);' : ''}">${esc(n.name)}</button>`).join('') || '<div class="muted">No nations available.</div>'}
+        </div>
+        <div class="setting-group" style="margin-top:8px;">
+          <label>Name</label>
+          <input id="politicalNationName" value="${esc(selected?.name || '')}" ${!selected ? 'disabled' : ''}>
+          <label>Alliance</label>
+          <input id="politicalNationAlliance" value="${esc(selected?.alliance_name || '')}" ${!selected ? 'disabled' : ''}>
+          <label>Races (comma-separated)</label>
+          <input id="politicalNationRaces" value="${esc((selected?.races || []).join(', '))}" ${!selected ? 'disabled' : ''}>
+          <div class="row">
+            <label><input id="politicalRemoveToggle" type="checkbox" ${politicalRemoveMode ? 'checked' : ''}> Remove territory</label>
+          </div>
+          <div class="row">
+            <button class="primary" id="editTerritoryBtn" ${!selected ? 'disabled' : ''}>${territoryEditing ? 'Stop Territory Edit' : 'Edit Territory'}</button>
+          </div>
+          <div class="row">
+            <button class="primary" id="assignOutlineBtn" ${(!selected || !territoryEditing) ? 'disabled' : ''}>Assign Encapsulated Land</button>
+            <button class="primary" id="clearOutlineBtn" ${outlinePoints.length ? '' : 'disabled'}>Clear Outline</button>
+          </div>
+          <div class="map-small-label">Outline: ${outlinePoints.length < 3 ? 'Not started' : (outlineClosed ? 'Closed' : 'Open')}</div>
+          <div class="row">
+            <button class="primary" id="politicalDoneBtn" ${!territoryEditing ? 'disabled' : ''}>Done</button>
+          </div>
+        </div>
+        <div class="row"><button class="primary" id="exitPoliticalEditorBtn">Exit Editor</button></div>
+        <div class="setting-group" style="margin-top:8px;">
+          ${terrainColorControlsHtml()}
+        </div>
+      `;
+
+      mapSidePanel.querySelectorAll('.politicalNationPick').forEach(btn => {
+        btn.onclick = () => {
+          politicalEditNationId = Number(btn.dataset.id);
+          territoryEditing = false;
+          renderSidebar();
+        };
+      });
+
+      const syncMeta = () => {
+        const cur = getNationById(politicalEditNationId);
+        if (!cur) return;
+        cur.name = document.getElementById('politicalNationName').value.trim() || cur.name;
+        cur.alliance_name = document.getElementById('politicalNationAlliance').value.trim();
+        cur.races = document.getElementById('politicalNationRaces').value
+          .split(',')
+          .map(v => v.trim())
+          .filter(Boolean);
+        cur.dirty = true;
+        unsavedChanges = true;
+        labelCache = [];
+      };
+
+      const nName = document.getElementById('politicalNationName');
+      if (nName) nName.onchange = syncMeta;
+      const nAlliance = document.getElementById('politicalNationAlliance');
+      if (nAlliance) nAlliance.onchange = syncMeta;
+      const nRaces = document.getElementById('politicalNationRaces');
+      if (nRaces) nRaces.onchange = syncMeta;
+
+      document.getElementById('politicalRemoveToggle').onchange = (e) => {
+        politicalRemoveMode = !!e.target.checked;
+      };
+
+      document.getElementById('editTerritoryBtn').onclick = () => {
+        territoryEditing = !territoryEditing;
+        if (territoryEditing) {
+          selectedTool = 'brush';
+          brushSize = politicalDefaultBrushSize;
+          outlinePoints = [];
+          outlineClosed = false;
+        }
+        renderSidebar();
+        renderBottomTools();
+      };
+
+      document.getElementById('assignOutlineBtn').onclick = assignOutlinedLandToNation;
+      document.getElementById('clearOutlineBtn').onclick = () => {
+        outlinePoints = [];
+        outlineClosed = false;
+        mapStatusMsg.textContent = 'Outline cleared.';
+        renderSidebar();
+        render();
+      };
+
+      document.getElementById('politicalDoneBtn').onclick = () => {
+        territoryEditing = false;
+        const pixels = nationPixelCount(politicalEditNationId);
+        mapStatusMsg.textContent = `Nation territory committed: ${pixels.toLocaleString()} pixels.`;
+        renderSidebar();
+      };
+
+      document.getElementById('addPoliticalNationBtn').onclick = async () => {
+        const name = window.prompt('Nation name for new territory:', 'New Nation');
+        if (!name) return;
+        const response = await api('/api/admin/nations', { method: 'POST', body: JSON.stringify({ name }) });
+        if (!response || !response.ok) {
+          mapStatusMsg.textContent = 'Failed to create nation record.';
+          return;
+        }
+        const payload = await response.json();
+        const newId = Number(payload.id || 0);
+        if (!newId) return;
+        politicalNationMap.set(newId, { id: newId, name, alliance_name: '', races: [], dirty: true });
+        politicalEditNationId = newId;
+        territoryEditing = true;
+        selectedTool = 'brush';
+        brushSize = politicalDefaultBrushSize;
+        outlinePoints = [];
+        outlineClosed = false;
+        unsavedChanges = true;
+        renderSidebar();
+        renderBottomTools();
+      };
+
+      document.getElementById('removePoliticalNationBtn').onclick = () => {
+        if (!politicalEditNationId) return;
+        const ok = window.confirm('Remove all territory for this nation from the political map?');
+        if (!ok) return;
+        const targetNationId = Number(politicalEditNationId);
+        politicalStrokes = politicalStrokes.filter(op => Number(op.nation_id || 0) !== targetNationId);
+        rebuildPoliticalFromStrokes();
+        territoryEditing = false;
+        unsavedChanges = true;
+        labelCache = [];
+        outlinePoints = [];
+        outlineClosed = false;
+        mapStatusMsg.textContent = 'Nation territory removed from map.';
+        renderSidebar();
+        renderBottomTools();
+        render();
+      };
+
+      document.getElementById('exitPoliticalEditorBtn').onclick = () => setMode('view');
+      bindTerrainColorInputs(mapSidePanel);
+    } else {
+      const allianceNames = Array.from(new Set(
+        nations
+          .map(n => String(n?.alliance_name || '').trim())
+          .filter(Boolean)
+      )).sort((a, b) => a.localeCompare(b));
+
+      mapSidePanel.innerHTML = `
+        <h3>Map Type</h3>
+        <div class="map-scroll-list">
+          <button class="primary mapTypeBtn map-type-item ${mapType === 'political' ? 'active' : ''}" data-type="political">Political Map</button>
+          <button class="primary mapTypeBtn map-type-item ${mapType === 'alliance' ? 'active' : ''}" data-type="alliance">Alliance Map</button>
+        </div>
+        <div class="setting-group" style="margin-top:8px;">
+          <label><input type="checkbox" id="terrainFilterToggle" ${terrainFilterEnabled ? 'checked' : ''}> Terrain filter overlay</label>
+        </div>
+        <h3 style="margin-top:10px;">Terrain Sq Miles</h3>
+        <label style="font-size:13px;">View Nation</label>
+        <select id="mapNationSelectView" style="margin-bottom:8px;">
+          <option value="me">My Nation</option>
+          ${nations.map(n => `<option value="${n.id}">${esc(n.name)}</option>`).join('')}
+        </select>
+        <div class="list" id="mapTerrainStats"></div>
+        <div class="setting-group" style="margin-top:8px;">
+          ${terrainColorControlsHtml()}
+        </div>
+        ${mapType === 'alliance' ? `
+          <div class="setting-group" style="margin-top:8px;">
+            <h3 style="margin-top:0;">Alliance Colors (Your View)</h3>
+            <div class="map-small-label">These colors are saved per player.</div>
+            <div class="map-scroll-list" style="max-height:180px;margin-top:6px;">
+              ${allianceNames.map(name => {
+                const key = String(name || '').trim().toLowerCase();
+                const value = allianceColorOverrides[key] || '#7d7d7d';
+                return `
+                  <div class="terrain-color-row">
+                    <label style="font-size:12px;">${esc(name)}</label>
+                    <input type="color" class="allianceColorInput" data-key="${esc(key)}" value="${value}">
+                  </div>
+                `;
+              }).join('') || '<div class="muted">No alliances found.</div>'}
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <button class="primary" id="saveAllianceColorsBtn">Save Alliance Colors</button>
+              <button class="primary" id="resetAllianceColorsBtn">Reset</button>
+            </div>
+          </div>
+        ` : ''}
+      `;
+      mapSidePanel.querySelectorAll('.mapTypeBtn').forEach(btn => {
+        btn.onclick = () => {
+          mapType = btn.dataset.type;
+          politicalLayerDirty = true;
+          setNationInfo(0);
+          renderSidebar();
+          render();
+        };
+      });
+      document.getElementById('terrainFilterToggle').onchange = (e) => {
+        terrainFilterEnabled = !!e.target.checked;
+        render();
+      };
+      bindTerrainColorInputs(mapSidePanel);
+
+      if (mapType === 'alliance') {
+        mapSidePanel.querySelectorAll('.allianceColorInput').forEach(input => {
+          input.addEventListener('input', () => {
+            const key = String(input.dataset.key || '').trim().toLowerCase();
+            if (!key) return;
+            if (/^#[0-9A-Fa-f]{6}$/.test(input.value)) {
+              allianceColorOverrides[key] = input.value;
+              politicalLayerDirty = true;
+              render();
+            }
+          });
+        });
+
+        const saveAllianceColorsBtn = document.getElementById('saveAllianceColorsBtn');
+        if (saveAllianceColorsBtn) {
+          saveAllianceColorsBtn.onclick = async () => {
+            const payload = normalizeAllianceColorOverrides(allianceColorOverrides);
+            const saveRes = await api('/api/me/settings', {
+              method: 'PATCH',
+              body: JSON.stringify({ alliance_color_overrides: payload }),
+            });
+            if (!saveRes || !saveRes.ok) {
+              mapStatusMsg.textContent = 'Failed to save alliance colors.';
+              return;
+            }
+            settings.alliance_color_overrides = payload;
+            mapStatusMsg.textContent = 'Alliance colors saved for your account.';
+          };
+        }
+
+        const resetAllianceColorsBtn = document.getElementById('resetAllianceColorsBtn');
+        if (resetAllianceColorsBtn) {
+          resetAllianceColorsBtn.onclick = () => {
+            allianceColorOverrides = {};
+            settings.alliance_color_overrides = {};
+            politicalLayerDirty = true;
+            renderSidebar();
+            render();
+          };
+        }
+      }
+      const renderTerrainStats = (sqMiles) => {
+        const normalized = normalizeTerrainColorStats(sqMiles);
+        const total = Math.max(1, Object.values(normalized).reduce((sum, val) => sum + toFiniteNumber(val, 0), 0));
+        document.getElementById('mapTerrainStats').innerHTML = TERRAIN_KEYS.map((k) => {
+          const v = normalized[k] || 0;
+          const value = toFiniteNumber(v, 0);
+          const pct = ((value / total) * 100).toFixed(1);
+          return `<div>${labelTerrainKey(k)}: ${value} (${pct}%)</div>`;
+        }).join('') || '<div class="muted">No data</div>';
+      };
+      renderTerrainStats(myTerrainSqMiles);
+      document.getElementById('mapNationSelectView').onchange = async (e) => {
+        if (e.target.value === 'me') {
+          renderTerrainStats(myTerrainSqMiles);
+          return;
+        }
+        const detailRes = await api('/api/nations/' + e.target.value);
+        if (!detailRes || !detailRes.ok) return;
+        const detail = await detailRes.json();
+        renderTerrainStats(detail.terrain?.square_miles_json || {});
+      };
+    }
+
+    mapSaveArea.innerHTML = (mode === 'terrain-editor' || mode === 'political-editor')
+      ? '<button class="primary" id="saveMapEditorBtn">Save</button>'
+      : '';
+    const saveBtn = document.getElementById('saveMapEditorBtn');
+    if (saveBtn) {
+      saveBtn.onclick = async () => {
+        const nationPayload = politicalNationsArray().map(n => ({
+          id: n.id,
+          name: n.name,
+          alliance_name: n.alliance_name || '',
+          races: n.races || [],
+          pixels: nationPixelCount(n.id),
+        }));
+        const payload = {
+          width: mapWidth,
+          height: mapHeight,
+          terrain_color_overrides: colorOverrides,
+          terrain_strokes: terrainStrokes,
+          political_strokes: politicalStrokes,
+          political_nations: nationPayload,
+          editor_background_path: editorBackgroundPath,
+          editor_background_opacity: editorBackgroundOpacity,
+        };
+        const saveStateRes = await api('/api/admin/maps/editor-state', { method: 'POST', body: JSON.stringify(payload) });
+        if (!saveStateRes || !saveStateRes.ok) {
+          mapStatusMsg.textContent = 'Failed to save map editor state.';
+          return;
+        }
+
+        const syncResult = await syncNationTerrainStats();
+        if (!syncResult.ok) {
+          mapStatusMsg.textContent = `Map saved, but ${syncResult.failedNationUpdates} nation terrain updates failed.`;
+          return;
+        }
+
+        unsavedChanges = false;
+        mapStatusMsg.textContent = 'Map saved.';
+      };
+    }
+  };
+
+  // Directly updates terrainLayerCanvas + waterLayerCanvas for a single brush circle,
+  // avoiding a full O(W*H) rebuild during live painting.
+  const applyBrushToTerrainCanvas = (op) => {
+    const palette = getPalette();
+    const cx = Math.floor(op.x);
+    const cy = Math.floor(op.y);
+    const r = Math.ceil(op.size / 2);
+    const bx = Math.max(0, cx - r);
+    const by = Math.max(0, cy - r);
+    const bw = Math.min(mapWidth, cx + r + 1) - bx;
+    const bh = Math.min(mapHeight, cy + r + 1) - by;
+    if (bw <= 0 || bh <= 0) return;
+    const r2 = r * r;
+    const rgbByCode = new Array(TERRAIN_KEYS.length);
+    for (let code = 0; code < TERRAIN_KEYS.length; code++) {
+      const key = CODE_TO_TERRAIN[code];
+      rgbByCode[code] = (key === 'tundra' || key === 'water') ? null : parseColorToRgb(palette[key] || '#ffffff');
+    }
+    const waterRgb = parseColorToRgb(palette.water || '#357ec7');
+    const tImg = terrainLayerCtx.getImageData(bx, by, bw, bh);
+    const wImg = waterLayerCtx.getImageData(bx, by, bw, bh);
+    for (let row = 0; row < bh; row++) {
+      for (let col = 0; col < bw; col++) {
+        const gx = bx + col;
+        const gy = by + row;
+        const dx = gx - cx;
+        const dy = gy - cy;
+        if (dx * dx + dy * dy > r2) continue;
+        const gi = gy * mapWidth + gx;
+        const code = terrainGrid[gi];
+        const p = (row * bw + col) * 4;
+        if (code === TERRAIN_CODES.water) {
+          tImg.data[p + 3] = 0;
+          wImg.data[p] = waterRgb.r; wImg.data[p + 1] = waterRgb.g; wImg.data[p + 2] = waterRgb.b; wImg.data[p + 3] = 255;
+        } else if (code === TERRAIN_CODES.tundra) {
+          tImg.data[p + 3] = 0;
+          wImg.data[p + 3] = 0;
+        } else {
+          const rgb = rgbByCode[code];
+          tImg.data[p] = rgb.r; tImg.data[p + 1] = rgb.g; tImg.data[p + 2] = rgb.b; tImg.data[p + 3] = 255;
+          wImg.data[p + 3] = 0;
+        }
+      }
+    }
+    terrainLayerCtx.putImageData(tImg, bx, by);
+    waterLayerCtx.putImageData(wImg, bx, by);
+  };
+
+  // Directly updates politicalLayerCanvas for a single brush circle (fill pass only;
+  // border rendering is deferred to a full rebuild on pointerup via politicalNeedsPostPaintBorderUpdate).
+  const applyBrushToPoliticalCanvas = (op) => {
+    const cx = Math.floor(op.x);
+    const cy = Math.floor(op.y);
+    const r = Math.ceil(op.size / 2);
+    const bx = Math.max(0, cx - r);
+    const by = Math.max(0, cy - r);
+    const bw = Math.min(mapWidth, cx + r + 1) - bx;
+    const bh = Math.min(mapHeight, cy + r + 1) - by;
+    if (bw <= 0 || bh <= 0) return;
+    const r2 = r * r;
+    const colorCache = new Map();
+    const cachedRgb = (c) => {
+      if (!colorCache.has(c)) colorCache.set(c, parseColorToRgb(c));
+      return colorCache.get(c);
+    };
+    const img = politicalLayerCtx.getImageData(bx, by, bw, bh);
+    for (let row = 0; row < bh; row++) {
+      for (let col = 0; col < bw; col++) {
+        const gx = bx + col;
+        const gy = by + row;
+        const dx = gx - cx;
+        const dy = gy - cy;
+        if (dx * dx + dy * dy > r2) continue;
+        const gi = gy * mapWidth + gx;
+        const owner = ownerGrid[gi];
+        const p = (row * bw + col) * 4;
+        if (!owner) {
+          img.data[p] = 0; img.data[p + 1] = 0; img.data[p + 2] = 0; img.data[p + 3] = 0;
+        } else {
+          let color = '#ffffff';
+          if (mapType === 'alliance' || mode === 'political-editor') {
+            const nation = getNationById(owner);
+            color = nation?.alliance_name ? mapAllianceColor(nation.alliance_name) : '#7d7d7d';
+          }
+          const rgb = cachedRgb(color);
+          img.data[p] = rgb.r; img.data[p + 1] = rgb.g; img.data[p + 2] = rgb.b; img.data[p + 3] = 210;
+        }
+      }
+    }
+    politicalLayerCtx.putImageData(img, bx, by);
+    politicalNeedsPostPaintBorderUpdate = true;
+  };
+
+  const commitPaintOperation = (op) => {
+    if (mode === 'terrain-editor') {
+      terrainStrokes.push(op);
+      applyTerrainOperationToGrid(op, terrainGrid);
+      if (op.tool === 'brush') {
+        applyBrushToTerrainCanvas(op);
+      } else {
+        terrainLayerDirty = true;
+        waterLayerDirty = true;
+      }
+      politicalNeedsFullRebuild = true;
+    } else if (mode === 'political-editor') {
+      politicalStrokes.push(op);
+      if (politicalNeedsFullRebuild) {
+        rebuildPoliticalFromStrokes();
+      }
+      applyPoliticalOperationToGrid(op, ownerGrid);
+      if (op.tool === 'brush') {
+        applyBrushToPoliticalCanvas(op);
+      } else {
+        politicalLayerDirty = true;
+      }
+    }
+    labelCache = [];
+    unsavedChanges = true;
+  };
+
+  const applyPaint = (wx, wy) => {
+    if (!inBounds(wx, wy)) return;
+    if (mode === 'terrain-editor') {
+      if (selectedTool !== 'brush' && selectedTool !== 'fill') return;
+      commitPaintOperation({
+        tool: selectedTool === 'fill' ? 'fill' : 'brush',
+        terrain: selectedTerrainType,
+        x: wx,
+        y: wy,
+        size: brushSize,
+      });
+      scheduleRender();
+      return;
+    }
+
+    if (mode === 'political-editor' && territoryEditing && politicalEditNationId) {
+      if (selectedTool !== 'brush' && selectedTool !== 'fill' && selectedTool !== 'outline') return;
+      commitPaintOperation({
+        tool: selectedTool === 'fill' ? 'fill' : 'brush',
+        nation_id: politicalEditNationId,
+        remove: politicalRemoveMode,
+        x: wx,
+        y: wy,
+        size: brushSize,
+      });
+      scheduleRender();
+      return;
+    }
+  };
+
+  const applyBrushStrokeSegment = (fromPoint, toPoint) => {
+    if (!fromPoint || !toPoint) {
+      applyPaint(toPoint?.x, toPoint?.y);
+      return;
+    }
+    const dx = toPoint.x - fromPoint.x;
+    const dy = toPoint.y - fromPoint.y;
+    const steps = Math.max(Math.abs(dx), Math.abs(dy), 1);
+    const stride = Math.max(1, Math.floor(Math.max(1, brushSize * 0.35)));
+    for (let step = stride; step <= steps; step += stride) {
+      const x = Math.round(fromPoint.x + (dx * step) / steps);
+      const y = Math.round(fromPoint.y + (dy * step) / steps);
+      if (!inBounds(x, y)) continue;
+      if (mode === 'terrain-editor') {
+        commitPaintOperation({
+          tool: 'brush',
+          terrain: selectedTerrainType,
+          x,
+          y,
+          size: brushSize,
+        });
+      } else if (mode === 'political-editor' && territoryEditing && politicalEditNationId) {
+        commitPaintOperation({
+          tool: 'brush',
+          nation_id: politicalEditNationId,
+          remove: politicalRemoveMode,
+          x,
+          y,
+          size: brushSize,
+        });
+      }
+    }
+    const endX = Math.round(toPoint.x);
+    const endY = Math.round(toPoint.y);
+    if (inBounds(endX, endY)) {
+      if (mode === 'terrain-editor') {
+        commitPaintOperation({ tool: 'brush', terrain: selectedTerrainType, x: endX, y: endY, size: brushSize });
+      } else if (mode === 'political-editor' && territoryEditing && politicalEditNationId) {
+        commitPaintOperation({ tool: 'brush', nation_id: politicalEditNationId, remove: politicalRemoveMode, x: endX, y: endY, size: brushSize });
+      }
+    }
+    scheduleRender();
+  };
+
+  document.getElementById('mapZoomPercent').oninput = (e) => {
+    zoomPct = clamp(toFiniteNumber(e.target.value, 0), minZoomPct, maxZoomPct);
+    if (zoomPct <= 0) {
+      panX = 0;
+      panY = 0;
+    }
+    render();
+  };
+
+  stage.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    zoomPct = clamp(zoomPct + (e.deltaY < 0 ? 3 : -3), minZoomPct, maxZoomPct);
+    if (zoomPct <= 0) {
+      panX = 0;
+      panY = 0;
+    }
+    document.getElementById('mapZoomPercent').value = String(zoomPct);
+    render();
+  }, { passive: false });
+
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    downPoint = { x: e.clientX, y: e.clientY, panX, panY };
+    canvas.classList.add('dragging');
+
+    const canPaint = (mode === 'terrain-editor' || (mode === 'political-editor' && territoryEditing));
+    if (selectedTool === 'move') {
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
+
+    if (canPaint) {
+      const { wx, wy } = toWorld(e.clientX, e.clientY);
+      lastPaintPoint = { x: wx, y: wy };
+      if (mode === 'political-editor' && selectedTool === 'outline') {
+        if (outlineClosed) {
+          outlinePoints = [];
+          outlineClosed = false;
+        }
+        if (!outlinePoints.length) {
+          outlinePoints.push({ x: wx, y: wy });
+        }
+      }
+      applyPaint(wx, wy);
+    }
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging || !downPoint) return;
+    const canPaint = (mode === 'terrain-editor' || (mode === 'political-editor' && territoryEditing));
+
+    if (selectedTool === 'move') {
+      panX = downPoint.panX + (e.clientX - downPoint.x);
+      panY = downPoint.panY + (e.clientY - downPoint.y);
+      render();
+      return;
+    }
+
+    if (canPaint) {
+      if (selectedTool === 'brush' || (selectedTool === 'outline' && mode === 'political-editor')) {
+        const { wx, wy } = toWorld(e.clientX, e.clientY);
+        if (mode === 'political-editor' && selectedTool === 'outline') {
+          outlinePoints.push({ x: wx, y: wy });
+        }
+        applyBrushStrokeSegment(lastPaintPoint, { x: wx, y: wy });
+        lastPaintPoint = { x: wx, y: wy };
+      }
+      return;
+    }
+    if (zoomPct <= 0) return;
+    panX = downPoint.panX + (e.clientX - downPoint.x);
+    panY = downPoint.panY + (e.clientY - downPoint.y);
+    render();
+  });
+
+  const releasePointer = (e) => {
+    if (!dragging) return;
+    const wasClick = downPoint && Math.hypot(e.clientX - downPoint.x, e.clientY - downPoint.y) < 4;
+    dragging = false;
+    lastPaintPoint = null;
+    // After brush painting on the political layer, trigger a full rebuild to restore border lines.
+    if (politicalNeedsPostPaintBorderUpdate) {
+      politicalLayerDirty = true;
+      politicalNeedsPostPaintBorderUpdate = false;
+      scheduleRender();
+    }
+    if (mode === 'political-editor' && territoryEditing && selectedTool === 'outline' && outlinePoints.length >= 3) {
+      const closeThreshold = Math.max(5, brushSize * 1.5);
+      if (pointDistance(outlinePoints[0], outlinePoints[outlinePoints.length - 1]) <= closeThreshold) {
+        outlinePoints[outlinePoints.length - 1] = { ...outlinePoints[0] };
+        outlineClosed = true;
+      } else {
+        outlineClosed = false;
+      }
+      renderSidebar();
+      render();
+    }
+    canvas.classList.remove('dragging');
+    canvas.style.cursor = selectedTool === 'move' ? 'grab' : ((mode === 'terrain-editor' || mode === 'political-editor') ? 'crosshair' : 'grab');
+    if (wasClick && mode === 'view') {
+      const { wx, wy } = toWorld(e.clientX, e.clientY);
+      if (inBounds(wx, wy)) {
+        const nationId = ownerGrid[idx(wx, wy)];
+        setNationInfo(nationId || 0);
+      }
+    }
+  };
+  canvas.addEventListener('pointerup', releasePointer);
+  canvas.addEventListener('pointercancel', releasePointer);
+
+  mapFullscreenBtn.onclick = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await stage.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch {}
+  };
+
+  if (user.role === 'admin') {
+    document.getElementById('openTerrainEditorBtn').onclick = () => setMode('terrain-editor');
+    document.getElementById('openPoliticalEditorBtn').onclick = () => setMode('political-editor');
+    document.getElementById('recalcTerrainStatsBtn').onclick = async () => {
+      const ok = window.confirm('Recalculate terrain stats for all nations from the current map pixels?');
+      if (!ok) return;
+      const syncResult = await syncNationTerrainStats();
+      if (!syncResult.ok) {
+        mapStatusMsg.textContent = `Recalculation failed for ${syncResult.failedNationUpdates} nation(s).`;
+        return;
+      }
+      mapStatusMsg.textContent = `Terrain stats recalculated for ${syncResult.updatedCount} nation(s).`;
+      renderSidebar();
+    };
+    document.getElementById('resetMapBtn').onclick = async () => {
+      const firstWarning = window.confirm('This will permanently reset the entire map, clear all map layers, and reset all nation terrain map values. Continue?');
+      if (!firstWarning) return;
+
+      const phrase = window.prompt('Type exactly: confirm reset of map');
+      if ((phrase || '').trim() !== 'confirm reset of map') {
+        mapStatusMsg.textContent = 'Map reset cancelled: confirmation text did not match.';
+        return;
+      }
+
+      const resetRes = await api('/api/admin/maps/reset', { method: 'POST' });
+      if (!resetRes || !resetRes.ok) {
+        mapStatusMsg.textContent = 'Failed to reset map.';
+        return;
+      }
+
+      await loadMap();
     };
   }
+
+  resizeLayerCanvases();
+  rebuildTerrainFromStrokes();
+  rebuildPoliticalFromStrokes();
+  computeLabels();
+  renderSidebar();
+  renderTopEditorControls();
+  renderBottomTools();
+  resizeCanvas();
+  render();
+  window.addEventListener('resize', () => {
+    resizeCanvas();
+    render();
+  });
 }
 
 async function loadChat(preferredChatId = null) {
@@ -1876,7 +3437,7 @@ async function loadSettings() {
       show_unread_chat_badge: document.getElementById('showUnreadChatBadge').checked,
     };
     await api('/api/me/settings', { method: 'PATCH', body: JSON.stringify(payload) });
-    settings = payload;
+    settings = { ...settings, ...payload };
     setTheme(settings.theme);
     applyColorBlindMode(settings.color_blind_mode);
     setFontMode(settings.font_mode);

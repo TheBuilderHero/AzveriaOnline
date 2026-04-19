@@ -19,6 +19,8 @@ class UpdateSettingsRequest extends FormRequest
             'dog_bark_enabled' => ['nullable', 'boolean'],
             'font_mode' => ['nullable', 'in:normal,fun,cool_person'],
             'show_unread_chat_badge' => ['nullable', 'boolean'],
+            'alliance_color_overrides' => ['nullable', 'array'],
+            'alliance_color_overrides.*' => ['nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
         ];
     }
 }

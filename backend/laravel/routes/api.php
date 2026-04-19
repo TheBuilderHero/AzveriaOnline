@@ -47,6 +47,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/announcements', [AnnouncementController::class, 'store'])->middleware('role:admin');
 
     Route::get('/maps/layers', [MapController::class, 'index']);
+    Route::get('/maps/editor-state', [MapController::class, 'editorState']);
 
     Route::get('/nations', [NationController::class, 'index']);
     Route::get('/nations/{nationId}', [NationController::class, 'show']);
@@ -83,6 +84,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/notifications', [AdminController::class, 'notifications']);
         Route::delete('/notifications/{notificationId}', [AdminController::class, 'deleteNotification']);
         Route::post('/maps/layers/{layerType}', [MapController::class, 'uploadLayer']);
+        Route::post('/maps/editor-reference', [MapController::class, 'uploadEditorReference']);
+        Route::post('/maps/reset', [MapController::class, 'resetMap']);
+        Route::post('/maps/editor-state', [MapController::class, 'saveEditorState']);
         Route::post('/chats', [AdminController::class, 'createChat']);
         Route::delete('/chats/{chatId}', [AdminController::class, 'deleteChat']);
         Route::post('/chats/{chatId}/members', [AdminController::class, 'addMembers']);
