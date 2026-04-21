@@ -883,6 +883,8 @@ async function loadMap() {
   let politicalRemoveMode = false;
   let territoryEditing = false;
   let zoomPct = 0;
+  let zoomTargetPct = 0;
+  let zoomAnimFrame = 0;
   let panX = 0;
   let panY = 0;
   let dragging = false;
@@ -904,6 +906,8 @@ async function loadMap() {
   let lastPaintPoint = null;
   let outlinePoints = [];
   let outlineClosed = false;
+  let lastOutlinePoint = null;
+  let dragAction = 'none';
 
   const terrainColorControlsHtml = () => {
     const palette = getPalette();
@@ -965,6 +969,22 @@ async function loadMap() {
   const idx = (x, y) => (y * mapWidth) + x;
   const inBounds = (x, y) => x >= 0 && y >= 0 && x < mapWidth && y < mapHeight;
   const pointDistance = (a, b) => Math.hypot((a?.x || 0) - (b?.x || 0), (a?.y || 0) - (b?.y || 0));
+  const brushRadiusFromSize = (size) => clamp(Math.ceil(toFiniteNumber(size, 1) / 2), 1, 200);
+  const brushOffsetCache = new Map();
+  const getBrushOffsets = (radius) => {
+    const r = clamp(Math.floor(radius), 1, 200);
+    if (brushOffsetCache.has(r)) return brushOffsetCache.get(r);
+    const offsets = [];
+    const rr = r * r;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if ((dx * dx) + (dy * dy) > rr) continue;
+        offsets.push(dx, dy);
+      }
+    }
+    brushOffsetCache.set(r, offsets);
+    return offsets;
+  };
 
   const terrainLayerCanvas = document.createElement('canvas');
   const terrainLayerCtx = terrainLayerCanvas.getContext('2d');
@@ -1039,6 +1059,64 @@ async function loadMap() {
     return inside;
   };
 
+  const getScaleForZoom = (zoomValue) => {
+    const viewW = canvas.width || Math.max(200, Math.floor(stage.getBoundingClientRect().width));
+    const viewH = canvas.height || Math.max(200, Math.floor(stage.getBoundingClientRect().height));
+    const fitScale = Math.min(viewW / mapWidth, viewH / mapHeight);
+    const factor = zoomValue >= 0
+      ? 1 + (zoomValue / 100) * 79
+      : Math.max(0.55, 1 + (zoomValue / 100));
+    return fitScale * factor;
+  };
+
+  const setZoom = (nextZoom, pivot = null) => {
+    const clamped = clamp(nextZoom, minZoomPct, maxZoomPct);
+    if (Math.abs(clamped - zoomPct) < 0.0001) return;
+
+    const prevScale = transform.scale || getScaleForZoom(zoomPct);
+    const prevOriginX = transform.originX;
+    const prevOriginY = transform.originY;
+    const viewW = canvas.width || Math.max(200, Math.floor(stage.getBoundingClientRect().width));
+    const viewH = canvas.height || Math.max(200, Math.floor(stage.getBoundingClientRect().height));
+    const newScale = getScaleForZoom(clamped);
+
+    zoomPct = clamped;
+
+    if (pivot && Number.isFinite(pivot.sx) && Number.isFinite(pivot.sy) && prevScale > 0 && newScale > 0) {
+      const worldX = (pivot.sx - prevOriginX) / prevScale;
+      const worldY = (pivot.sy - prevOriginY) / prevScale;
+      const nextCenterX = (viewW - mapWidth * newScale) / 2;
+      const nextCenterY = (viewH - mapHeight * newScale) / 2;
+      panX = pivot.sx - nextCenterX - (worldX * newScale);
+      panY = pivot.sy - nextCenterY - (worldY * newScale);
+    }
+
+    if (zoomPct <= 0) {
+      panX = 0;
+      panY = 0;
+    }
+
+    scheduleRender();
+  };
+
+  const animateZoomToTarget = (pivot = null) => {
+    if (zoomAnimFrame) {
+      cancelAnimationFrame(zoomAnimFrame);
+      zoomAnimFrame = 0;
+    }
+    const step = () => {
+      const delta = zoomTargetPct - zoomPct;
+      if (Math.abs(delta) < 0.1) {
+        setZoom(zoomTargetPct, pivot);
+        zoomAnimFrame = 0;
+        return;
+      }
+      setZoom(zoomPct + (delta * 0.22), pivot);
+      zoomAnimFrame = requestAnimationFrame(step);
+    };
+    zoomAnimFrame = requestAnimationFrame(step);
+  };
+
   const getNationById = (id) => politicalNationMap.get(Number(id)) || null;
   const firstLetterName = (name) => {
     const s = (name || '').trim();
@@ -1073,15 +1151,13 @@ async function loadMap() {
       return;
     }
 
-    const r = clamp(Math.floor(op.size || 50), 1, 200);
-    for (let yy = y - r; yy <= y + r; yy++) {
-      for (let xx = x - r; xx <= x + r; xx++) {
-        if (!inBounds(xx, yy)) continue;
-        const dx = xx - x;
-        const dy = yy - y;
-        if ((dx * dx) + (dy * dy) > r * r) continue;
-        targetGrid[idx(xx, yy)] = code;
-      }
+    const r = brushRadiusFromSize(op.size || 50);
+    const offsets = getBrushOffsets(r);
+    for (let i = 0; i < offsets.length; i += 2) {
+      const xx = x + offsets[i];
+      const yy = y + offsets[i + 1];
+      if (!inBounds(xx, yy)) continue;
+      targetGrid[idx(xx, yy)] = code;
     }
   };
 
@@ -1123,18 +1199,16 @@ async function loadMap() {
       return;
     }
 
-    const r = clamp(Math.floor(op.size || 50), 1, 200);
-    for (let yy = y - r; yy <= y + r; yy++) {
-      for (let xx = x - r; xx <= x + r; xx++) {
-        if (!inBounds(xx, yy)) continue;
-        const dx = xx - x;
-        const dy = yy - y;
-        if ((dx * dx) + (dy * dy) > r * r) continue;
-        const ii = idx(xx, yy);
-        if (!op.remove && terrainGrid[ii] === TERRAIN_CODES.water) continue;
-        if (!op.remove && targetGrid[ii] && targetGrid[ii] !== newId) continue;
-        targetGrid[ii] = newId;
-      }
+    const r = brushRadiusFromSize(op.size || 50);
+    const offsets = getBrushOffsets(r);
+    for (let i = 0; i < offsets.length; i += 2) {
+      const xx = x + offsets[i];
+      const yy = y + offsets[i + 1];
+      if (!inBounds(xx, yy)) continue;
+      const ii = idx(xx, yy);
+      if (!op.remove && terrainGrid[ii] === TERRAIN_CODES.water) continue;
+      if (!op.remove && targetGrid[ii] && targetGrid[ii] !== newId) continue;
+      targetGrid[ii] = newId;
     }
   };
 
@@ -1282,16 +1356,19 @@ async function loadMap() {
     const parsed = safeJsonParse(raw, raw) || {};
     const source = (typeof parsed === 'string') ? (safeJsonParse(parsed, {}) || {}) : parsed;
     const out = Object.fromEntries(TERRAIN_KEYS.map(k => [k, 0]));
+    const hasForest = Object.prototype.hasOwnProperty.call(source, 'forest');
+    const hasWater = Object.prototype.hasOwnProperty.call(source, 'water');
+    const legacySea = toFiniteNumber(source.seafront ?? source.sea_front ?? source.seaFront, 0);
 
     out.grassland = toFiniteNumber(source.grassland, 0);
-    out.forest = toFiniteNumber(source.forest, 0) + toFiniteNumber(source.hills, 0);
+    out.forest = hasForest ? toFiniteNumber(source.forest, 0) : toFiniteNumber(source.hills, 0);
     out.mountain = toFiniteNumber(source.mountain, 0);
     out.desert = toFiniteNumber(source.desert, 0);
     out.tundra = toFiniteNumber(source.tundra, 0);
     out.magic_grassland = toFiniteNumber(source.magic_grassland, 0);
-    out.water = toFiniteNumber(source.water, 0)
-      + toFiniteNumber(source.freshwater, 0)
-      + toFiniteNumber(source.seafront ?? source.sea_front ?? source.seaFront, 0);
+    out.water = hasWater
+      ? toFiniteNumber(source.water, 0)
+      : toFiniteNumber(source.freshwater, 0) + legacySea;
 
     return out;
   };
@@ -1480,6 +1557,7 @@ async function loadMap() {
     mode = nextMode;
     territoryEditing = false;
     lastPaintPoint = null;
+    lastOutlinePoint = null;
     outlinePoints = [];
     outlineClosed = false;
     if (mode === 'terrain-editor') {
@@ -1541,6 +1619,7 @@ async function loadMap() {
       politicalLayerDirty = true;
       labelCache = [];
       unsavedChanges = true;
+      lastOutlinePoint = null;
       resizeCanvas();
       render();
       mapStatusMsg.textContent = 'Grid resized and reset to all water.';
@@ -1739,14 +1818,14 @@ async function loadMap() {
       const terrainPayload = {
         grassland: breakdown.grassland,
         mountain: breakdown.mountain,
+        hills: breakdown.forest,
+        freshwater: 0,
+        seafront: breakdown.water,
+        desert: breakdown.desert,
         forest: breakdown.forest,
         water: breakdown.water,
         tundra: breakdown.tundra,
         magic_grassland: breakdown.magic_grassland,
-        freshwater: breakdown.water,
-        hills: breakdown.forest,
-        desert: breakdown.desert,
-        seafront: breakdown.water,
       };
       const nationSaveRes = await api('/api/admin/nations/' + nation.id, {
         method: 'PUT',
@@ -2103,46 +2182,56 @@ async function loadMap() {
 
   // Directly updates terrainLayerCanvas + waterLayerCanvas for a single brush circle,
   // avoiding a full O(W*H) rebuild during live painting.
-  const applyBrushToTerrainCanvas = (op) => {
+  let brushPaletteSignature = '';
+  let brushTerrainRgbByCode = [];
+  let brushWaterRgb = { r: 53, g: 126, b: 199 };
+  const syncBrushPaletteCache = () => {
     const palette = getPalette();
-    const cx = Math.floor(op.x);
-    const cy = Math.floor(op.y);
-    const r = Math.ceil(op.size / 2);
-    const bx = Math.max(0, cx - r);
-    const by = Math.max(0, cy - r);
-    const bw = Math.min(mapWidth, cx + r + 1) - bx;
-    const bh = Math.min(mapHeight, cy + r + 1) - by;
-    if (bw <= 0 || bh <= 0) return;
-    const r2 = r * r;
+    const signature = JSON.stringify(palette);
+    if (signature === brushPaletteSignature) return;
     const rgbByCode = new Array(TERRAIN_KEYS.length);
     for (let code = 0; code < TERRAIN_KEYS.length; code++) {
       const key = CODE_TO_TERRAIN[code];
       rgbByCode[code] = (key === 'tundra' || key === 'water') ? null : parseColorToRgb(palette[key] || '#ffffff');
     }
-    const waterRgb = parseColorToRgb(palette.water || '#357ec7');
+    brushPaletteSignature = signature;
+    brushTerrainRgbByCode = rgbByCode;
+    brushWaterRgb = parseColorToRgb(palette.water || '#357ec7');
+  };
+
+  const applyBrushToTerrainCanvas = (op) => {
+    syncBrushPaletteCache();
+    const cx = Math.floor(op.x);
+    const cy = Math.floor(op.y);
+    const r = brushRadiusFromSize(op.size);
+    const bx = Math.max(0, cx - r);
+    const by = Math.max(0, cy - r);
+    const bw = Math.min(mapWidth, cx + r + 1) - bx;
+    const bh = Math.min(mapHeight, cy + r + 1) - by;
+    if (bw <= 0 || bh <= 0) return;
+    const offsets = getBrushOffsets(r);
     const tImg = terrainLayerCtx.getImageData(bx, by, bw, bh);
     const wImg = waterLayerCtx.getImageData(bx, by, bw, bh);
-    for (let row = 0; row < bh; row++) {
-      for (let col = 0; col < bw; col++) {
-        const gx = bx + col;
-        const gy = by + row;
-        const dx = gx - cx;
-        const dy = gy - cy;
-        if (dx * dx + dy * dy > r2) continue;
-        const gi = gy * mapWidth + gx;
-        const code = terrainGrid[gi];
-        const p = (row * bw + col) * 4;
-        if (code === TERRAIN_CODES.water) {
-          tImg.data[p + 3] = 0;
-          wImg.data[p] = waterRgb.r; wImg.data[p + 1] = waterRgb.g; wImg.data[p + 2] = waterRgb.b; wImg.data[p + 3] = 255;
-        } else if (code === TERRAIN_CODES.tundra) {
-          tImg.data[p + 3] = 0;
-          wImg.data[p + 3] = 0;
-        } else {
-          const rgb = rgbByCode[code];
-          tImg.data[p] = rgb.r; tImg.data[p + 1] = rgb.g; tImg.data[p + 2] = rgb.b; tImg.data[p + 3] = 255;
-          wImg.data[p + 3] = 0;
-        }
+    for (let i = 0; i < offsets.length; i += 2) {
+      const gx = cx + offsets[i];
+      const gy = cy + offsets[i + 1];
+      if (!inBounds(gx, gy)) continue;
+      const col = gx - bx;
+      const row = gy - by;
+      if (col < 0 || row < 0 || col >= bw || row >= bh) continue;
+      const gi = gy * mapWidth + gx;
+      const code = terrainGrid[gi];
+      const p = (row * bw + col) * 4;
+      if (code === TERRAIN_CODES.water) {
+        tImg.data[p + 3] = 0;
+        wImg.data[p] = brushWaterRgb.r; wImg.data[p + 1] = brushWaterRgb.g; wImg.data[p + 2] = brushWaterRgb.b; wImg.data[p + 3] = 255;
+      } else if (code === TERRAIN_CODES.tundra) {
+        tImg.data[p + 3] = 0;
+        wImg.data[p + 3] = 0;
+      } else {
+        const rgb = brushTerrainRgbByCode[code];
+        tImg.data[p] = rgb.r; tImg.data[p + 1] = rgb.g; tImg.data[p + 2] = rgb.b; tImg.data[p + 3] = 255;
+        wImg.data[p + 3] = 0;
       }
     }
     terrainLayerCtx.putImageData(tImg, bx, by);
@@ -2154,40 +2243,39 @@ async function loadMap() {
   const applyBrushToPoliticalCanvas = (op) => {
     const cx = Math.floor(op.x);
     const cy = Math.floor(op.y);
-    const r = Math.ceil(op.size / 2);
+    const r = brushRadiusFromSize(op.size);
     const bx = Math.max(0, cx - r);
     const by = Math.max(0, cy - r);
     const bw = Math.min(mapWidth, cx + r + 1) - bx;
     const bh = Math.min(mapHeight, cy + r + 1) - by;
     if (bw <= 0 || bh <= 0) return;
-    const r2 = r * r;
+    const offsets = getBrushOffsets(r);
     const colorCache = new Map();
     const cachedRgb = (c) => {
       if (!colorCache.has(c)) colorCache.set(c, parseColorToRgb(c));
       return colorCache.get(c);
     };
     const img = politicalLayerCtx.getImageData(bx, by, bw, bh);
-    for (let row = 0; row < bh; row++) {
-      for (let col = 0; col < bw; col++) {
-        const gx = bx + col;
-        const gy = by + row;
-        const dx = gx - cx;
-        const dy = gy - cy;
-        if (dx * dx + dy * dy > r2) continue;
-        const gi = gy * mapWidth + gx;
-        const owner = ownerGrid[gi];
-        const p = (row * bw + col) * 4;
-        if (!owner) {
-          img.data[p] = 0; img.data[p + 1] = 0; img.data[p + 2] = 0; img.data[p + 3] = 0;
-        } else {
-          let color = '#ffffff';
-          if (mapType === 'alliance' || mode === 'political-editor') {
-            const nation = getNationById(owner);
-            color = nation?.alliance_name ? mapAllianceColor(nation.alliance_name) : '#7d7d7d';
-          }
-          const rgb = cachedRgb(color);
-          img.data[p] = rgb.r; img.data[p + 1] = rgb.g; img.data[p + 2] = rgb.b; img.data[p + 3] = 210;
+    for (let i = 0; i < offsets.length; i += 2) {
+      const gx = cx + offsets[i];
+      const gy = cy + offsets[i + 1];
+      if (!inBounds(gx, gy)) continue;
+      const col = gx - bx;
+      const row = gy - by;
+      if (col < 0 || row < 0 || col >= bw || row >= bh) continue;
+      const gi = gy * mapWidth + gx;
+      const owner = ownerGrid[gi];
+      const p = (row * bw + col) * 4;
+      if (!owner) {
+        img.data[p] = 0; img.data[p + 1] = 0; img.data[p + 2] = 0; img.data[p + 3] = 0;
+      } else {
+        let color = '#ffffff';
+        if (mapType === 'alliance' || mode === 'political-editor') {
+          const nation = getNationById(owner);
+          color = nation?.alliance_name ? mapAllianceColor(nation.alliance_name) : '#7d7d7d';
         }
+        const rgb = cachedRgb(color);
+        img.data[p] = rgb.r; img.data[p + 1] = rgb.g; img.data[p + 2] = rgb.b; img.data[p + 3] = 210;
       }
     }
     politicalLayerCtx.putImageData(img, bx, by);
@@ -2217,7 +2305,9 @@ async function loadMap() {
         politicalLayerDirty = true;
       }
     }
-    labelCache = [];
+    if (mode === 'political-editor') {
+      labelCache = [];
+    }
     unsavedChanges = true;
   };
 
@@ -2238,6 +2328,7 @@ async function loadMap() {
 
     if (mode === 'political-editor' && territoryEditing && politicalEditNationId) {
       if (selectedTool !== 'brush' && selectedTool !== 'fill' && selectedTool !== 'outline') return;
+      if (selectedTool === 'outline') return;
       commitPaintOperation({
         tool: selectedTool === 'fill' ? 'fill' : 'brush',
         nation_id: politicalEditNationId,
@@ -2259,7 +2350,9 @@ async function loadMap() {
     const dx = toPoint.x - fromPoint.x;
     const dy = toPoint.y - fromPoint.y;
     const steps = Math.max(Math.abs(dx), Math.abs(dy), 1);
-    const stride = Math.max(1, Math.floor(Math.max(1, brushSize * 0.35)));
+    const maxSamples = 120;
+    const dynamicStride = Math.max(1, Math.floor(Math.max(1, brushSize * 0.6)));
+    const stride = Math.max(dynamicStride, Math.ceil(steps / maxSamples));
     for (let step = stride; step <= steps; step += stride) {
       const x = Math.round(fromPoint.x + (dx * step) / steps);
       const y = Math.round(fromPoint.y + (dy * step) / steps);
@@ -2296,35 +2389,33 @@ async function loadMap() {
   };
 
   document.getElementById('mapZoomPercent').oninput = (e) => {
-    zoomPct = clamp(toFiniteNumber(e.target.value, 0), minZoomPct, maxZoomPct);
-    if (zoomPct <= 0) {
-      panX = 0;
-      panY = 0;
-    }
-    render();
+    zoomTargetPct = clamp(toFiniteNumber(e.target.value, 0), minZoomPct, maxZoomPct);
+    animateZoomToTarget();
   };
 
   stage.addEventListener('wheel', (e) => {
     e.preventDefault();
-    zoomPct = clamp(zoomPct + (e.deltaY < 0 ? 3 : -3), minZoomPct, maxZoomPct);
-    if (zoomPct <= 0) {
-      panX = 0;
-      panY = 0;
-    }
-    document.getElementById('mapZoomPercent').value = String(zoomPct);
-    render();
+    const rect = canvas.getBoundingClientRect();
+    zoomTargetPct = clamp(zoomTargetPct + (e.deltaY < 0 ? 3 : -3), minZoomPct, maxZoomPct);
+    document.getElementById('mapZoomPercent').value = String(Math.round(zoomTargetPct));
+    animateZoomToTarget({ sx: e.clientX - rect.left, sy: e.clientY - rect.top });
   }, { passive: false });
 
   canvas.addEventListener('pointerdown', (e) => {
     dragging = true;
+    canvas.setPointerCapture(e.pointerId);
     downPoint = { x: e.clientX, y: e.clientY, panX, panY };
     canvas.classList.add('dragging');
 
+    const inEditorMode = (mode === 'terrain-editor' || mode === 'political-editor');
     const canPaint = (mode === 'terrain-editor' || (mode === 'political-editor' && territoryEditing));
-    if (selectedTool === 'move') {
+    const shiftMoveOverride = inEditorMode && e.shiftKey;
+    if (selectedTool === 'move' || shiftMoveOverride) {
+      dragAction = 'move';
       canvas.style.cursor = 'grabbing';
       return;
     }
+    dragAction = canPaint ? 'paint' : 'none';
 
     if (canPaint) {
       const { wx, wy } = toWorld(e.clientX, e.clientY);
@@ -2336,6 +2427,8 @@ async function loadMap() {
         }
         if (!outlinePoints.length) {
           outlinePoints.push({ x: wx, y: wy });
+          lastOutlinePoint = { x: wx, y: wy };
+          scheduleRender();
         }
       }
       applyPaint(wx, wy);
@@ -2344,37 +2437,43 @@ async function loadMap() {
 
   canvas.addEventListener('pointermove', (e) => {
     if (!dragging || !downPoint) return;
-    const canPaint = (mode === 'terrain-editor' || (mode === 'political-editor' && territoryEditing));
 
-    if (selectedTool === 'move') {
+    if (dragAction === 'move') {
       panX = downPoint.panX + (e.clientX - downPoint.x);
       panY = downPoint.panY + (e.clientY - downPoint.y);
-      render();
+      scheduleRender();
       return;
     }
 
-    if (canPaint) {
-      if (selectedTool === 'brush' || (selectedTool === 'outline' && mode === 'political-editor')) {
+    if (dragAction === 'paint') {
+      if (selectedTool === 'brush') {
         const { wx, wy } = toWorld(e.clientX, e.clientY);
-        if (mode === 'political-editor' && selectedTool === 'outline') {
-          outlinePoints.push({ x: wx, y: wy });
-        }
         applyBrushStrokeSegment(lastPaintPoint, { x: wx, y: wy });
         lastPaintPoint = { x: wx, y: wy };
+      } else if (selectedTool === 'outline' && mode === 'political-editor') {
+        const { wx, wy } = toWorld(e.clientX, e.clientY);
+        const next = { x: wx, y: wy };
+        if (!lastOutlinePoint || pointDistance(lastOutlinePoint, next) >= 2) {
+          outlinePoints.push(next);
+          lastOutlinePoint = next;
+          scheduleRender();
+        }
       }
       return;
     }
     if (zoomPct <= 0) return;
     panX = downPoint.panX + (e.clientX - downPoint.x);
     panY = downPoint.panY + (e.clientY - downPoint.y);
-    render();
+    scheduleRender();
   });
 
   const releasePointer = (e) => {
     if (!dragging) return;
     const wasClick = downPoint && Math.hypot(e.clientX - downPoint.x, e.clientY - downPoint.y) < 4;
     dragging = false;
+    dragAction = 'none';
     lastPaintPoint = null;
+    lastOutlinePoint = null;
     // After brush painting on the political layer, trigger a full rebuild to restore border lines.
     if (politicalNeedsPostPaintBorderUpdate) {
       politicalLayerDirty = true;
@@ -2390,7 +2489,10 @@ async function loadMap() {
         outlineClosed = false;
       }
       renderSidebar();
-      render();
+      scheduleRender();
+    }
+    if (canvas.hasPointerCapture(e.pointerId)) {
+      canvas.releasePointerCapture(e.pointerId);
     }
     canvas.classList.remove('dragging');
     canvas.style.cursor = selectedTool === 'move' ? 'grab' : ((mode === 'terrain-editor' || mode === 'political-editor') ? 'crosshair' : 'grab');

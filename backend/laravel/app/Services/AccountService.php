@@ -172,24 +172,48 @@ class AccountService
 
     public function buildTerrainStatsPayload(array $terrainSquareMiles): array
     {
-        $squareMiles = array_merge([
-            'grassland' => 0,
-            'mountain' => 0,
-            'freshwater' => 0,
-            'hills' => 0,
-            'desert' => 0,
-            'seafront' => 0,
-        ], $terrainSquareMiles);
+        $read = static function (array $source, array $keys): float {
+            foreach ($keys as $key) {
+                if (!array_key_exists($key, $source)) {
+                    continue;
+                }
+                $value = (float) $source[$key];
+                return max(0, $value);
+            }
 
-        $total = max(1, array_sum(array_map('floatval', $squareMiles)));
+            return 0;
+        };
+
+        $normalized = [
+            'grassland' => $read($terrainSquareMiles, ['grassland']),
+            'mountain' => $read($terrainSquareMiles, ['mountain']),
+            'freshwater' => $read($terrainSquareMiles, ['freshwater']),
+            'hills' => $read($terrainSquareMiles, ['hills', 'forest']),
+            'desert' => $read($terrainSquareMiles, ['desert']),
+            'seafront' => $read($terrainSquareMiles, ['seafront', 'sea_front', 'seaFront']),
+        ];
+
+        $extra = [];
+        foreach ($terrainSquareMiles as $key => $value) {
+            if (array_key_exists($key, $normalized)) {
+                continue;
+            }
+            if (!is_numeric($value)) {
+                continue;
+            }
+            $extra[$key] = max(0, (float) $value);
+        }
+
+        $squareMiles = array_merge($normalized, $extra);
+        $total = max(1, array_sum($normalized));
 
         return [
-            'grassland_pct' => round(((float) ($squareMiles['grassland'] ?? 0) / $total) * 100, 2),
-            'mountain_pct' => round(((float) ($squareMiles['mountain'] ?? 0) / $total) * 100, 2),
-            'freshwater_pct' => round(((float) ($squareMiles['freshwater'] ?? 0) / $total) * 100, 2),
-            'hills_pct' => round(((float) ($squareMiles['hills'] ?? 0) / $total) * 100, 2),
-            'desert_pct' => round(((float) ($squareMiles['desert'] ?? 0) / $total) * 100, 2),
-            'seafront_pct' => round(((float) ($squareMiles['seafront'] ?? 0) / $total) * 100, 2),
+            'grassland_pct' => round(($normalized['grassland'] / $total) * 100, 2),
+            'mountain_pct' => round(($normalized['mountain'] / $total) * 100, 2),
+            'freshwater_pct' => round(($normalized['freshwater'] / $total) * 100, 2),
+            'hills_pct' => round(($normalized['hills'] / $total) * 100, 2),
+            'desert_pct' => round(($normalized['desert'] / $total) * 100, 2),
+            'seafront_pct' => round(($normalized['seafront'] / $total) * 100, 2),
             'square_miles_json' => json_encode($squareMiles),
         ];
     }

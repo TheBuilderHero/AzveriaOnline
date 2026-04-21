@@ -23,6 +23,7 @@ This document defines admin-only behavior in the Azveria Online web app.
 	- Terrain map
 	- Political map
 - Changes are global and instantly visible to all users.
+- Note to move while drawing hold shift and click and drag to move the map.
 
 ### Chat
 - Access all chats.
@@ -68,4 +69,5 @@ Admin tools are designed around the attached Azveria data sets:
 - Azveria rules/resources
 - Structures/terrain
 - War system and unit semantics
-- Dakotians sample statline
+- Dakotians sample statline\
+
