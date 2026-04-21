@@ -66,6 +66,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/shop/items', [ShopController::class, 'items']);
     Route::post('/shop/buy', [ShopController::class, 'buy']);
 
+    // Read-only game information and rules for all authenticated users.
+    Route::get('/game-documents', [AdminController::class, 'gameDocuments']);
+    Route::get('/game-documents/{code}', [AdminController::class, 'gameDocument']);
+
     Route::middleware('role:admin')->prefix('/admin')->group(function () {
         Route::get('/users', [AdminController::class, 'users']);
         Route::get('/nations', [AdminController::class, 'nations']);
@@ -74,7 +78,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/nations', [AdminController::class, 'createPlaceholderNation']);
         Route::put('/nations/{nationId}', [AdminController::class, 'updateNation']);
         Route::post('/nations/{nationId}/units', [AdminController::class, 'addUnitToNation']);
+        Route::delete('/nations/{nationId}/units/{nationUnitId}', [AdminController::class, 'removeUnitFromNation']);
+        Route::post('/nations/{nationId}/buildings', [AdminController::class, 'addBuildingToNation']);
+        Route::delete('/nations/{nationId}/buildings/{nationBuildingId}', [AdminController::class, 'removeBuildingFromNation']);
         Route::get('/unit-catalog', [AdminController::class, 'unitCatalog']);
+        Route::get('/building-catalog', [AdminController::class, 'buildingCatalog']);
         Route::get('/new-account-defaults', [AdminController::class, 'newAccountDefaults']);
         Route::patch('/new-account-defaults', [AdminController::class, 'updateNewAccountDefaults']);
         Route::patch('/users/{userId}/password', [AuthController::class, 'adminResetPassword']);
@@ -99,6 +107,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/visibility/rules', [AdminController::class, 'visibilityRules']);
         Route::put('/visibility/rules', [AdminController::class, 'updateVisibilityRules']);
         Route::get('/game-documents', [AdminController::class, 'gameDocuments']);
+        Route::post('/game-documents', [AdminController::class, 'createGameDocument']);
         Route::get('/game-documents/download-all', [AdminController::class, 'downloadAllGameDocuments']);
         Route::get('/game-documents/{code}', [AdminController::class, 'gameDocument']);
         Route::put('/game-documents/{code}', [AdminController::class, 'updateGameDocument']);

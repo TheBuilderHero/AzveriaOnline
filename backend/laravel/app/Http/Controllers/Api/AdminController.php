@@ -226,10 +226,103 @@ class AdminController extends Controller
         return response()->json(['message' => 'Unit added']);
     }
 
+    public function removeUnitFromNation(Request $request, int $nationId, int $nationUnitId)
+    {
+        $data = $request->validate([
+            'qty' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        $nation = DB::table('nations')->where('id', $nationId)->first();
+        if (!$nation) {
+            return response()->json(['message' => 'Nation not found'], 404);
+        }
+
+        $unitRow = DB::table('nation_units')
+            ->where('id', $nationUnitId)
+            ->where('nation_id', $nationId)
+            ->first();
+        if (!$unitRow) {
+            return response()->json(['message' => 'Nation unit not found'], 404);
+        }
+
+        $removeQty = (int) ($data['qty'] ?? 1);
+        if ($removeQty >= (int) $unitRow->qty) {
+            DB::table('nation_units')->where('id', $nationUnitId)->delete();
+        } else {
+            DB::table('nation_units')->where('id', $nationUnitId)->update([
+                'qty' => max(0, (int) $unitRow->qty - $removeQty),
+                'updated_at' => now(),
+            ]);
+        }
+
+        return response()->json(['message' => 'Unit removed']);
+    }
+
+    public function addBuildingToNation(Request $request, int $nationId)
+    {
+        $data = $request->validate([
+            'building_catalog_id' => ['required', 'integer', 'exists:building_catalog,id'],
+            'level' => ['sometimes', 'integer', 'min:1'],
+            'status' => ['sometimes', 'in:built,constructing,upgrading'],
+            'qty' => ['sometimes', 'integer', 'min:1', 'max:500'],
+        ]);
+
+        $nation = DB::table('nations')->where('id', $nationId)->first();
+        if (!$nation) {
+            return response()->json(['message' => 'Nation not found'], 404);
+        }
+
+        $qty = (int) ($data['qty'] ?? 1);
+        $payload = [];
+        for ($i = 0; $i < $qty; $i++) {
+            $payload[] = [
+                'nation_id' => $nationId,
+                'building_catalog_id' => (int) $data['building_catalog_id'],
+                'level' => (int) ($data['level'] ?? 1),
+                'status' => (string) ($data['status'] ?? 'built'),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+        }
+
+        DB::table('nation_buildings')->insert($payload);
+
+        return response()->json(['message' => 'Building added']);
+    }
+
+    public function removeBuildingFromNation(int $nationId, int $nationBuildingId)
+    {
+        $nation = DB::table('nations')->where('id', $nationId)->first();
+        if (!$nation) {
+            return response()->json(['message' => 'Nation not found'], 404);
+        }
+
+        $deleted = DB::table('nation_buildings')
+            ->where('id', $nationBuildingId)
+            ->where('nation_id', $nationId)
+            ->delete();
+
+        if (!$deleted) {
+            return response()->json(['message' => 'Nation building not found'], 404);
+        }
+
+        return response()->json(['message' => 'Building removed']);
+    }
+
     public function unitCatalog()
     {
         $rows = DB::table('unit_catalog')
             ->select('id', 'code', 'display_name', 'class_name', 'unlocked_by_structure')
+            ->orderBy('display_name')
+            ->get();
+
+        return response()->json($rows);
+    }
+
+    public function buildingCatalog()
+    {
+        $rows = DB::table('building_catalog')
+            ->select('id', 'code', 'display_name', 'max_level')
             ->orderBy('display_name')
             ->get();
 
@@ -303,27 +396,105 @@ class AdminController extends Controller
 
     public function gameDocuments()
     {
+        $dbRows = collect();
+        if (Schema::hasTable('game_documents')) {
+            $dbRows = DB::table('game_documents')
+                ->select('code', 'title', 'updated_at')
+                ->get()
+                ->keyBy('code');
+        }
+
+        $builtInCodes = collect($this->gameDocumentDefinitions())
+            ->pluck('code')
+            ->values();
+
         $rows = collect($this->gameDocumentDefinitions())
-            ->map(function (array $document) {
+            ->map(function (array $document) use ($dbRows) {
                 $path = $this->gameDocumentPath($document['filename']);
                 $updatedAt = File::exists($path) ? date('c', File::lastModified($path)) : null;
 
-                if ($updatedAt === null && Schema::hasTable('game_documents')) {
-                    $updatedAt = DB::table('game_documents')
-                        ->where('code', $document['code'])
-                        ->value('updated_at');
+                $dbRow = $dbRows->get($document['code']);
+                if ($updatedAt === null && $dbRow) {
+                    $updatedAt = $dbRow->updated_at;
                 }
 
                 return [
                     'code' => $document['code'],
-                    'title' => $document['title'],
+                    'title' => ($dbRow && is_string($dbRow->title) && trim($dbRow->title) !== '') ? $dbRow->title : $document['title'],
                     'updated_at' => $updatedAt,
                 ];
-            })
+            });
+
+        if ($dbRows->isNotEmpty()) {
+            $customRows = $dbRows
+                ->filter(fn ($row, $code) => !$builtInCodes->contains((string) $code))
+                ->map(function ($row, $code) {
+                    $fallbackTitle = Str::headline(str_replace('_', ' ', (string) $code));
+                    return [
+                        'code' => (string) $code,
+                        'title' => (is_string($row->title) && trim($row->title) !== '') ? $row->title : $fallbackTitle,
+                        'updated_at' => $row->updated_at,
+                    ];
+                })
+                ->values();
+
+            $rows = $rows->merge($customRows);
+        }
+
+        $rows = $rows
             ->sortBy('title')
             ->values();
 
         return response()->json($rows);
+    }
+
+    public function createGameDocument(Request $request)
+    {
+        $data = $request->validate([
+            'title' => ['required', 'string', 'max:200'],
+            'content_text' => ['nullable', 'string'],
+            'code' => ['sometimes', 'nullable', 'string', 'max:80'],
+        ]);
+
+        if (!Schema::hasTable('game_documents')) {
+            return response()->json(['message' => 'Game document storage is not available'], 500);
+        }
+
+        $rawCode = trim((string) ($data['code'] ?? ''));
+        $codeSource = $rawCode !== '' ? $rawCode : (string) $data['title'];
+        $code = Str::slug($codeSource, '_');
+        if ($code === '' || strlen($code) > 80) {
+            throw ValidationException::withMessages([
+                'code' => ['Please provide a valid document code (letters, numbers, spaces, dashes, underscores).'],
+            ]);
+        }
+
+        if ($this->findGameDocument($code) !== null) {
+            throw ValidationException::withMessages([
+                'code' => ['A built-in game document already uses this code.'],
+            ]);
+        }
+
+        $exists = DB::table('game_documents')->where('code', $code)->exists();
+        if ($exists) {
+            throw ValidationException::withMessages([
+                'code' => ['A game document with this code already exists.'],
+            ]);
+        }
+
+        DB::table('game_documents')->insert([
+            'code' => $code,
+            'title' => trim((string) $data['title']),
+            'content_text' => (string) ($data['content_text'] ?? ''),
+            'updated_by_user_id' => $request->user()->id,
+            'updated_at' => now(),
+        ]);
+
+        return response()->json([
+            'message' => 'Game information document created',
+            'code' => $code,
+            'title' => trim((string) $data['title']),
+        ], 201);
     }
 
     public function downloadAllGameDocuments()
@@ -355,6 +526,23 @@ class AdminController extends Controller
             }
         }
 
+        if (Schema::hasTable('game_documents')) {
+            $builtInCodes = collect($this->gameDocumentDefinitions())->pluck('code')->all();
+            $customRows = DB::table('game_documents')
+                ->select('code', 'content_text')
+                ->whereNotIn('code', $builtInCodes)
+                ->get();
+
+            foreach ($customRows as $row) {
+                $safeBase = preg_replace('/[^a-z0-9_\-]+/i', '_', (string) $row->code);
+                $safeBase = trim((string) $safeBase, '_-');
+                if ($safeBase === '') {
+                    $safeBase = 'document_' . Str::random(6);
+                }
+                $zip->addFromString($safeBase . '.md', (string) ($row->content_text ?? ''));
+            }
+        }
+
         $zip->close();
 
         return response()->download($tmpFile, 'game-information.zip', [
@@ -365,8 +553,25 @@ class AdminController extends Controller
     public function gameDocument(string $code)
     {
         $document = $this->findGameDocument($code);
-        if ($document === null) {
+        $dbRow = null;
+        if (Schema::hasTable('game_documents')) {
+            $dbRow = DB::table('game_documents')->where('code', $code)->first();
+        }
+        if ($document === null && !$dbRow) {
             return response()->json(['message' => 'Game information document not found'], 404);
+        }
+
+        if ($document === null && $dbRow) {
+            $resolvedTitle = (is_string($dbRow->title) && trim($dbRow->title) !== '')
+                ? $dbRow->title
+                : Str::headline(str_replace('_', ' ', $code));
+
+            return response()->json([
+                'code' => (string) $code,
+                'title' => $resolvedTitle,
+                'content_text' => (string) ($dbRow->content_text ?? ''),
+                'updated_at' => $dbRow->updated_at,
+            ]);
         }
 
         // DB takes priority if an admin has explicitly saved edits (updated_by_user_id is set).
@@ -380,6 +585,14 @@ class AdminController extends Controller
             if ($row && $row->updated_by_user_id !== null && !$isPlaceholder) {
                 $content = $row->content_text;
                 $updatedAt = $row->updated_at;
+            }
+        }
+
+        $resolvedTitle = $document['title'];
+        if (Schema::hasTable('game_documents')) {
+            $dbTitle = DB::table('game_documents')->where('code', $code)->value('title');
+            if (is_string($dbTitle) && trim($dbTitle) !== '') {
+                $resolvedTitle = $dbTitle;
             }
         }
 
@@ -400,7 +613,7 @@ class AdminController extends Controller
 
         return response()->json([
             'code' => $document['code'],
-            'title' => $document['title'],
+            'title' => $resolvedTitle,
             'content_text' => $content,
             'updated_at' => $updatedAt,
         ]);
@@ -414,9 +627,17 @@ class AdminController extends Controller
         ]);
 
         $document = $this->findGameDocument($code);
-        if ($document === null) {
+        $dbExisting = Schema::hasTable('game_documents')
+            ? DB::table('game_documents')->where('code', $code)->first()
+            : null;
+        if ($document === null && !$dbExisting) {
             return response()->json(['message' => 'Game information document not found'], 404);
         }
+
+        $defaultTitle = $document['title']
+            ?? ((is_string($dbExisting?->title) && trim((string) $dbExisting->title) !== '')
+                ? $dbExisting->title
+                : Str::headline(str_replace('_', ' ', $code)));
 
         // Persist edits to the DB so they survive container restarts.
         // The resource file is baked into the image and serves as the factory default;
@@ -425,7 +646,7 @@ class AdminController extends Controller
             DB::table('game_documents')->updateOrInsert(
                 ['code' => $code],
                 [
-                    'title' => $data['title'] ?? $document['title'],
+                    'title' => $data['title'] ?? $defaultTitle,
                     'content_text' => $data['content_text'],
                     'updated_by_user_id' => $request->user()->id,
                     'updated_at' => now(),

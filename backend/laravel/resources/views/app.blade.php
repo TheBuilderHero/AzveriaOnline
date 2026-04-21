@@ -148,6 +148,78 @@
     .notify-head { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
     .notify-type { font-size:11px; background:#314f72; color:#fff; border-radius:999px; padding:2px 8px; }
     .setting-group { border: 1px solid #c9d1db; border-radius: 10px; padding: 10px; margin-top: 10px; }
+    .doc-toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+      gap: 10px;
+      align-items: end;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: linear-gradient(180deg, var(--panel), var(--bg));
+    }
+    .doc-toolbar-actions { display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap; }
+    .doc-read {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 14px;
+      line-height: 1.6;
+      min-height: 280px;
+      max-height: 62vh;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-size: 14px;
+    }
+    .doc-editor {
+      margin-top: 10px;
+      min-height: 280px;
+      max-height: 62vh;
+      font-family: Consolas, 'Courier New', monospace;
+      resize: vertical;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .admin-picker {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      background: var(--bg);
+      margin-top: 8px;
+    }
+    .admin-picker-list {
+      width: 100%;
+      min-height: 170px;
+      max-height: 220px;
+      overflow: auto;
+      font-size: 13px;
+    }
+    .admin-asset-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 8px;
+      border-bottom: 1px solid #d7dee7;
+    }
+    .admin-asset-row:last-child { border-bottom: 0; }
+    .admin-asset-remove { background:#8a1a1a; }
+    .doc-create {
+      margin-top: 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: linear-gradient(180deg, var(--bg), var(--panel));
+      padding: 12px;
+    }
+    .doc-create-grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .doc-create h3 { margin: 0 0 8px 0; }
+    @media (max-width: 900px) {
+      .doc-toolbar { grid-template-columns: 1fr; }
+      .doc-toolbar-actions { justify-content:flex-start; }
+      .doc-create-grid { grid-template-columns: 1fr; }
+    }
     .map-shell { display:grid; grid-template-columns: 1fr 300px; gap:12px; }
     .map-stage-wrap { position:relative; border:1px solid #c9d1db; border-radius:12px; background:#0f1520; height:72vh; min-height:480px; overflow:hidden; }
     .map-stage-controls { position:absolute; left:12px; right:12px; top:10px; display:flex; justify-content:space-between; align-items:flex-start; z-index:4; pointer-events:none; }
@@ -247,7 +319,7 @@ const view = document.getElementById('view');
 const nav = document.getElementById('nav');
 const resourcesBar = document.getElementById('resourcesBar');
 
-const playerMenu = ['Player', 'Announcements', 'Map', 'Combat', 'Chat', 'Other Nations', 'Shop', 'Settings'];
+const playerMenu = ['Player', 'Announcements', 'Game Information and Rules', 'Map', 'Combat', 'Chat', 'Other Nations', 'Shop', 'Settings'];
 const adminMenu = ['Announcements', 'All Nations', 'Notifications', 'Game Information and Rules', 'New Accounts', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
 
 const goofyAudio = new Audio('https://actions.google.com/sounds/v1/cartoon/boing.ogg');
@@ -761,6 +833,7 @@ async function loadAnnouncements() {
   const payload = await res.json();
   const list = extractList(payload);
   const canPost = user.role === 'admin';
+
   view.innerHTML = `
     <div class="card">
       <h2>Announcements</h2>
@@ -3938,31 +4011,85 @@ async function loadAllNations() {
       <h3 style="margin:0 0 8px;">Owned Units / Buildings</h3>
       <details open style="margin-bottom:8px;">
         <summary>Units (${(d.units || []).length})</summary>
-        <div class="list" style="max-height:160px;">${(d.units || []).map(u => `<div>${u.display_name || 'Unit'} x${u.qty} (${u.status})</div>`).join('') || '<div class="muted">No units</div>'}</div>
+        <div class="list" style="max-height:220px;">${(d.units || []).map(u => `
+          <div class="admin-asset-row">
+            <div>${escapeHtml(u.display_name || 'Unit')} x${Number(u.qty || 0)} <span class="muted">(${escapeHtml(u.status || 'owned')})</span></div>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input id="removeUnitQty-${u.id}" type="number" min="1" max="${Number(u.qty || 1)}" value="1" style="width:70px;padding:4px;">
+              <button class="primary admin-asset-remove removeUnitBtn" data-unit-id="${u.id}">Remove</button>
+            </div>
+          </div>
+        `).join('') || '<div class="muted">No units</div>'}</div>
       </details>
       <details open style="margin-bottom:8px;">
         <summary>Buildings (${(d.buildings || []).length})</summary>
-        <div class="list" style="max-height:160px;">${(d.buildings || []).map(b => `<div>${b.display_name} L${b.level} (${b.status})</div>`).join('') || '<div class="muted">No buildings</div>'}</div>
+        <div class="list" style="max-height:220px;">${(d.buildings || []).map(b => `
+          <div class="admin-asset-row">
+            <div>${escapeHtml(b.display_name || 'Building')} L${Number(b.level || 1)} <span class="muted">(${escapeHtml(b.status || 'built')})</span></div>
+            <button class="primary admin-asset-remove removeBuildingBtn" data-building-id="${b.id}">Remove</button>
+          </div>
+        `).join('') || '<div class="muted">No buildings</div>'}</div>
       </details>
 
       <hr style="margin:12px 0;">
       <h3 style="margin:0 0 8px;">Add Unit</h3>
-      <div id="unitCatArea" class="muted">Loading units…</div>
-      <div class="row" style="margin-top:6px;"><button class="primary" id="addUnitBtn">Add Unit</button><span class="muted" id="addUnitMsg"></span></div>
+      <div class="admin-picker">
+        <label style="font-size:13px;">Search Units</label>
+        <input id="unitCatalogSearch" placeholder="Type to filter units...">
+        <select id="unitCatId" class="admin-picker-list" size="8" style="margin-top:6px;"></select>
+        <div class="row" style="margin-top:6px;">
+          <div style="min-width:120px;"><label style="font-size:12px;">Quantity</label><input id="unitQty" type="number" value="1" min="1"></div>
+          <div style="min-width:180px;"><label style="font-size:12px;">Status</label><select id="unitStatus"><option value="owned">Owned</option><option value="training">Training</option></select></div>
+        </div>
+        <div class="row" style="margin-top:6px;"><button class="primary" id="addUnitBtn">Add Unit</button><span class="muted" id="addUnitMsg"></span></div>
+      </div>
+
+      <h3 style="margin:12px 0 8px;">Add Building</h3>
+      <div class="admin-picker">
+        <label style="font-size:13px;">Search Buildings</label>
+        <input id="buildingCatalogSearch" placeholder="Type to filter buildings...">
+        <select id="buildingCatId" class="admin-picker-list" size="8" style="margin-top:6px;"></select>
+        <div class="row" style="margin-top:6px;">
+          <div style="min-width:100px;"><label style="font-size:12px;">Level</label><input id="buildingLevel" type="number" value="1" min="1"></div>
+          <div style="min-width:180px;"><label style="font-size:12px;">Status</label><select id="buildingStatus"><option value="built">Built</option><option value="constructing">Constructing</option><option value="upgrading">Upgrading</option></select></div>
+          <div style="min-width:120px;"><label style="font-size:12px;">Quantity</label><input id="buildingQty" type="number" value="1" min="1"></div>
+        </div>
+        <div class="row" style="margin-top:6px;"><button class="primary" id="addBuildingBtn">Add Building</button><span class="muted" id="addBuildingMsg"></span></div>
+      </div>
     `;
 
-    const unitCatalogRes = await api('/api/admin/unit-catalog');
+    const [unitCatalogRes, buildingCatalogRes] = await Promise.all([
+      api('/api/admin/unit-catalog'),
+      api('/api/admin/building-catalog'),
+    ]);
     const unitCatalog = unitCatalogRes && unitCatalogRes.ok ? await unitCatalogRes.json() : [];
-    document.getElementById('unitCatArea').innerHTML = `
-      <label style="font-size:13px;">Unit</label>
-      <select id="unitCatId" style="margin-bottom:4px;">
-        ${unitCatalog.map(u => `<option value="${u.id}">${u.display_name} [${u.class_name || 'unit'}]</option>`).join('')}
-      </select>
-      <label style="font-size:13px;">Quantity</label>
-      <input id="unitQty" type="number" value="1" min="1">
-      <label style="font-size:13px;">Status</label>
-      <select id="unitStatus"><option value="owned">Owned</option><option value="training">Training</option></select>
-    `;
+    const buildingCatalog = buildingCatalogRes && buildingCatalogRes.ok ? await buildingCatalogRes.json() : [];
+
+    const unitSelect = document.getElementById('unitCatId');
+    const buildingSelect = document.getElementById('buildingCatId');
+
+    const renderUnitOptions = (term = '') => {
+      const needle = String(term || '').trim().toLowerCase();
+      const filtered = unitCatalog.filter(u => {
+        const hay = `${u.display_name || ''} ${u.class_name || ''} ${u.code || ''}`.toLowerCase();
+        return !needle || hay.includes(needle);
+      });
+      unitSelect.innerHTML = filtered.map(u => `<option value="${u.id}">${escapeHtml(u.display_name || 'Unit')} [${escapeHtml(u.class_name || 'unit')}]</option>`).join('');
+    };
+
+    const renderBuildingOptions = (term = '') => {
+      const needle = String(term || '').trim().toLowerCase();
+      const filtered = buildingCatalog.filter(b => {
+        const hay = `${b.display_name || ''} ${b.code || ''}`.toLowerCase();
+        return !needle || hay.includes(needle);
+      });
+      buildingSelect.innerHTML = filtered.map(b => `<option value="${b.id}">${escapeHtml(b.display_name || 'Building')} [${escapeHtml(b.code || '')}]</option>`).join('');
+    };
+
+    renderUnitOptions();
+    renderBuildingOptions();
+    document.getElementById('unitCatalogSearch').addEventListener('input', (e) => renderUnitOptions(e.target.value));
+    document.getElementById('buildingCatalogSearch').addEventListener('input', (e) => renderBuildingOptions(e.target.value));
 
     document.getElementById('saveNation').onclick = async () => {
       const refined_resources = {};
@@ -4012,7 +4139,7 @@ async function loadAllNations() {
       const unitCatalogId = Number(document.getElementById('unitCatId').value);
       const qty = Number(document.getElementById('unitQty').value);
       const status = document.getElementById('unitStatus').value;
-      if (!unitCatalogId) { document.getElementById('addUnitMsg').textContent = 'Enter a unit catalog ID'; return; }
+      if (!unitCatalogId) { document.getElementById('addUnitMsg').textContent = 'Select a unit from the list.'; return; }
       const r = await api('/api/admin/nations/' + id + '/units', { method: 'POST', body: JSON.stringify({ unit_catalog_id: unitCatalogId, qty, status }) });
       document.getElementById('addUnitMsg').textContent = r.ok ? 'Added!' : 'Failed';
       if (r.ok) {
@@ -4020,6 +4147,50 @@ async function loadAllNations() {
       }
       barkIfEnabled();
     };
+
+    document.getElementById('addBuildingBtn').onclick = async () => {
+      const buildingCatalogId = Number(document.getElementById('buildingCatId').value);
+      const level = Number(document.getElementById('buildingLevel').value || 1);
+      const status = document.getElementById('buildingStatus').value;
+      const qty = Number(document.getElementById('buildingQty').value || 1);
+      if (!buildingCatalogId) { document.getElementById('addBuildingMsg').textContent = 'Select a building from the list.'; return; }
+      const r = await api('/api/admin/nations/' + id + '/buildings', {
+        method: 'POST',
+        body: JSON.stringify({ building_catalog_id: buildingCatalogId, level, status, qty }),
+      });
+      document.getElementById('addBuildingMsg').textContent = r.ok ? 'Added!' : 'Failed';
+      if (r.ok) {
+        openEditor(id);
+      }
+      barkIfEnabled();
+    };
+
+    document.querySelectorAll('.removeUnitBtn').forEach(btn => {
+      btn.onclick = async () => {
+        const rowId = Number(btn.dataset.unitId);
+        const qtyInput = document.getElementById('removeUnitQty-' + rowId);
+        const qty = Math.max(1, Number(qtyInput?.value || 1));
+        const r = await api('/api/admin/nations/' + id + '/units/' + rowId, {
+          method: 'DELETE',
+          body: JSON.stringify({ qty }),
+        });
+        if (r.ok) {
+          openEditor(id);
+        }
+      };
+    });
+
+    document.querySelectorAll('.removeBuildingBtn').forEach(btn => {
+      btn.onclick = async () => {
+        const rowId = Number(btn.dataset.buildingId);
+        const r = await api('/api/admin/nations/' + id + '/buildings/' + rowId, {
+          method: 'DELETE',
+        });
+        if (r.ok) {
+          openEditor(id);
+        }
+      };
+    });
   };
 
   document.querySelectorAll('.editNationBtn').forEach(btn => btn.onclick = () => openEditor(btn.dataset.id));
@@ -4129,77 +4300,138 @@ async function loadNotifications() {
 }
 
 async function loadGameInformationRules() {
-  const listRes = await api('/api/admin/game-documents');
-  const docs = listRes && listRes.ok ? await listRes.json() : [];
+  const isAdmin = user.role === 'admin';
+  const listRes = await api(isAdmin ? '/api/admin/game-documents' : '/api/game-documents');
+  let docs = listRes && listRes.ok ? await listRes.json() : [];
 
   view.innerHTML = `
     <div class="card">
       <h2>Game Information and Rules</h2>
-      <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap;">
-        <div style="min-width:240px;flex:1;">
+      <div class="doc-toolbar">
+        <div>
           <label style="font-size:12px;">Document</label>
           <select id="gameDocSelect">
-            <option value="">— Select a document —</option>
+            <option value="">- Select a document -</option>
             ${docs.map(d => `<option value="${escapeHtml(d.code)}">${escapeHtml(d.title)}</option>`).join('')}
           </select>
         </div>
-        <button class="primary" id="gameDocEditBtn" style="background:#314f72;" disabled>Edit</button>
-        <button class="primary" id="gameDocSaveBtn" style="display:none;" disabled>Save</button>
-        <button id="gameDocCancelBtn" style="display:none;">Cancel</button>
-        <button id="gameDocDownloadAllBtn" style="background:#2a5934;">Download All</button>
-        <span class="muted" id="gameDocMsg"></span>
+        ${isAdmin ? `
+          <div>
+            <label style="font-size:12px;">Document Name</label>
+            <input id="gameDocTitle" type="text" placeholder="Document display name" disabled>
+          </div>
+          <div class="doc-toolbar-actions">
+            <button class="primary" id="gameDocEditBtn" style="background:#314f72;" disabled>Edit</button>
+            <button class="primary" id="gameDocSaveBtn" style="display:none;" disabled>Save</button>
+            <button id="gameDocCancelBtn" style="display:none;">Cancel</button>
+            <button id="gameDocDownloadAllBtn" style="background:#2a5934;">Download All</button>
+          </div>
+        ` : `
+          <div></div>
+          <div class="doc-toolbar-actions"></div>
+        `}
       </div>
-      <p id="gameDocHint" class="muted" style="margin:8px 0 0;">Select a document above to view its contents.</p>
-      <div id="gameDocLoading" style="display:none;margin-top:8px;" class="muted">Loading…</div>
-      <textarea id="gameDocText" rows="28" readonly
-        style="display:none;margin-top:8px;font-family:Consolas,'Courier New',monospace;resize:vertical;"></textarea>
+      <div class="row" style="margin-top:8px;"><span class="muted" id="gameDocMsg"></span></div>
+      <p id="gameDocHint" class="muted" style="margin:6px 0 0;">Select a document above to view its contents.</p>
+      <div id="gameDocLoading" style="display:none;margin-top:8px;" class="muted">Loading...</div>
+      <div id="gameDocRead" class="doc-read" style="display:none;"></div>
+      <textarea id="gameDocText" rows="24" readonly class="doc-editor" style="display:none;"></textarea>
+      ${isAdmin ? `
+        <div class="doc-create">
+          <h3>Create New Document</h3>
+          <div class="doc-create-grid">
+            <div>
+              <label style="font-size:12px;">Title</label>
+              <input id="newGameDocTitle" type="text" placeholder="Example: Naval Combat Rules">
+            </div>
+            <div>
+              <label style="font-size:12px;">Code (optional)</label>
+              <input id="newGameDocCode" type="text" placeholder="Example: naval_combat_rules">
+            </div>
+          </div>
+          <label style="font-size:12px; margin-top:8px; display:block;">Initial Content</label>
+          <textarea id="newGameDocContent" rows="6" placeholder="Write the initial rules text..."></textarea>
+          <div class="row" style="margin-top:8px;">
+            <button class="primary" id="createGameDocBtn" style="background:#2f6a41;">Create Document</button>
+            <span class="muted" id="createGameDocMsg"></span>
+          </div>
+        </div>
+      ` : ''}
     </div>
   `;
 
   let currentCode = '';
   let originalContent = '';
+  let originalTitle = '';
 
-  const select          = document.getElementById('gameDocSelect');
-  const text            = document.getElementById('gameDocText');
-  const editBtn         = document.getElementById('gameDocEditBtn');
-  const saveBtn         = document.getElementById('gameDocSaveBtn');
-  const cancelBtn       = document.getElementById('gameDocCancelBtn');
-  const downloadAllBtn  = document.getElementById('gameDocDownloadAllBtn');
-  const msg             = document.getElementById('gameDocMsg');
+  const select = document.getElementById('gameDocSelect');
+  const readView = document.getElementById('gameDocRead');
+  const text = document.getElementById('gameDocText');
+  const titleInput = isAdmin ? document.getElementById('gameDocTitle') : null;
+  const editBtn = isAdmin ? document.getElementById('gameDocEditBtn') : null;
+  const saveBtn = isAdmin ? document.getElementById('gameDocSaveBtn') : null;
+  const cancelBtn = isAdmin ? document.getElementById('gameDocCancelBtn') : null;
+  const downloadAllBtn = isAdmin ? document.getElementById('gameDocDownloadAllBtn') : null;
+  const createBtn = isAdmin ? document.getElementById('createGameDocBtn') : null;
+  const createMsg = isAdmin ? document.getElementById('createGameDocMsg') : null;
+  const msg = document.getElementById('gameDocMsg');
+  const hint = document.getElementById('gameDocHint');
+  const loading = document.getElementById('gameDocLoading');
 
-  downloadAllBtn.onclick = async () => {
-    const res = await fetch('/api/admin/game-documents/download-all', {
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
-    if (!res.ok) {
-      alert('Download failed.');
-      return;
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'game-information.zip';
-    a.click();
-    URL.revokeObjectURL(url);
+  const renderDocReadView = (content) => {
+    readView.innerHTML = escapeHtml(content || '').replace(/\n/g, '<br>');
   };
-  const hint      = document.getElementById('gameDocHint');
-  const loading   = document.getElementById('gameDocLoading');
+
+  const refreshSelectOptions = (selectedCode = '') => {
+    const sorted = [...docs].sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
+    docs = sorted;
+    select.innerHTML = `
+      <option value="">- Select a document -</option>
+      ${sorted.map(d => `<option value="${escapeHtml(d.code)}">${escapeHtml(d.title)}</option>`).join('')}
+    `;
+    if (selectedCode) select.value = selectedCode;
+  };
+
+  if (isAdmin && downloadAllBtn) {
+    downloadAllBtn.onclick = async () => {
+      const res = await fetch('/api/admin/game-documents/download-all', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        alert('Download failed.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'game-information.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+  }
 
   const showReadOnly = () => {
     text.readOnly = true;
-    editBtn.style.display  = '';
-    saveBtn.style.display  = 'none';
-    cancelBtn.style.display = 'none';
-    msg.textContent = '';
+    text.style.display = 'none';
+    readView.style.display = 'block';
+    if (titleInput) titleInput.disabled = true;
+    if (editBtn) editBtn.style.display = '';
+    if (saveBtn) saveBtn.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = 'none';
   };
 
   const showEditMode = () => {
     text.readOnly = false;
-    editBtn.style.display  = 'none';
-    saveBtn.style.display  = '';
-    saveBtn.disabled = false;
-    cancelBtn.style.display = '';
+    text.style.display = 'block';
+    readView.style.display = 'none';
+    if (titleInput) titleInput.disabled = false;
+    if (editBtn) editBtn.style.display = 'none';
+    if (saveBtn) {
+      saveBtn.style.display = '';
+      saveBtn.disabled = false;
+    }
+    if (cancelBtn) cancelBtn.style.display = '';
     text.focus();
   };
 
@@ -4207,10 +4439,15 @@ async function loadGameInformationRules() {
     currentCode = select.value;
     text.value = '';
     text.style.display = 'none';
+    readView.style.display = 'none';
+    readView.innerHTML = '';
     hint.style.display = 'none';
     msg.textContent = '';
-    editBtn.disabled = true;
-    showReadOnly();
+    if (titleInput) {
+      titleInput.value = '';
+      titleInput.disabled = true;
+    }
+    if (editBtn) editBtn.disabled = true;
 
     if (!currentCode) {
       hint.style.display = '';
@@ -4219,7 +4456,7 @@ async function loadGameInformationRules() {
     }
 
     loading.style.display = 'block';
-    const res = await api('/api/admin/game-documents/' + encodeURIComponent(currentCode));
+    const res = await api((isAdmin ? '/api/admin/game-documents/' : '/api/game-documents/') + encodeURIComponent(currentCode));
     loading.style.display = 'none';
 
     if (!res || !res.ok) {
@@ -4228,41 +4465,106 @@ async function loadGameInformationRules() {
     }
 
     const doc = await res.json();
+    originalTitle = String(doc.title || '');
     originalContent = doc.content_text || '';
-    text.value = originalContent;
-    text.style.display = 'block';
-    editBtn.disabled = false;
-  };
-
-  editBtn.onclick = () => {
-    if (!currentCode) return;
-    showEditMode();
-  };
-
-  cancelBtn.onclick = () => {
+    if (titleInput) titleInput.value = originalTitle;
+    renderDocReadView(originalContent);
     text.value = originalContent;
     showReadOnly();
+    if (editBtn) editBtn.disabled = false;
   };
 
-  saveBtn.onclick = async () => {
-    if (!currentCode) return;
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving…';
-    const res = await api('/api/admin/game-documents/' + encodeURIComponent(currentCode), {
-      method: 'PUT',
-      body: JSON.stringify({ content_text: text.value }),
-    });
-    saveBtn.textContent = 'Save';
-    if (res && res.ok) {
-      originalContent = text.value;
-      msg.textContent = 'Saved.';
-      setTimeout(() => { if (msg.textContent === 'Saved.') msg.textContent = ''; }, 3000);
+  if (isAdmin && editBtn) {
+    editBtn.onclick = () => {
+      if (!currentCode) return;
+      showEditMode();
+    };
+  }
+
+  if (isAdmin && cancelBtn) {
+    cancelBtn.onclick = () => {
+      text.value = originalContent;
+      if (titleInput) titleInput.value = originalTitle;
       showReadOnly();
-    } else {
-      saveBtn.disabled = false;
-      msg.textContent = 'Save failed.';
-    }
-  };
+    };
+  }
+
+  if (isAdmin && saveBtn) {
+    saveBtn.onclick = async () => {
+      if (!currentCode) return;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      const normalizedTitle = titleInput ? String(titleInput.value || '').trim() : '';
+      const payload = {
+        content_text: text.value,
+        title: normalizedTitle || originalTitle,
+      };
+      const res = await api('/api/admin/game-documents/' + encodeURIComponent(currentCode), {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      saveBtn.textContent = 'Save';
+      if (res && res.ok) {
+        originalContent = text.value;
+        renderDocReadView(originalContent);
+        if (titleInput) {
+          originalTitle = normalizedTitle || originalTitle;
+          titleInput.value = originalTitle;
+          const selectedOption = select.options[select.selectedIndex];
+          if (selectedOption && originalTitle) selectedOption.textContent = originalTitle;
+        }
+        msg.textContent = 'Saved.';
+        setTimeout(() => { if (msg.textContent === 'Saved.') msg.textContent = ''; }, 3000);
+        showReadOnly();
+      } else {
+        saveBtn.disabled = false;
+        msg.textContent = 'Save failed.';
+      }
+    };
+  }
+
+  if (isAdmin && createBtn) {
+    createBtn.onclick = async () => {
+      if (!createMsg) return;
+      createMsg.textContent = '';
+      const titleEl = document.getElementById('newGameDocTitle');
+      const codeEl = document.getElementById('newGameDocCode');
+      const contentEl = document.getElementById('newGameDocContent');
+      const title = String(titleEl?.value || '').trim();
+      const code = String(codeEl?.value || '').trim();
+      const contentText = String(contentEl?.value || '');
+
+      if (!title) {
+        createMsg.textContent = 'Title is required.';
+        return;
+      }
+
+      createBtn.disabled = true;
+      createBtn.textContent = 'Creating...';
+      const res = await api('/api/admin/game-documents', {
+        method: 'POST',
+        body: JSON.stringify({ title, code, content_text: contentText }),
+      });
+      createBtn.disabled = false;
+      createBtn.textContent = 'Create Document';
+
+      if (!res || !res.ok) {
+        createMsg.textContent = await readErrorMessage(res, 'Failed to create document.');
+        return;
+      }
+
+      const created = await res.json();
+      const createdCode = String(created.code || '');
+      const createdTitle = String(created.title || title);
+      docs.push({ code: createdCode, title: createdTitle, updated_at: null });
+      refreshSelectOptions(createdCode);
+      if (titleEl) titleEl.value = '';
+      if (codeEl) codeEl.value = '';
+      if (contentEl) contentEl.value = '';
+      createMsg.textContent = 'Document created.';
+      await select.onchange();
+    };
+  }
 }
 
 async function loadTimeTracker() {
@@ -4346,20 +4648,26 @@ async function loadTimeTracker() {
 }
 
 async function init() {
-  const [settingsRes] = await Promise.all([
-    api('/api/me/settings'),
-    loadResources(),
-  ]);
+  let settingsRes = null;
+  try {
+    settingsRes = await api('/api/me/settings');
+  } catch {}
+
   if (settingsRes && settingsRes.ok) {
     settings = await settingsRes.json();
     setTheme(settings.theme);
     applyColorBlindMode(settings.color_blind_mode);
     setFontMode(settings.font_mode || 'normal');
   }
+
+  // Never block navigation rendering on topbar resource refresh failures.
+  loadResources().catch(() => {});
+
   if (user.force_password_reset) {
     loadForcedPasswordReset();
     return;
   }
+
   initMenuToggle();
   renderNav();
 }
