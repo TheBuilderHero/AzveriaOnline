@@ -63,25 +63,49 @@
     .menu button.active { background: var(--accent); }
     .help-select { background: #314f72; color: #fff; }
     .main { padding: 18px; }
-    .topbar { display: flex; justify-content: flex-end; gap: 8px; }
-    .chip { background: var(--panel); padding: 8px 12px; border-radius: 999px; border: 1px solid #c8d0da; }
-    .card { background: var(--panel); border-radius: 12px; padding: 14px; border: 1px solid #c9d1db; margin-top: 12px; }
+    .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+    .chip {
+      background: var(--panel);
+      padding: 5px 11px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .chip-label { color: var(--muted); font-weight: 400; margin-right: 4px; }
+    .card {
+      background: var(--panel);
+      border-radius: 14px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      margin-top: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .card h2 { margin: 0 0 14px 0; font-size: 1.25rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+    .card h3 { margin: 12px 0 6px 0; font-size: 1rem; color: var(--text); }
     .twocol { display: grid; grid-template-columns: 1fr 300px; gap: 12px; }
-    .list { max-height: 420px; overflow: auto; border: 1px solid #c9d1db; border-radius: 8px; padding: 8px; }
-    .muted { color: #777; }
+    .list { max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 8px; background: var(--bg); }
+    .muted { color: var(--muted); }
     .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
     input, textarea, select, button { font: inherit; }
-    input, textarea, select { width: 100%; padding: 8px; border: 1px solid #bfc8d2; border-radius: 8px; background: var(--panel); color: var(--text); }
-    button.primary { background: var(--accent); color: #fff; border: 0; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+    input, textarea, select { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); }
+    button.primary { background: var(--accent); color: #fff; border: 0; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; }
     .danger { color: var(--danger); }
+    .res-panel { border: 1px solid var(--border); border-radius: 10px; padding: 6px; margin-top: 6px; background: var(--bg); }
+    .num-pos { color: #2e7d32; font-weight: 600; }
+    .num-neg { color: #c62828; font-weight: 600; }
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
       .menu { height: auto; position: relative; }
       .menu-brand { padding-left: 54px; }
       .twocol { grid-template-columns: 1fr; }
     }
-    details summary { cursor:pointer; font-weight:bold; padding:4px 0; user-select:none; }
+    details summary { cursor:pointer; font-weight:600; padding:5px 2px; user-select:none; font-size:14px; color:var(--text); }
     details[open] summary { margin-bottom:6px; }
+    details + details { margin-top:6px; }
     .msg-wrap { display:flex; flex-direction:column; margin-bottom:8px; }
     .msg-wrap.own { align-items:flex-end; }
     .msg-wrap.other { align-items:flex-start; }
@@ -91,8 +115,9 @@
     .msg-sender { font-size:11px; margin-bottom:3px; font-weight:bold; }
     .msg-wrap.own  .msg-sender { color:var(--accent); }
     .msg-wrap.other .msg-sender { color:#3a72b5; }
-    .res-kv { display:flex; justify-content:space-between; padding:2px 6px; font-size:13px; }
-    .res-kv:nth-child(even) { background:var(--bg-alt); border-radius:4px; }
+    .res-kv { display:flex; justify-content:space-between; align-items:center; padding:4px 8px; font-size:13px; gap:8px; min-height:26px; }
+    .res-kv:nth-child(even) { background:var(--bg-alt); border-radius:6px; }
+    .res-kv span:last-child { font-weight:600; white-space:nowrap; text-align:right; }
     body.font-fun { font-family: "Comic Sans MS", "Trebuchet MS", cursive; }
     body.font-cool-person { font-family: "Papyrus", "Brush Script MT", fantasy; letter-spacing: 0.02em; }
     .announcement-card {
@@ -283,6 +308,22 @@ function toFiniteNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+// Format a number cleanly. abbrev=true uses K/M/B suffixes for large values (topbar use).
+function fmtNum(n, { abbrev = false, signed = false } = {}) {
+  const v = toFiniteNumber(n, 0);
+  let s;
+  if (abbrev) {
+    const abs = Math.abs(v);
+    if (abs >= 1e9) s = (v / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+    else if (abs >= 1e6) s = (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    else if (abs >= 1e4) s = (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+    else s = v.toLocaleString();
+  } else {
+    s = v.toLocaleString();
+  }
+  return signed && v > 0 ? '+' + s : s;
+}
+
 function normalizeTerrainSquareMiles(raw) {
   const parsed = safeJsonParse(raw, raw) || {};
   const asObject = typeof parsed === 'string' ? (safeJsonParse(parsed, {}) || {}) : parsed;
@@ -427,12 +468,15 @@ async function loadResources() {
   if (!res || !res.ok) return;
   const r = await res.json();
   const base = r.base || {};
-  resourcesBar.innerHTML = `
-    <div class="chip">Cow: ${Number(base.cow || 0).toFixed(0)}</div>
-    <div class="chip">Wood: ${Number(base.wood || 0).toFixed(0)}</div>
-    <div class="chip">Ore: ${Number(base.ore || 0).toFixed(0)}</div>
-    <div class="chip">Food: ${Number(base.food || 0).toFixed(0)}</div>
-  `;
+  const chips = [
+    { icon: '🐄', label: 'Cow',  val: base.cow  },
+    { icon: '🌳', label: 'Wood', val: base.wood },
+    { icon: '⛏',  label: 'Ore',  val: base.ore  },
+    { icon: '🍞', label: 'Food', val: base.food },
+  ];
+  resourcesBar.innerHTML = chips.map(c =>
+    `<div class="chip" title="${c.label}: ${fmtNum(c.val)}">${c.icon} <span class="chip-label">${c.label}</span>${fmtNum(c.val, { abbrev: true })}</div>`
+  ).join('');
 }
 
 // Human-readable names for all resource/currency cost keys
@@ -467,7 +511,7 @@ function renderKVList(map, data, opts = {}) {
   const showZero = opts.showZero !== false;
   return Object.entries(map)
     .filter(([k]) => showZero || toFiniteNumber(data[k] || 0, 0) !== 0)
-    .map(([k,label]) => `<div class="res-kv"><span>${label}</span><span>${toFiniteNumber(data[k]||0, 0).toLocaleString()}</span></div>`)
+    .map(([k,label]) => `<div class="res-kv"><span>${label}</span><span>${fmtNum(data[k]||0)}</span></div>`)
     .join('');
 }
 
@@ -554,7 +598,7 @@ async function loadPlayer() {
   const sqMiles = await sqMilesRes.json();
   const normalizedSqMiles = normalizeTerrainSquareMiles(sqMiles);
   const terrainRows = Object.entries(normalizedSqMiles).length
-    ? Object.entries(normalizedSqMiles).map(([k, v]) => `<span>${labelTerrainKey(k)}: <strong>${toFiniteNumber(v, 0)} sq mi</strong></span>`).join(' &nbsp;|&nbsp; ')
+    ? Object.entries(normalizedSqMiles).map(([k, v]) => `<span>${labelTerrainKey(k)}: <strong>${fmtNum(v)} sq mi</strong></span>`).join(' &nbsp;|&nbsp; ')
     : 'No terrain data';
 
   const res = data.resources || {};
@@ -581,37 +625,47 @@ async function loadPlayer() {
 
           <details style="margin-top:12px;">
             <summary>Base Resources</summary>
-            <div style="border:1px solid #c9d1db;border-radius:8px;padding:6px;margin-top:4px;">
-              <div class="res-kv"><span>Cow</span><span>${Number(base.cow||0).toLocaleString()}</span></div>
-              <div class="res-kv"><span>Wood</span><span>${Number(base.wood||0).toLocaleString()}</span></div>
-              <div class="res-kv"><span>Ore</span><span>${Number(base.ore||0).toLocaleString()}</span></div>
-              <div class="res-kv"><span>Food</span><span>${Number(base.food||0).toLocaleString()}</span></div>
+            <div class="res-panel">
+              <div class="res-kv"><span>🐄 Cow</span><span>${fmtNum(base.cow)}</span></div>
+              <div class="res-kv"><span>🪵 Wood</span><span>${fmtNum(base.wood)}</span></div>
+              <div class="res-kv"><span>⛏ Ore</span><span>${fmtNum(base.ore)}</span></div>
+              <div class="res-kv"><span>🍞 Food</span><span>${fmtNum(base.food)}</span></div>
             </div>
           </details>
 
           <details style="margin-top:8px;">
             <summary>Refined Resources</summary>
-            <div style="border:1px solid #c9d1db;border-radius:8px;padding:6px;margin-top:4px;">
-              <details open><summary style="font-size:12px;color:#666;">⛏ Ore-derived</summary>${renderKVList(ORE_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;">None</div>'}</details>
-              <details open style="margin-top:4px;"><summary style="font-size:12px;color:#666;">🌲 Wood-derived</summary>${renderKVList(WOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;">None</div>'}</details>
-              <details open style="margin-top:4px;"><summary style="font-size:12px;color:#666;">🍞 Food-derived</summary>${renderKVList(FOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;">None</div>'}</details>
+            <div class="res-panel">
+              <details open><summary style="font-size:13px;">⛏ Ore-derived</summary>${renderKVList(ORE_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;font-size:13px;">None yet.</div>'}</details>
+              <details open><summary style="font-size:13px;">🌲 Wood-derived</summary>${renderKVList(WOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;font-size:13px;">None yet.</div>'}</details>
+              <details open><summary style="font-size:13px;">🍞 Food-derived</summary>${renderKVList(FOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;font-size:13px;">None yet.</div>'}</details>
             </div>
           </details>
 
           <details style="margin-top:8px;" open>
             <summary>Expected Yearly Income / Maintenance</summary>
-            <div style="border:1px solid #c9d1db;border-radius:8px;padding:8px;margin-top:4px;">
-              <div style="font-size:12px;color:#666;margin-bottom:4px;">Net (Income - Maintenance)</div>
-              <div>${renderKVList({cow:'Cow',wood:'Wood',ore:'Ore',food:'Food'}, yearly.net?.base || {}, { showZero: false }) || '<div class="muted" style="padding:4px 6px;">No yearly net base changes.</div>'}</div>
-              <div style="margin-top:8px;font-size:12px;color:#666;">Maintenance causes</div>
-              <div>${(yearly.maintenance_breakdown || []).map(m => `<div class="res-kv"><span>${m.asset} (${m.key})</span><span>- ${toFiniteNumber(m.amount, 0)}</span></div>`).join('') || '<div class="muted" style="padding:4px 6px;">No maintenance assets.</div>'}</div>
+            <div class="res-panel" style="padding:8px;">
+              <div style="font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Net (Income − Maintenance)</div>
+              <div>${(() => {
+                const netBase = yearly.net?.base || {};
+                const rows = Object.entries({cow:'🐄 Cow',wood:'🪵 Wood',ore:'⛏ Ore',food:'🍞 Food'})
+                  .filter(([k]) => toFiniteNumber(netBase[k], 0) !== 0)
+                  .map(([k,label]) => {
+                    const v = toFiniteNumber(netBase[k], 0);
+                    const cls = v > 0 ? 'num-pos' : 'num-neg';
+                    return `<div class="res-kv"><span>${label}</span><span class="${cls}">${fmtNum(v, { signed: true })}</span></div>`;
+                  }).join('');
+                return rows || '<div class="muted" style="padding:4px 6px;font-size:13px;">No yearly net base changes.</div>';
+              })()}</div>
+              <div style="margin-top:10px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Maintenance breakdown</div>
+              <div>${(yearly.maintenance_breakdown || []).map(m => `<div class="res-kv"><span>${m.asset} <span class="muted" style="font-size:11px;">(${m.key})</span></span><span class="num-neg">−${fmtNum(m.amount)}</span></div>`).join('') || '<div class="muted" style="padding:4px 6px;font-size:13px;">No maintenance costs.</div>'}</div>
             </div>
           </details>
 
           <details style="margin-top:8px;">
             <summary>Currency</summary>
-            <div style="border:1px solid #c9d1db;border-radius:8px;padding:6px;margin-top:4px;">
-              ${renderKVList(CURRENCIES, currencies)}
+            <div class="res-panel">
+              ${(() => { const rows = renderKVList(CURRENCIES, currencies, { showZero: false }); return rows || '<div class="muted" style="padding:4px 6px;font-size:13px;">No currencies held.</div>'; })()}
             </div>
           </details>
 
@@ -1555,7 +1609,7 @@ async function loadMap() {
       </div>
       <div class="map-small-label" style="margin-top:4px;">Alliance: ${canViewAlliance ? esc(n?.alliance_name || '-') : 'Hidden by visibility rules'}</div>
       <div class="map-small-label">Races: ${esc(races)}</div>
-      <div class="map-small-label">Owned Terrain (pixels): ${canViewTerrain ? pixels.toLocaleString() : 'Hidden by visibility rules'}</div>
+      <div class="map-small-label">Owned Terrain (pixels): ${canViewTerrain ? fmtNum(pixels) : 'Hidden by visibility rules'}</div>
     `;
     document.getElementById('closeNationInfoBtn').onclick = () => setNationInfo(0);
   };
@@ -2139,7 +2193,7 @@ async function loadMap() {
           const v = normalized[k] || 0;
           const value = toFiniteNumber(v, 0);
           const pct = ((value / total) * 100).toFixed(1);
-          return `<div>${labelTerrainKey(k)}: ${value} (${pct}%)</div>`;
+          return `<div class="res-kv"><span>${labelTerrainKey(k)}</span><span>${fmtNum(value)} <span class="muted" style="font-size:11px;">(${pct}%)</span></span></div>`;
         }).join('') || '<div class="muted">No data</div>';
       };
       renderTerrainStats(myTerrainSqMiles);
@@ -2838,7 +2892,7 @@ async function loadOtherNations() {
       const renderSection = (title, body) => `
         <details open style="margin-top:10px;">
           <summary>${escapeHtml(title)}</summary>
-          <div style="border:1px solid #c9d1db;border-radius:8px;padding:8px;margin-top:6px;">${body}</div>
+          <div class="res-panel" style="margin-top:6px;">${body}</div>
         </details>
       `;
 
@@ -2867,9 +2921,9 @@ async function loadOtherNations() {
         sections.push(renderSection(
           'Refined Resources',
           [
-            `<div style="font-size:12px;color:#666;margin-bottom:4px;">Ore-derived</div>${renderKVList(ORE_REFS, refined, { showZero: false }) || '<div class="muted" style="margin-bottom:8px;">None</div>'}`,
-            `<div style="font-size:12px;color:#666;margin:8px 0 4px;">Wood-derived</div>${renderKVList(WOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="margin-bottom:8px;">None</div>'}`,
-            `<div style="font-size:12px;color:#666;margin:8px 0 4px;">Food-derived</div>${renderKVList(FOOD_REFS, refined, { showZero: false }) || '<div class="muted">None</div>'}`,
+            `<div style="font-size:12px;color:var(--muted);font-weight:600;margin-bottom:4px;">⛏ Ore-derived</div>${renderKVList(ORE_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:2px 6px;font-size:13px;">None</div>'}`,
+            `<div style="font-size:12px;color:var(--muted);font-weight:600;margin:8px 0 4px;">🌲 Wood-derived</div>${renderKVList(WOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:2px 6px;font-size:13px;">None</div>'}`,
+            `<div style="font-size:12px;color:var(--muted);font-weight:600;margin:8px 0 4px;">🍞 Food-derived</div>${renderKVList(FOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:2px 6px;font-size:13px;">None</div>'}`,
           ].join('')
         ));
       }
@@ -2881,7 +2935,7 @@ async function loadOtherNations() {
       if (visibility.terrain && d.terrain) {
         const terrainHtml = Object.entries(terrainSqMiles)
           .filter(([, value]) => toFiniteNumber(value, 0) > 0)
-          .map(([key, value]) => `<div class="res-kv"><span>${escapeHtml(labelTerrainKey(key))}</span><span>${toFiniteNumber(value, 0)} sq mi (${((toFiniteNumber(value, 0) / terrainTotal) * 100).toFixed(1)}%)</span></div>`)
+          .map(([key, value]) => `<div class="res-kv"><span>${escapeHtml(labelTerrainKey(key))}</span><span>${fmtNum(value)} sq mi <span class="muted" style="font-size:11px;">(${((toFiniteNumber(value, 0) / terrainTotal) * 100).toFixed(1)}%)</span></span></div>`)
           .join('') || '<div class="muted">No terrain data visible.</div>';
         sections.push(renderSection('Terrain', terrainHtml));
       }
