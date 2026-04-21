@@ -803,6 +803,7 @@ async function loadMap() {
       id: Number(n.id),
       name: n.name,
       alliance_name: n.alliance_name || '',
+      visibility: (n.visibility && typeof n.visibility === 'object') ? n.visibility : { terrain: true, alliance_name: true },
       races: [],
       dirty: false,
     });
@@ -810,10 +811,19 @@ async function loadMap() {
   (politicalNationMeta || []).forEach(n => {
     const id = Number(n.id || 0);
     if (!id) return;
-    const existing = politicalNationMap.get(id) || { id, name: n.name || `Nation ${id}`, alliance_name: '', races: [], dirty: false };
-    existing.name = n.name || existing.name;
-    existing.alliance_name = n.alliance_name || existing.alliance_name || '';
-    existing.races = Array.isArray(n.races) ? n.races : [];
+    const existing = politicalNationMap.get(id) || {
+      id,
+      name: user.role === 'admin' ? (n.name || `Nation ${id}`) : `Nation ${id}`,
+      alliance_name: '',
+      visibility: { terrain: true, alliance_name: false },
+      races: [],
+      dirty: false,
+    };
+    if (user.role === 'admin') {
+      existing.name = n.name || existing.name;
+      existing.alliance_name = n.alliance_name || existing.alliance_name || '';
+      existing.races = Array.isArray(n.races) ? n.races : [];
+    }
     politicalNationMap.set(id, existing);
   });
 
@@ -1534,16 +1544,18 @@ async function loadMap() {
     }
     const n = getNationById(selectedNationId);
     const pixels = nationPixelCount(selectedNationId);
-    const races = (n?.races || []).join(', ') || '-';
+    const canViewAlliance = (n?.visibility?.alliance_name !== false);
+    const canViewTerrain = (n?.visibility?.terrain !== false);
+    const races = user.role === 'admin' ? ((n?.races || []).join(', ') || '-') : '-';
     mapNationInfo.style.display = 'block';
     mapNationInfo.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
         <strong>${esc(n?.name || `Nation ${selectedNationId}`)}</strong>
         <button class="primary" id="closeNationInfoBtn" style="padding:2px 8px;">X</button>
       </div>
-      <div class="map-small-label" style="margin-top:4px;">Alliance: ${esc(n?.alliance_name || '-')}</div>
+      <div class="map-small-label" style="margin-top:4px;">Alliance: ${canViewAlliance ? esc(n?.alliance_name || '-') : 'Hidden by visibility rules'}</div>
       <div class="map-small-label">Races: ${esc(races)}</div>
-      <div class="map-small-label">Owned Terrain (pixels): ${pixels.toLocaleString()}</div>
+      <div class="map-small-label">Owned Terrain (pixels): ${canViewTerrain ? pixels.toLocaleString() : 'Hidden by visibility rules'}</div>
     `;
     document.getElementById('closeNationInfoBtn').onclick = () => setNationInfo(0);
   };
@@ -2116,7 +2128,11 @@ async function loadMap() {
           };
         }
       }
-      const renderTerrainStats = (sqMiles) => {
+      const renderTerrainStats = (sqMiles, options = {}) => {
+        if (options.restricted) {
+          document.getElementById('mapTerrainStats').innerHTML = '<div class="muted">Terrain is hidden by visibility rules for this nation.</div>';
+          return;
+        }
         const normalized = normalizeTerrainColorStats(sqMiles);
         const total = Math.max(1, Object.values(normalized).reduce((sum, val) => sum + toFiniteNumber(val, 0), 0));
         document.getElementById('mapTerrainStats').innerHTML = TERRAIN_KEYS.map((k) => {
@@ -2132,9 +2148,19 @@ async function loadMap() {
           renderTerrainStats(myTerrainSqMiles);
           return;
         }
+        const selectedNationId = Number(e.target.value);
+        const selectedNation = nations.find(n => Number(n.id) === selectedNationId);
+        if (selectedNation?.visibility?.terrain === false) {
+          renderTerrainStats({}, { restricted: true });
+          return;
+        }
         const detailRes = await api('/api/nations/' + e.target.value);
         if (!detailRes || !detailRes.ok) return;
         const detail = await detailRes.json();
+        if (detail?.visibility?.terrain === false) {
+          renderTerrainStats({}, { restricted: true });
+          return;
+        }
         renderTerrainStats(detail.terrain?.square_miles_json || {});
       };
     }

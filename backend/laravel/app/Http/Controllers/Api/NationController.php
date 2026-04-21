@@ -17,7 +17,7 @@ class NationController extends Controller
 
         $query = DB::table('nations as n')
             ->leftJoin('users as u', 'n.owner_user_id', '=', 'u.id')
-            ->select('n.id', 'n.name', 'n.is_placeholder', 'u.name as player_name', 'n.leader_name', 'n.alliance_name');
+            ->select('n.id', 'n.owner_user_id', 'n.name', 'n.is_placeholder', 'u.name as player_name', 'n.leader_name', 'n.alliance_name');
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
@@ -27,7 +27,61 @@ class NationController extends Controller
             });
         }
 
-        return response()->json($query->orderBy('n.name')->paginate($perPage));
+        $page = $query->orderBy('n.name')->paginate($perPage);
+        $viewer = $request->user();
+
+        if (!$viewer || $viewer->role === 'admin') {
+            return response()->json($page);
+        }
+
+        $viewerUserId = (int) $viewer->id;
+        $rows = collect($page->items());
+        $subjectUserIds = $rows
+            ->map(fn ($row) => (int) ($row->owner_user_id ?? 0))
+            ->filter(fn (int $id) => $id > 0 && $id !== $viewerUserId)
+            ->unique()
+            ->values();
+
+        $rulesBySubject = [];
+        if ($subjectUserIds->isNotEmpty()) {
+            $ruleRows = DB::table('player_visibility_rules')
+                ->where('viewer_user_id', $viewerUserId)
+                ->whereIn('subject_user_id', $subjectUserIds)
+                ->get();
+
+            foreach ($ruleRows as $rule) {
+                $subjectId = (int) $rule->subject_user_id;
+                $fieldKey = (string) $rule->field_key;
+                $rulesBySubject[$subjectId][$fieldKey] = (bool) $rule->is_allowed;
+            }
+        }
+
+        $rows = $rows->map(function ($row) use ($viewerUserId, $rulesBySubject) {
+            $subjectUserId = (int) ($row->owner_user_id ?? 0);
+            $visibility = $this->defaultVisibilityRules();
+
+            if ($subjectUserId > 0 && $subjectUserId !== $viewerUserId) {
+                foreach (($rulesBySubject[$subjectUserId] ?? []) as $field => $allowed) {
+                    $visibility[$field] = (bool) $allowed;
+                }
+
+                if (!$visibility['leader_name']) {
+                    $row->leader_name = null;
+                }
+                if (!$visibility['alliance_name']) {
+                    $row->alliance_name = null;
+                }
+            }
+
+            $row->visibility = $visibility;
+            unset($row->owner_user_id);
+
+            return $row;
+        });
+
+        $page->setCollection($rows);
+
+        return response()->json($page);
     }
 
     public function show(Request $request, int $nationId)
@@ -59,28 +113,14 @@ class NationController extends Controller
             ->get();
 
         $viewer = $request->user();
-        $visibility = [
-            'leader_name' => true,
-            'alliance_name' => true,
-            'about_text' => true,
-            'resources_base' => true,
-            'resources_refined' => true,
-            'resources_currencies' => true,
-            'terrain' => true,
-            'units' => true,
-            'buildings' => true,
-        ];
+        $visibility = $this->defaultVisibilityRules();
 
         if ($viewer && $viewer->role !== 'admin') {
             $viewerUserId = (int) $viewer->id;
             $subjectUserId = (int) ($nation->owner_user_id ?? 0);
             if ($subjectUserId > 0 && $viewerUserId !== $subjectUserId) {
-                $ruleRows = DB::table('player_visibility_rules')
-                    ->where('viewer_user_id', $viewerUserId)
-                    ->where('subject_user_id', $subjectUserId)
-                    ->get();
-                foreach ($ruleRows as $rule) {
-                    $visibility[(string) $rule->field_key] = (bool) $rule->is_allowed;
+                foreach ($this->rulesForPair($viewerUserId, $subjectUserId) as $field => $allowed) {
+                    $visibility[$field] = (bool) $allowed;
                 }
 
                 if (!$visibility['leader_name']) {
@@ -130,5 +170,35 @@ class NationController extends Controller
             'buildings' => $buildings,
             'visibility' => $visibility,
         ]);
+    }
+
+    private function defaultVisibilityRules(): array
+    {
+        return [
+            'leader_name' => true,
+            'alliance_name' => true,
+            'about_text' => true,
+            'resources_base' => true,
+            'resources_refined' => true,
+            'resources_currencies' => true,
+            'terrain' => true,
+            'units' => true,
+            'buildings' => true,
+        ];
+    }
+
+    private function rulesForPair(int $viewerUserId, int $subjectUserId): array
+    {
+        $out = [];
+        $rows = DB::table('player_visibility_rules')
+            ->where('viewer_user_id', $viewerUserId)
+            ->where('subject_user_id', $subjectUserId)
+            ->get();
+
+        foreach ($rows as $rule) {
+            $out[(string) $rule->field_key] = (bool) $rule->is_allowed;
+        }
+
+        return $out;
     }
 }

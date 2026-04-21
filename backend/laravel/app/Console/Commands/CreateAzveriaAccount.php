@@ -44,9 +44,15 @@ class CreateAzveriaAccount extends Command
             return self::FAILURE;
         }
 
+        $name = trim((string) $this->argument('name'));
+        if (preg_match('/\s{2,}/', $name)) {
+            $this->error('Display names cannot contain repeated spaces.');
+            return self::FAILURE;
+        }
+
         $user = $accounts->createAccount([
-            'name' => (string) $this->argument('name'),
-            'email' => (string) $this->argument('email'),
+            'name' => $name,
+            'email' => trim((string) $this->argument('email')),
             'password' => $password,
             'role' => $role,
             'create_nation' => $this->option('with-nation') || $role === 'player',

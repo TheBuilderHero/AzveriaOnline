@@ -67,6 +67,8 @@ class AccountService
     public function createAccount(array $attributes): User
     {
         return DB::transaction(function () use ($attributes) {
+            $name = trim((string) ($attributes['name'] ?? ''));
+            $email = trim((string) ($attributes['email'] ?? ''));
             $role = (string) ($attributes['role'] ?? 'player');
             $shouldCreateNation = array_key_exists('create_nation', $attributes)
                 ? (bool) $attributes['create_nation']
@@ -75,9 +77,15 @@ class AccountService
                 ? (bool) $attributes['force_password_reset']
                 : true;
 
+            if ($name === '' || $email === '') {
+                throw ValidationException::withMessages([
+                    'account' => 'Account name and email are required.',
+                ]);
+            }
+
             $user = User::create([
-                'name' => $attributes['name'],
-                'email' => $attributes['email'],
+                'name' => $name,
+                'email' => $email,
                 'password' => $attributes['password'],
                 'role' => $role,
             ]);
@@ -121,18 +129,26 @@ class AccountService
         $refined = $defaults['refined_resources'] ?? [];
         $currencies = $defaults['currencies'] ?? [];
         $incomeDefaults = $defaults['income_defaults'] ?? ['cow' => 30, 'wood' => 3, 'ore' => 3, 'food' => 3];
+        [$resourceMin, $resourceMax] = $this->normalizeIntRange(
+            (int) ($defaults['income_resource_min'] ?? 1),
+            (int) ($defaults['income_resource_max'] ?? 5)
+        );
+        [$cowMin, $cowMax] = $this->normalizeIntRange(
+            (int) ($defaults['income_cow_min'] ?? 30),
+            (int) ($defaults['income_cow_max'] ?? 30)
+        );
         $income = [
             'cow' => (bool) ($defaults['income_randomize_cow'] ?? false)
-                ? random_int((int) ($defaults['income_cow_min'] ?? 30), (int) ($defaults['income_cow_max'] ?? 30))
+                ? random_int($cowMin, $cowMax)
                 : (float) ($incomeDefaults['cow'] ?? 30),
             'wood' => (bool) ($defaults['income_randomize_resources'] ?? true)
-                ? random_int((int) ($defaults['income_resource_min'] ?? 1), (int) ($defaults['income_resource_max'] ?? 5))
+                ? random_int($resourceMin, $resourceMax)
                 : (float) ($incomeDefaults['wood'] ?? 3),
             'ore' => (bool) ($defaults['income_randomize_resources'] ?? true)
-                ? random_int((int) ($defaults['income_resource_min'] ?? 1), (int) ($defaults['income_resource_max'] ?? 5))
+                ? random_int($resourceMin, $resourceMax)
                 : (float) ($incomeDefaults['ore'] ?? 3),
             'food' => (bool) ($defaults['income_randomize_resources'] ?? true)
-                ? random_int((int) ($defaults['income_resource_min'] ?? 1), (int) ($defaults['income_resource_max'] ?? 5))
+                ? random_int($resourceMin, $resourceMax)
                 : (float) ($incomeDefaults['food'] ?? 3),
         ];
 
@@ -216,6 +232,14 @@ class AccountService
             'seafront_pct' => round(($normalized['seafront'] / $total) * 100, 2),
             'square_miles_json' => json_encode($squareMiles),
         ];
+    }
+
+    private function normalizeIntRange(int $a, int $b): array
+    {
+        $min = min($a, $b);
+        $max = max($a, $b);
+
+        return [$min, $max];
     }
 
     public function setForcePasswordReset(int $userId, bool $forcePasswordReset): void

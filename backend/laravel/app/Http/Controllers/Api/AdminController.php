@@ -57,6 +57,18 @@ class AdminController extends Controller
             'income_cow_max' => ['sometimes', 'numeric', 'min:0'],
         ]);
 
+        $effective = array_replace_recursive($this->accounts->getNewAccountDefaults(), $data);
+        if ((float) ($effective['income_resource_min'] ?? 0) > (float) ($effective['income_resource_max'] ?? 0)) {
+            throw ValidationException::withMessages([
+                'income_resource_min' => 'Resource income min cannot be greater than resource income max.',
+            ]);
+        }
+        if ((float) ($effective['income_cow_min'] ?? 0) > (float) ($effective['income_cow_max'] ?? 0)) {
+            throw ValidationException::withMessages([
+                'income_cow_min' => 'Cow income min cannot be greater than cow income max.',
+            ]);
+        }
+
         $merged = $this->accounts->saveNewAccountDefaults($data);
 
         return response()->json(['message' => 'New account defaults saved', 'defaults' => $merged]);
@@ -481,10 +493,17 @@ class AdminController extends Controller
             'email.unique' => 'That email address already belongs to an existing account.',
         ]);
 
+        $trimmedName = trim((string) ($data['name'] ?? ''));
+        if (preg_match('/\s{2,}/', $trimmedName)) {
+            throw ValidationException::withMessages([
+                'name' => 'Display names cannot contain repeated spaces.',
+            ]);
+        }
+
         $role = (string) ($data['role'] ?? 'player');
         $user = $this->accounts->createAccount([
-            'name' => $data['name'],
-            'email' => $data['email'],
+            'name' => $trimmedName,
+            'email' => trim((string) $data['email']),
             'password' => $data['password'],
             'role' => $role,
             'create_nation' => array_key_exists('create_nation', $data) ? (bool) $data['create_nation'] : $role === 'player',
