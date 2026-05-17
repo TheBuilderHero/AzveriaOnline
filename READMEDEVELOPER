@@ -349,6 +349,9 @@ docker compose exec app php artisan storage:link --force
 ## 13) Useful Commands
 
 ```powershell
+Super rebuild:
+docker compose down && docker compose build --no-cache && docker compose  up -d --build
+
 docker compose exec app php artisan route:list
 docker compose exec app php artisan cache:clear
 docker compose exec app php artisan config:clear
