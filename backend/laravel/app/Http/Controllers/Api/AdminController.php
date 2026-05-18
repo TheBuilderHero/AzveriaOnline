@@ -10,6 +10,7 @@ use App\Http\Requests\Api\UpdateShopItemRequest;
 use App\Models\User;
 use App\Services\AccountService;
 use Illuminate\Http\Request;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
@@ -394,8 +395,11 @@ class AdminController extends Controller
         return response()->json(['message' => 'Visibility rules saved']);
     }
 
-    public function gameDocuments()
+    public function gameDocuments(Request $request)
     {
+        $viewer = $request->user();
+        $isAdmin = $viewer && $viewer->role === 'admin';
+
         $dbRows = collect();
         if (Schema::hasTable('game_documents')) {
             $dbRows = DB::table('game_documents')
@@ -439,6 +443,22 @@ class AdminController extends Controller
                 ->values();
 
             $rows = $rows->merge($customRows);
+        }
+
+        // Keep DB defaults explicit for admin-managed documents when visibility storage exists.
+        if ($isAdmin && Schema::hasTable('game_document_visibility')) {
+            $allCodes = $rows->pluck('code')->filter(fn ($code) => is_string($code) && trim($code) !== '')->values()->all();
+            $this->seedMissingGameDocumentVisibilityDefaults($allCodes);
+        }
+
+        if (!$isAdmin) {
+            $viewerUserId = (int) ($viewer->id ?? 0);
+            $viewerRole = (string) ($viewer->role ?? '');
+            $rows = $rows
+                ->filter(function (array $row) use ($viewerUserId, $viewerRole) {
+                    return $this->isDocumentVisibleToViewer((string) ($row['code'] ?? ''), $viewerUserId, $viewerRole);
+                })
+                ->values();
         }
 
         $rows = $rows
@@ -489,6 +509,19 @@ class AdminController extends Controller
             'updated_by_user_id' => $request->user()->id,
             'updated_at' => now(),
         ]);
+
+        if (Schema::hasTable('game_document_visibility')) {
+            DB::table('game_document_visibility')->updateOrInsert(
+                ['document_code' => $code],
+                [
+                    'visibility_type' => 'admin',
+                    'role_name' => null,
+                    'player_ids' => null,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]
+            );
+        }
 
         return response()->json([
             'message' => 'Game information document created',
@@ -550,8 +583,18 @@ class AdminController extends Controller
         ])->deleteFileAfterSend(true);
     }
 
-    public function gameDocument(string $code)
+    public function gameDocument(Request $request, string $code)
     {
+        $viewer = $request->user();
+        $isAdmin = $viewer && $viewer->role === 'admin';
+        if (!$isAdmin) {
+            $viewerUserId = (int) ($viewer->id ?? 0);
+            $viewerRole = (string) ($viewer->role ?? '');
+            if (!$this->isDocumentVisibleToViewer($code, $viewerUserId, $viewerRole)) {
+                return response()->json(['message' => 'Game information document not found'], 404);
+            }
+        }
+
         $document = $this->findGameDocument($code);
         $dbRow = null;
         if (Schema::hasTable('game_documents')) {
@@ -655,6 +698,70 @@ class AdminController extends Controller
         }
 
         return response()->json(['message' => 'Game information document saved']);
+    }
+
+    public function getGameDocumentVisibility(Request $request, string $code)
+    {
+        try {
+            $this->seedMissingGameDocumentVisibilityDefaults([$code]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'document_code' => $code,
+                'visibility_type' => 'admin',
+                'role_name' => null,
+                'player_ids' => [],
+            ]);
+        }
+
+        $row = $this->readGameDocumentVisibilityRecord($code);
+
+        if (!$row) {
+            return response()->json([
+                'document_code' => $code,
+                'visibility_type' => 'admin',
+                'role_name' => null,
+                'player_ids' => [],
+            ]);
+        }
+
+        return response()->json([
+            'document_code' => (string) ($row['document_code'] ?? $code),
+            'visibility_type' => (string) ($row['visibility_type'] ?? 'admin'),
+            'role_name' => $row['role_name'] ?? null,
+            'player_ids' => is_array($row['player_ids'] ?? null) ? $row['player_ids'] : [],
+        ]);
+    }
+
+    public function updateGameDocumentVisibility(Request $request, string $code)
+    {
+        $data = $request->validate([
+            'visibility_type' => ['required', 'in:admin,role,all,custom'],
+            'role_name' => ['nullable', 'string', 'max:80'],
+            'player_ids' => ['nullable', 'array'],
+            'player_ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        try {
+            $saved = $this->writeGameDocumentVisibilityRecord($code, [
+                'visibility_type' => (string) $data['visibility_type'],
+                'role_name' => $data['visibility_type'] === 'role' ? ($data['role_name'] ?? null) : null,
+                'player_ids' => $data['visibility_type'] === 'custom'
+                    ? array_values(array_unique(array_map('intval', $data['player_ids'] ?? [])))
+                    : [],
+            ]);
+
+            if (!$saved) {
+                return response()->json([
+                    'message' => 'Document visibility storage is not available. Check database or storage permissions.',
+                ], 500);
+            }
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Document visibility storage is currently unavailable.',
+            ], 500);
+        }
+
+        return response()->json(['message' => 'Visibility updated']);
     }
 
     public function shopItemTemplates()
@@ -997,6 +1104,191 @@ class AdminController extends Controller
             ['code' => 'war_rules_and_such', 'title' => 'War Rules and Such', 'filename' => 'war_rules_and_such.md'],
             ['code' => 'rules_and_resources', 'title' => 'Rules and Resources', 'filename' => 'rules_and_resources.md'],
         ];
+    }
+
+    private function isDocumentVisibleToViewer(string $code, int $viewerUserId, string $viewerRole): bool
+    {
+        if ($code === '') {
+            return false;
+        }
+
+        $isAdminViewer = strtolower($viewerRole) === 'admin';
+
+        try {
+            // Default is admin-only if no visibility has been explicitly configured.
+            $row = $this->readGameDocumentVisibilityRecord($code);
+            if (!$row) {
+                return $isAdminViewer;
+            }
+
+            $visibilityType = (string) ($row['visibility_type'] ?? 'admin');
+            if ($visibilityType === 'all') {
+                return true;
+            }
+
+            if ($visibilityType === 'admin') {
+                return $isAdminViewer;
+            }
+
+            if ($visibilityType === 'role') {
+                return strtolower((string) ($row['role_name'] ?? '')) === strtolower($viewerRole);
+            }
+
+            if ($visibilityType === 'custom') {
+                $ids = $row['player_ids'] ?? [];
+                if (!is_array($ids)) {
+                    $ids = [];
+                }
+                return in_array($viewerUserId, array_map('intval', $ids), true);
+            }
+
+            return false;
+        } catch (\Throwable $e) {
+            return $isAdminViewer;
+        }
+    }
+
+    private function seedMissingGameDocumentVisibilityDefaults(array $codes): void
+    {
+        $normalizedCodes = collect($codes)
+            ->map(fn ($code) => trim((string) $code))
+            ->filter(fn ($code) => $code !== '')
+            ->unique()
+            ->values();
+
+        if ($normalizedCodes->isEmpty()) {
+            return;
+        }
+
+        foreach ($normalizedCodes as $code) {
+            $existing = $this->readGameDocumentVisibilityRecord($code);
+            if ($existing) {
+                continue;
+            }
+
+            $this->writeGameDocumentVisibilityRecord($code, [
+                'visibility_type' => 'admin',
+                'role_name' => null,
+                'player_ids' => [],
+            ]);
+        }
+    }
+
+    private function readGameDocumentVisibilityRecord(string $code): ?array
+    {
+        if ($code === '') {
+            return null;
+        }
+
+        if ($this->ensureGameDocumentVisibilityStorage()) {
+            $row = DB::table('game_document_visibility')->where('document_code', $code)->first();
+            if ($row) {
+                return [
+                    'document_code' => (string) $row->document_code,
+                    'visibility_type' => (string) ($row->visibility_type ?? 'admin'),
+                    'role_name' => $row->role_name,
+                    'player_ids' => $row->player_ids ? (json_decode($row->player_ids, true) ?: []) : [],
+                ];
+            }
+        }
+
+        $fallback = $this->loadGameDocumentVisibilityFallback();
+        $row = $fallback[$code] ?? null;
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'document_code' => $code,
+            'visibility_type' => (string) ($row['visibility_type'] ?? 'admin'),
+            'role_name' => $row['role_name'] ?? null,
+            'player_ids' => is_array($row['player_ids'] ?? null) ? $row['player_ids'] : [],
+        ];
+    }
+
+    private function writeGameDocumentVisibilityRecord(string $code, array $record): bool
+    {
+        if ($code === '') {
+            return false;
+        }
+
+        if ($this->ensureGameDocumentVisibilityStorage()) {
+            DB::table('game_document_visibility')->updateOrInsert(
+                ['document_code' => $code],
+                [
+                    'visibility_type' => (string) ($record['visibility_type'] ?? 'admin'),
+                    'role_name' => $record['visibility_type'] === 'role' ? ($record['role_name'] ?? null) : null,
+                    'player_ids' => ($record['visibility_type'] ?? 'admin') === 'custom'
+                        ? json_encode(array_values(array_unique(array_map('intval', $record['player_ids'] ?? []))))
+                        : null,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]
+            );
+            return true;
+        }
+
+        $fallback = $this->loadGameDocumentVisibilityFallback();
+        $fallback[$code] = [
+            'visibility_type' => (string) ($record['visibility_type'] ?? 'admin'),
+            'role_name' => ($record['visibility_type'] ?? 'admin') === 'role' ? ($record['role_name'] ?? null) : null,
+            'player_ids' => ($record['visibility_type'] ?? 'admin') === 'custom'
+                ? array_values(array_unique(array_map('intval', $record['player_ids'] ?? [])))
+                : [],
+            'updated_at' => now()->toIso8601String(),
+        ];
+
+        return $this->saveGameDocumentVisibilityFallback($fallback);
+    }
+
+    private function gameDocumentVisibilityFallbackPath(): string
+    {
+        return storage_path('app/game_document_visibility.json');
+    }
+
+    private function loadGameDocumentVisibilityFallback(): array
+    {
+        $path = $this->gameDocumentVisibilityFallbackPath();
+        if (!File::exists($path)) {
+            return [];
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function saveGameDocumentVisibilityFallback(array $rows): bool
+    {
+        try {
+            $path = $this->gameDocumentVisibilityFallbackPath();
+            File::ensureDirectoryExists(dirname($path));
+            File::put($path, json_encode($rows, JSON_PRETTY_PRINT));
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private function ensureGameDocumentVisibilityStorage(): bool
+    {
+        try {
+            if (Schema::hasTable('game_document_visibility')) {
+                return true;
+            }
+
+            Schema::create('game_document_visibility', function (Blueprint $table) {
+                $table->id();
+                $table->string('document_code', 80)->unique();
+                $table->enum('visibility_type', ['admin', 'role', 'all', 'custom'])->default('admin');
+                $table->string('role_name')->nullable();
+                $table->json('player_ids')->nullable();
+                $table->timestamps();
+            });
+
+            return true;
+        } catch (\Throwable $e) {
+            return Schema::hasTable('game_document_visibility');
+        }
     }
 
     public function timeTracker()

@@ -62,6 +62,8 @@ services:
       MYSQL_DATABASE: azveria
       MYSQL_USER: azveria
       MYSQL_PASSWORD: azveria
+    ports:
+      - "3307:3306" #for external access, use 3307 instead of 3306
     volumes:
       - mysql_data:/var/lib/mysql
     networks:

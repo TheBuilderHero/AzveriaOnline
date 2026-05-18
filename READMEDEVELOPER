@@ -29,6 +29,33 @@ docker compose up -d --build
 
 This repository is already structured so app, nginx, and MySQL images do not depend on Windows-only bind mounts when using an SSH Docker context.
 
+### Run Laravel Migrations On Remote (After Stack Is Already Running)
+
+Use this when the containers are already up on the remote context and you only need to apply new Laravel migrations.
+
+From the repository root:
+
+```powershell
+docker context use remote
+docker compose ps
+docker compose exec app php artisan migrate --force
+```
+
+Recommended follow-up:
+
+```powershell
+docker compose exec app php artisan config:clear
+docker compose exec app php artisan cache:clear
+```
+
+Quick verification:
+
+```powershell
+docker compose exec app php artisan migrate:status
+```
+
+If migration fails with a DB host/connect error, confirm the `mysql` service is healthy in `docker compose ps` before retrying.
+
 ## 3) Existing Server Schema Updates
 
 Fresh setups use the SQL in `database/init/001_schema.sql` automatically.

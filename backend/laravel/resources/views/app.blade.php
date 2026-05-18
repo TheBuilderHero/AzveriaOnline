@@ -215,6 +215,40 @@
     }
     .doc-create-grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
     .doc-create h3 { margin: 0 0 8px 0; }
+    .doc-visibility {
+      margin-top: 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: linear-gradient(180deg, var(--bg), var(--panel));
+      padding: 12px;
+    }
+    .doc-vis-panel {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: var(--bg);
+    }
+    .doc-vis-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+    .doc-vis-select {
+      width: 100%;
+      min-height: 220px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text);
+    }
+    .doc-vis-help {
+      font-size: 12px;
+      margin-top: 6px;
+      color: var(--muted);
+    }
     @media (max-width: 900px) {
       .doc-toolbar { grid-template-columns: 1fr; }
       .doc-toolbar-actions { justify-content:flex-start; }
@@ -3808,9 +3842,10 @@ async function loadResetPasswordPage() {
 }
 
 async function loadAllNations() {
-  const [res] = await Promise.all([api('/api/admin/nations')]);
-  const payload = await res.json();
-  const nations = extractList(payload);
+
+  const nationsRes = await api('/api/admin/nations');
+  const nationsPayload = await nationsRes.json();
+  const nations = extractList(nationsPayload);
 
   view.innerHTML = `
     <div class="card">
@@ -3835,35 +3870,33 @@ async function loadAllNations() {
       </div>
 
       <div class="card">
-        <h3 style="margin-top:0;">Player Visibility Matrix</h3>
-        <p class="muted" style="margin-top:0;">Control what one player can see about another player in Other Nations.</p>
+        <h3 style="margin-top:0;">Nation Visibility Matrix</h3>
+        <p class="muted" style="margin-top:0;">Control what one nation can see about another nation in Other Nations.</p>
         <div class="row" style="flex-wrap:wrap;">
           <div style="min-width:260px;flex:1;">
-            <label style="font-size:12px;">Player View (viewer)</label>
-            <select id="visViewer"></select>
+            <label style="font-size:12px;">Nation View (viewer)</label>
+            <select id="visViewerNation"></select>
           </div>
           <div style="min-width:260px;flex:1;">
-            <label style="font-size:12px;">Player To Be Seen (subject)</label>
-            <select id="visSubject"></select>
+            <label style="font-size:12px;">Nation To Be Seen (subject)</label>
+            <select id="visSubjectNation"></select>
           </div>
           <button class="primary" id="loadVisibilityRulesBtn" style="align-self:flex-end;">Load Rules</button>
         </div>
-        <div id="visRuleGrid" class="list" style="margin-top:8px;max-height:260px;">Select players to load rules.</div>
+        <div id="visRuleGrid" class="list" style="margin-top:8px;max-height:260px;">Select nations to load rules.</div>
         <div class="row"><button class="primary" id="saveVisibilityRulesBtn">Save Visibility Rules</button><span class="muted" id="saveVisibilityMsg"></span></div>
       </div>
     </div>
   `;
 
-  const playersRes = await api('/api/players');
   const visFieldsRes = await api('/api/admin/visibility/fields');
-  const players = playersRes && playersRes.ok ? (await playersRes.json()) : [];
   const visFields = visFieldsRes && visFieldsRes.ok ? (await visFieldsRes.json()) : [];
 
-  const visViewer = document.getElementById('visViewer');
-  const visSubject = document.getElementById('visSubject');
-  const playerOptions = (players || []).map(p => `<option value="${p.id}">${p.name}</option>`).join('');
-  visViewer.innerHTML = `<option value="">Select viewer</option>${playerOptions}`;
-  visSubject.innerHTML = `<option value="">Select subject</option>${playerOptions}`;
+  const visViewer = document.getElementById('visViewerNation');
+  const visSubject = document.getElementById('visSubjectNation');
+  const nationOptions = (nations || []).map(n => `<option value="${n.owner_user_id}">${n.name}</option>`).join('');
+  visViewer.innerHTML = `<option value="">Select viewer nation</option>${nationOptions}`;
+  visSubject.innerHTML = `<option value="">Select subject nation</option>${nationOptions}`;
 
   const renderVisGrid = (ruleMap = {}) => {
     document.getElementById('visRuleGrid').innerHTML = visFields.map(field => `
@@ -3892,7 +3925,7 @@ async function loadAllNations() {
       } else if (changedField === 'subject') {
         visViewer.value = '';
       }
-      document.getElementById('saveVisibilityMsg').textContent = 'Viewer and subject must be different players.';
+      document.getElementById('saveVisibilityMsg').textContent = 'Viewer and subject must be different nations.';
     }
   };
 
@@ -3927,7 +3960,7 @@ async function loadAllNations() {
       return;
     }
     if (viewer === subject) {
-      document.getElementById('saveVisibilityMsg').textContent = 'Viewer and subject must be different players.';
+      document.getElementById('saveVisibilityMsg').textContent = 'Viewer and subject must be different nations.';
       return;
     }
     const rules = Array.from(document.querySelectorAll('.vis-rule-box')).map(box => ({
@@ -4300,6 +4333,120 @@ async function loadNotifications() {
 }
 
 async function loadGameInformationRules() {
+    // --- Document Visibility Controls (Admin Only) ---
+    async function loadDocVisibility(code) {
+      const controls = document.getElementById('docVisibilityControls');
+      const saveBtn = document.getElementById('saveDocVisibilityBtn');
+      const msg = document.getElementById('saveDocVisibilityMsg');
+      if (!controls || !saveBtn) return;
+      controls.innerHTML = '';
+      saveBtn.disabled = true;
+      msg.textContent = '';
+      if (!code) return;
+      controls.innerHTML = 'Loading...';
+      const res = await api(`/api/admin/game-documents/${encodeURIComponent(code)}/visibility`);
+      if (!res || !res.ok) {
+        controls.innerHTML = '<span class="muted">Failed to load visibility settings.</span>';
+        return;
+      }
+      const data = await res.json();
+      const playersRes = await api('/api/players');
+      const players = playersRes && playersRes.ok ? (await playersRes.json()) : [];
+      const selectedPlayerIds = Array.isArray(data.player_ids) ? data.player_ids.map(v => Number(v)) : [];
+      const isAllSelected = data.visibility_type === 'all';
+      const isAdminSelected = data.visibility_type === 'admin' || (data.visibility_type === 'role' && String(data.role_name || '').toLowerCase() === 'admin');
+      const isCustomSelected = data.visibility_type === 'custom';
+
+      controls.innerHTML = `
+        <div class="doc-vis-panel">
+          <label class="doc-vis-label">Visibility Selection</label>
+          <select id="docVisMulti" class="doc-vis-select" multiple size="10">
+            <option value="__all" ${isAllSelected ? 'selected' : ''}>All Players</option>
+            <option value="__admin" ${isAdminSelected ? 'selected' : ''}>Admin Players</option>
+            <option value="" disabled>--------------------</option>
+            ${players.map(p => `<option value="${p.id}" ${isCustomSelected && selectedPlayerIds.includes(Number(p.id)) ? 'selected' : ''}>${escapeHtml(p.name || ('User #' + p.id))}</option>`).join('')}
+          </select>
+          <div class="doc-vis-help">Pick one mode: All Players, Admin Players, or one/more specific users.</div>
+        </div>
+      `;
+
+      const multi = document.getElementById('docVisMulti');
+      const enforceExclusiveMode = () => {
+        if (!multi) return;
+        const selected = Array.from(multi.selectedOptions).map(o => o.value);
+        const hasAll = selected.includes('__all');
+        const hasAdmin = selected.includes('__admin');
+        const hasUsers = selected.some(v => v !== '__all' && v !== '__admin' && v !== '');
+
+        if (hasAll) {
+          Array.from(multi.options).forEach(opt => {
+            if (opt.value !== '__all') opt.selected = false;
+          });
+          return;
+        }
+
+        if (hasAdmin) {
+          Array.from(multi.options).forEach(opt => {
+            if (opt.value !== '__admin') opt.selected = false;
+          });
+          return;
+        }
+
+        if (hasUsers) {
+          Array.from(multi.options).forEach(opt => {
+            if (opt.value === '__all' || opt.value === '__admin') opt.selected = false;
+          });
+          return;
+        }
+
+        // Keep a safe default when nothing is selected.
+        const adminOption = Array.from(multi.options).find(opt => opt.value === '__admin');
+        if (adminOption) adminOption.selected = true;
+      };
+
+      multi.addEventListener('change', enforceExclusiveMode);
+      enforceExclusiveMode();
+
+      saveBtn.disabled = false;
+      saveBtn.onclick = async () => {
+        saveBtn.disabled = true;
+        msg.textContent = '';
+
+        const selectedValues = Array.from(document.querySelectorAll('#docVisMulti option:checked')).map(o => o.value);
+        const allSelected = selectedValues.includes('__all');
+        const adminSelected = selectedValues.includes('__admin');
+        const playerIds = selectedValues
+          .filter(v => v !== '__all' && v !== '__admin' && v !== '')
+          .map(v => Number(v))
+          .filter(v => Number.isInteger(v) && v > 0);
+
+        let type = 'admin';
+        if (allSelected) {
+          type = 'all';
+        } else if (adminSelected) {
+          type = 'admin';
+        } else if (playerIds.length > 0) {
+          type = 'custom';
+        }
+
+        const payload = {
+          visibility_type: type,
+          role_name: null,
+          player_ids: type === 'custom' ? playerIds : null,
+        };
+        const res = await api(`/api/admin/game-documents/${encodeURIComponent(code)}/visibility`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+        if (res && res.ok) {
+          msg.textContent = 'Visibility updated.';
+          setTimeout(() => { if (msg.textContent === 'Visibility updated.') msg.textContent = ''; }, 3000);
+        } else {
+          msg.textContent = await readErrorMessage(res, 'Failed to update visibility.');
+        }
+        saveBtn.disabled = false;
+      };
+    }
   const isAdmin = user.role === 'admin';
   const listRes = await api(isAdmin ? '/api/admin/game-documents' : '/api/game-documents');
   let docs = listRes && listRes.ok ? await listRes.json() : [];
@@ -4337,6 +4484,14 @@ async function loadGameInformationRules() {
       <div id="gameDocRead" class="doc-read" style="display:none;"></div>
       <textarea id="gameDocText" rows="24" readonly class="doc-editor" style="display:none;"></textarea>
       ${isAdmin ? `
+        <div class="doc-visibility">
+          <h3>Document Visibility</h3>
+          <div id="docVisibilityControls"></div>
+          <div class="row" style="margin-top:8px;">
+            <button class="primary" id="saveDocVisibilityBtn" disabled>Save Visibility</button>
+            <span class="muted" id="saveDocVisibilityMsg"></span>
+          </div>
+        </div>
         <div class="doc-create">
           <h3>Create New Document</h3>
           <div class="doc-create-grid">
@@ -4377,6 +4532,13 @@ async function loadGameInformationRules() {
   const msg = document.getElementById('gameDocMsg');
   const hint = document.getElementById('gameDocHint');
   const loading = document.getElementById('gameDocLoading');
+
+  if (isAdmin) {
+    const controls = document.getElementById('docVisibilityControls');
+    if (controls) {
+      controls.innerHTML = '<span class="muted">Select a document to configure visibility.</span>';
+    }
+  }
 
   const renderDocReadView = (content) => {
     readView.innerHTML = escapeHtml(content || '').replace(/\n/g, '<br>');
@@ -4437,6 +4599,17 @@ async function loadGameInformationRules() {
 
   select.onchange = async () => {
     currentCode = select.value;
+
+    // Load document visibility controls if admin.
+    if (isAdmin && currentCode) {
+      loadDocVisibility(currentCode);
+    } else if (isAdmin) {
+      const controls = document.getElementById('docVisibilityControls');
+      if (controls) controls.innerHTML = '<span class="muted">Select a document to configure visibility.</span>';
+      const saveBtn = document.getElementById('saveDocVisibilityBtn');
+      if (saveBtn) saveBtn.disabled = true;
+    }
+
     text.value = '';
     text.style.display = 'none';
     readView.style.display = 'none';
