@@ -34,6 +34,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/meta/about', [MetaController::class, 'about']);
 
     Route::get('/me/dashboard', [MeController::class, 'dashboard']);
+    // Public resource definitions for player dashboard
+    Route::get('/resources', [\App\Http\Controllers\Api\ResourceDefinitionController::class, 'index']);
     Route::get('/me/resources', [MeController::class, 'resources']);
     Route::patch('/me/about', [MeController::class, 'updateAbout']);
     Route::get('/me/settings', [MeController::class, 'settings']);
@@ -91,6 +93,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/time-tracker/next-year', [AdminController::class, 'advanceYear']);
         Route::get('/notifications', [AdminController::class, 'notifications']);
         Route::delete('/notifications/{notificationId}', [AdminController::class, 'deleteNotification']);
+        Route::get('/resource-topbar-config', [AdminController::class, 'resourceTopbarConfig']);
+        Route::put('/resource-topbar-config', [AdminController::class, 'updateResourceTopbarConfig']);
         Route::post('/maps/layers/{layerType}', [MapController::class, 'uploadLayer']);
         Route::post('/maps/editor-reference', [MapController::class, 'uploadEditorReference']);
         Route::post('/maps/reset', [MapController::class, 'resetMap']);
@@ -113,5 +117,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/game-documents/{code}', [AdminController::class, 'updateGameDocument']);
         Route::get('/game-documents/{code}/visibility', [AdminController::class, 'getGameDocumentVisibility']);
         Route::put('/game-documents/{code}/visibility', [AdminController::class, 'updateGameDocumentVisibility']);
+
+        // Resource Definitions CRUD (admin only)
+        Route::get('/resources', [\App\Http\Controllers\Api\ResourceDefinitionController::class, 'index']);
+        Route::post('/resources', [\App\Http\Controllers\Api\ResourceDefinitionController::class, 'store']);
+        Route::patch('/resources/{id}', [\App\Http\Controllers\Api\ResourceDefinitionController::class, 'update']);
+        Route::delete('/resources/{id}', [\App\Http\Controllers\Api\ResourceDefinitionController::class, 'destroy']);
     });
 });

@@ -64,10 +64,90 @@ Admin mutation endpoints still go through Laravel REST APIs, then broadcast via 
 	- timestamp
 - Use optimistic locking for nation/shop edits to avoid overwriting concurrent admin updates.
 
+
+## Resource Management (Admin UI)
+
+The Resource Management section allows admins to define, edit, and organize all game resources. Resources are divided into two main types:
+
+- **Base Resources**: The primary resources (e.g., Cow, Wood, Ore, Food) used throughout the game.
+- **Advanced Resources**: Special or refined resources, grouped by their origin or use (e.g., Metal, Antimatter, Granola Bars).
+
+Each resource has the following fields:
+
+- **Name**: The unique code name for the resource (e.g., `cow`, `ore`, `ref_M`). Used as the internal key.
+- **Display**: The human-readable label shown in the UI (e.g., "Cow", "Metal").
+- **Type**: Either `base` or `advanced`. Determines which group the resource belongs to.
+- **Group**: Arbitrary grouping for display and organization (e.g., "Common", "Ore-derived").
+- **Order**: Integer for sorting resources within a group (lower numbers appear first).
+- **Meta**: A JSON object for additional configuration, rules, or display hints. See below for details and examples.
+
+### Meta Field Details
+
+The `meta` field is a JSON object that can store any extra data needed for a resource. This is used for advanced display, rules, or custom logic. Common patterns:
+
+- `{ "icon": "🐄" }` — Display a custom emoji/icon for the resource.
+- `{ "hidden": true }` — Hide this resource from normal player views.
+- `{ "admin_only": true }` — Only show/edit this resource in admin UIs.
+- `{ "description": "Special resource for event rewards." }` — Add a tooltip/description.
+- `{ "max": 100 }` — Set a maximum allowed value for this resource.
+- `{ "min": 0 }` — Set a minimum allowed value.
+- `{ "category": "currency" }` — Mark as a currency for shop/cost logic.
+
+#### Example Meta Field Usages
+
+**1. Custom Icon and Description**
+
+```
+{ "icon": "⚙", "description": "Advanced crafting material." }
+```
+
+**2. Hide from Players, Admin Only**
+
+```
+{ "hidden": true, "admin_only": true }
+```
+
+**3. Set Value Bounds**
+
+```
+{ "min": 0, "max": 9999 }
+```
+
+**4. Mark as Currency**
+
+```
+{ "category": "currency", "icon": "💰" }
+```
+
+**5. Complex Example**
+
+```
+{
+	"icon": "🧪",
+	"description": "Experimental resource only available during events.",
+	"hidden": true,
+	"event": "spring_festival"
+}
+```
+
+#### Notes
+- The meta field must be valid JSON. Use `{}` for no extra data.
+- You can add any keys needed for custom logic. The frontend/backend may use these for display, validation, or rules.
+- If you add a new meta key, document its meaning for other admins/developers.
+
+### Resource Management Workflow
+1. Use the **+ Add Resource** button to create new resources. Fill out all fields; meta is optional.
+2. Edit existing resources by changing any field and clicking **Save**.
+3. Delete resources with the **Delete** button (irreversible).
+4. Use the **Order** field to control display order within each group.
+5. Use the **Type** and **Group** fields to organize resources for the All Nations, Player, and Shop UIs.
+6. Use the **Meta** field for advanced configuration, icons, or rules.
+
+---
 ## Source Rule Mapping
 Admin tools are designed around the attached Azveria data sets:
 - Azveria rules/resources
 - Structures/terrain
 - War system and unit semantics
-- Dakotians sample statline\
+- Dakotians sample statline
 

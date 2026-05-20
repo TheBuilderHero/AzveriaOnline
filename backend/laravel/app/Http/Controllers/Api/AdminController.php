@@ -56,7 +56,22 @@ class AdminController extends Controller
             'income_randomize_cow' => ['sometimes', 'boolean'],
             'income_cow_min' => ['sometimes', 'numeric', 'min:0'],
             'income_cow_max' => ['sometimes', 'numeric', 'min:0'],
+            'starting_resources' => ['sometimes', 'array'],
+            'starting_resources.*.type' => ['required_with:starting_resources', 'in:base,advanced'],
+            'starting_resources.*.name' => ['required_with:starting_resources', 'string', 'max:120'],
+            'starting_resources.*.amount' => ['required_with:starting_resources', 'numeric'],
+            'income_resources' => ['sometimes', 'array'],
+            'income_resources.*.type' => ['required_with:income_resources', 'in:base,advanced'],
+            'income_resources.*.name' => ['required_with:income_resources', 'string', 'max:120'],
+            'income_resources.*.amount' => ['required_with:income_resources', 'numeric'],
         ]);
+
+        if (array_key_exists('starting_resources', $data)) {
+            $data['starting_resources'] = $this->normalizeDefaultResourceRows($data['starting_resources'], 'starting_resources');
+        }
+        if (array_key_exists('income_resources', $data)) {
+            $data['income_resources'] = $this->normalizeDefaultResourceRows($data['income_resources'], 'income_resources');
+        }
 
         $effective = array_replace_recursive($this->accounts->getNewAccountDefaults(), $data);
         if ((float) ($effective['income_resource_min'] ?? 0) > (float) ($effective['income_resource_max'] ?? 0)) {
@@ -73,6 +88,38 @@ class AdminController extends Controller
         $merged = $this->accounts->saveNewAccountDefaults($data);
 
         return response()->json(['message' => 'New account defaults saved', 'defaults' => $merged]);
+    }
+
+    private function normalizeDefaultResourceRows(array $rows, string $field): array
+    {
+        $seen = [];
+        $normalized = [];
+
+        foreach ($rows as $index => $row) {
+            $type = ($row['type'] ?? '') === 'advanced' ? 'advanced' : 'base';
+            $name = trim((string) ($row['name'] ?? ''));
+            if ($name === '') {
+                throw ValidationException::withMessages([
+                    $field . '.' . $index . '.name' => 'Resource name is required.',
+                ]);
+            }
+
+            $key = $type . ':' . $name;
+            if (isset($seen[$key])) {
+                throw ValidationException::withMessages([
+                    $field => 'Duplicate resources are not allowed. Duplicate: ' . $key,
+                ]);
+            }
+            $seen[$key] = true;
+
+            $normalized[] = [
+                'type' => $type,
+                'name' => $name,
+                'amount' => (float) ($row['amount'] ?? 0),
+            ];
+        }
+
+        return $normalized;
     }
 
     public function nations(Request $request)
@@ -135,39 +182,57 @@ class AdminController extends Controller
             'updated_at' => now(),
         ]);
 
-        if (isset($data['resources'])) {
+        if (isset($data['resources']) || isset($data['refined_resources']) || isset($data['currencies']) || isset($data['income'])) {
             $res = DB::table('nation_resources')->where('nation_id', $nationId)->first();
             $extra = json_decode($res->extra_json ?? '{}', true) ?: [];
-            if (isset($data['refined_resources'])) {
-                $extra['refined'] = array_merge($extra['refined'] ?? [], $data['refined_resources']);
+
+            $resourcePayload = is_array($data['resources'] ?? null) ? $data['resources'] : [];
+            $basePayload = is_array($resourcePayload['base'] ?? null) ? $resourcePayload['base'] : $resourcePayload;
+            $advancedPayload = is_array($resourcePayload['advanced'] ?? null) ? $resourcePayload['advanced'] : [];
+
+            $extraBase = is_array($extra['base'] ?? null) ? $extra['base'] : [];
+            $extraAdvanced = is_array($extra['advanced'] ?? null) ? $extra['advanced'] : [];
+            $extraRefined = is_array($extra['refined'] ?? null) ? $extra['refined'] : [];
+
+            if (!empty($basePayload)) {
+                foreach ($basePayload as $key => $value) {
+                    if (in_array($key, ['cow', 'wood', 'ore', 'food'], true)) {
+                        continue;
+                    }
+                    $extraBase[(string) $key] = (float) $value;
+                }
             }
-            if (isset($data['currencies'])) {
+
+            if (!empty($advancedPayload)) {
+                foreach ($advancedPayload as $key => $value) {
+                    $extraAdvanced[(string) $key] = (float) $value;
+                }
+                // Keep legacy refined mirror in sync for compatibility.
+                $extraRefined = array_merge($extraRefined, $extraAdvanced);
+            }
+
+            if (isset($data['refined_resources']) && is_array($data['refined_resources'])) {
+                foreach ($data['refined_resources'] as $key => $value) {
+                    $extraRefined[(string) $key] = (float) $value;
+                    $extraAdvanced[(string) $key] = (float) $value;
+                }
+            }
+            if (isset($data['currencies']) && is_array($data['currencies'])) {
                 $extra['currencies'] = array_merge($extra['currencies'] ?? [], $data['currencies']);
             }
-            if (isset($data['income'])) {
-                $extra['income'] = array_merge($extra['income'] ?? [], $data['income']);
+            if (isset($data['income']) && is_array($data['income'])) {
+                $extra['income'] = $this->normalizeIncomeMapInput($data['income']);
             }
+
+            $extra['base'] = $extraBase;
+            $extra['advanced'] = $extraAdvanced;
+            $extra['refined'] = $extraRefined;
+
             DB::table('nation_resources')->where('nation_id', $nationId)->update([
-                'cow' => $data['resources']['cow'] ?? ($res->cow ?? 0),
-                'wood' => $data['resources']['wood'] ?? ($res->wood ?? 0),
-                'ore' => $data['resources']['ore'] ?? ($res->ore ?? 0),
-                'food' => $data['resources']['food'] ?? ($res->food ?? 0),
-                'extra_json' => json_encode($extra),
-                'updated_at' => now(),
-            ]);
-        } elseif (isset($data['refined_resources']) || isset($data['currencies']) || isset($data['income'])) {
-            $res = DB::table('nation_resources')->where('nation_id', $nationId)->first();
-            $extra = json_decode($res->extra_json ?? '{}', true) ?: [];
-            if (isset($data['refined_resources'])) {
-                $extra['refined'] = array_merge($extra['refined'] ?? [], $data['refined_resources']);
-            }
-            if (isset($data['currencies'])) {
-                $extra['currencies'] = array_merge($extra['currencies'] ?? [], $data['currencies']);
-            }
-            if (isset($data['income'])) {
-                $extra['income'] = array_merge($extra['income'] ?? [], $data['income']);
-            }
-            DB::table('nation_resources')->where('nation_id', $nationId)->update([
+                'cow' => array_key_exists('cow', $basePayload) ? (float) $basePayload['cow'] : ($res->cow ?? 0),
+                'wood' => array_key_exists('wood', $basePayload) ? (float) $basePayload['wood'] : ($res->wood ?? 0),
+                'ore' => array_key_exists('ore', $basePayload) ? (float) $basePayload['ore'] : ($res->ore ?? 0),
+                'food' => array_key_exists('food', $basePayload) ? (float) $basePayload['food'] : ($res->food ?? 0),
                 'extra_json' => json_encode($extra),
                 'updated_at' => now(),
             ]);
@@ -858,6 +923,111 @@ class AdminController extends Controller
         return response()->json($query->get());
     }
 
+    public function resourceTopbarConfig()
+    {
+        $available = $this->availableTopbarResources();
+        $config = $this->loadResourceTopbarConfigRaw();
+
+        $normalizedGlobal = $this->normalizeResourceTopbarSelections($config['global'] ?? [], $available);
+        if (empty($normalizedGlobal)) {
+            $normalizedGlobal = $this->defaultTopbarSelections($available);
+        }
+
+        $overrides = [];
+        foreach (($config['overrides'] ?? []) as $override) {
+            $userId = (int) ($override['user_id'] ?? 0);
+            if ($userId <= 0) {
+                continue;
+            }
+
+            $mode = (string) ($override['mode'] ?? 'replace');
+            if (!in_array($mode, ['replace', 'append'], true)) {
+                $mode = 'replace';
+            }
+
+            $resources = $this->normalizeResourceTopbarSelections($override['resources'] ?? [], $available);
+            if (empty($resources)) {
+                continue;
+            }
+
+            $overrides[] = [
+                'user_id' => $userId,
+                'mode' => $mode,
+                'resources' => $resources,
+            ];
+        }
+
+        return response()->json([
+            'global' => $normalizedGlobal,
+            'overrides' => $overrides,
+            'available' => [
+                'base' => array_values($available['base'] ?? []),
+                'advanced' => array_values($available['advanced'] ?? []),
+            ],
+        ]);
+    }
+
+    public function updateResourceTopbarConfig(Request $request)
+    {
+        $data = $request->validate([
+            'global' => ['required', 'array', 'min:1'],
+            'global.*.type' => ['required', 'in:base,advanced'],
+            'global.*.name' => ['required', 'string', 'max:120'],
+            'overrides' => ['sometimes', 'array'],
+            'overrides.*.user_id' => ['required', 'integer', 'exists:users,id'],
+            'overrides.*.mode' => ['sometimes', 'in:replace,append'],
+            'overrides.*.resources' => ['required', 'array', 'min:1'],
+            'overrides.*.resources.*.type' => ['required', 'in:base,advanced'],
+            'overrides.*.resources.*.name' => ['required', 'string', 'max:120'],
+        ]);
+
+        $available = $this->availableTopbarResources();
+
+        $global = $this->normalizeResourceTopbarSelections($data['global'] ?? [], $available);
+        if (empty($global)) {
+            throw ValidationException::withMessages([
+                'global' => 'Select at least one valid resource for the global topbar configuration.',
+            ]);
+        }
+
+        $overrideByUser = [];
+        foreach (($data['overrides'] ?? []) as $override) {
+            $userId = (int) ($override['user_id'] ?? 0);
+            if ($userId <= 0) {
+                continue;
+            }
+
+            $resources = $this->normalizeResourceTopbarSelections($override['resources'] ?? [], $available);
+            if (empty($resources)) {
+                continue;
+            }
+
+            $mode = (string) ($override['mode'] ?? 'replace');
+            if (!in_array($mode, ['replace', 'append'], true)) {
+                $mode = 'replace';
+            }
+
+            $overrideByUser[$userId] = [
+                'user_id' => $userId,
+                'mode' => $mode,
+                'resources' => $resources,
+            ];
+        }
+
+        $payload = [
+            'global' => $global,
+            'overrides' => array_values($overrideByUser),
+            'updated_at' => now()->toIso8601String(),
+            'updated_by_user_id' => (int) $request->user()->id,
+        ];
+
+        if (!$this->saveResourceTopbarConfigRaw($payload)) {
+            return response()->json(['message' => 'Topbar configuration storage is unavailable.'], 500);
+        }
+
+        return response()->json(['message' => 'Topbar resource configuration saved.']);
+    }
+
     public function deleteManagedAccount(Request $request, int $userId)
     {
         $data = $request->validate([
@@ -1061,6 +1231,122 @@ class AdminController extends Controller
             throw ValidationException::withMessages([
                 'subject_user_id' => ['Viewer and subject must be different players.'],
             ]);
+        }
+    }
+
+    private function availableTopbarResources(): array
+    {
+        $rows = DB::table('resource_definitions')
+            ->select('type', 'name', 'display_name')
+            ->orderBy('type')
+            ->orderBy('group')
+            ->orderBy('order')
+            ->get();
+
+        $available = [
+            'base' => [],
+            'advanced' => [],
+        ];
+
+        foreach ($rows as $row) {
+            $type = (string) ($row->type ?? '');
+            $name = trim((string) ($row->name ?? ''));
+            $displayName = trim((string) ($row->display_name ?? $name));
+            if (!in_array($type, ['base', 'advanced'], true) || $name === '') {
+                continue;
+            }
+
+            $available[$type][$name] = [
+                'type' => $type,
+                'name' => $name,
+                'display_name' => $displayName !== '' ? $displayName : $name,
+            ];
+        }
+
+        return $available;
+    }
+
+    private function defaultTopbarSelections(array $available): array
+    {
+        $fallback = array_values($available['base'] ?? []);
+        if (empty($fallback)) {
+            $fallback = array_values($available['advanced'] ?? []);
+        }
+
+        return array_map(static fn ($item) => [
+            'type' => (string) ($item['type'] ?? 'base'),
+            'name' => (string) ($item['name'] ?? ''),
+        ], array_slice($fallback, 0, 4));
+    }
+
+    private function normalizeResourceTopbarSelections(array $selections, array $available): array
+    {
+        $out = [];
+        $seen = [];
+
+        foreach ($selections as $row) {
+            $type = (string) ($row['type'] ?? '');
+            $name = trim((string) ($row['name'] ?? ''));
+            if (!in_array($type, ['base', 'advanced'], true) || $name === '') {
+                continue;
+            }
+            if (!isset($available[$type][$name])) {
+                continue;
+            }
+
+            $key = $type . ':' . $name;
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+
+            $out[] = [
+                'type' => $type,
+                'name' => $name,
+            ];
+        }
+
+        return $out;
+    }
+
+    private function resourceTopbarConfigPath(): string
+    {
+        return storage_path('app/resource_topbar_config.json');
+    }
+
+    private function loadResourceTopbarConfigRaw(): array
+    {
+        $path = $this->resourceTopbarConfigPath();
+        if (!File::exists($path)) {
+            return [
+                'global' => [],
+                'overrides' => [],
+            ];
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        if (!is_array($decoded)) {
+            return [
+                'global' => [],
+                'overrides' => [],
+            ];
+        }
+
+        return [
+            'global' => is_array($decoded['global'] ?? null) ? $decoded['global'] : [],
+            'overrides' => is_array($decoded['overrides'] ?? null) ? $decoded['overrides'] : [],
+        ];
+    }
+
+    private function saveResourceTopbarConfigRaw(array $payload): bool
+    {
+        try {
+            $path = $this->resourceTopbarConfigPath();
+            File::ensureDirectoryExists(dirname($path));
+            File::put($path, json_encode($payload, JSON_PRETTY_PRINT));
+            return true;
+        } catch (\Throwable $e) {
+            return false;
         }
     }
 
@@ -1466,18 +1752,17 @@ class AdminController extends Controller
                     continue;
                 }
                 $extra = json_decode($resourceRow->extra_json ?? '{}', true) ?: [];
-                $income = $extra['income'] ?? ['cow' => 30, 'wood' => 3, 'ore' => 3, 'food' => 3];
+                $incomeMap = $this->normalizeIncomeMap($extra);
 
                 $delta = [
-                    'base' => [
-                        'cow' => (float) ($income['cow'] ?? 30),
-                        'wood' => (float) ($income['wood'] ?? 3),
-                        'ore' => (float) ($income['ore'] ?? 3),
-                        'food' => (float) ($income['food'] ?? 3),
-                    ],
+                    'base' => [],
+                    'advanced' => [],
                     'refined' => [],
                     'currencies' => [],
                 ];
+                foreach ($incomeMap as $incomeKey => $incomeValue) {
+                    $this->applyDeltaValue($delta, $incomeKey, (float) $incomeValue);
+                }
 
                 $assets = DB::table('nation_assets as na')
                     ->join('shop_items as si', 'na.shop_item_id', '=', 'si.id')
@@ -1502,9 +1787,9 @@ class AdminController extends Controller
 
                 $updated = $this->applyNationDelta($nation->id, $delta);
                 $negativeKeys = [];
-                foreach (['cow', 'wood', 'ore', 'food'] as $key) {
-                    if (($updated['base'][$key] ?? 0) < 0) {
-                        $negativeKeys[] = $key . '=' . $updated['base'][$key];
+                foreach (($updated['base'] ?? []) as $key => $value) {
+                    if ((float) $value < 0) {
+                        $negativeKeys[] = $key . '=' . $value;
                     }
                 }
                 foreach (($updated['currencies'] ?? []) as $key => $value) {
@@ -1523,7 +1808,7 @@ class AdminController extends Controller
                         'yearly_maintenance',
                         'Year ' . $yearNumber . ' processing for ' . $nation->name,
                         'System processed yearly income and maintenance for nation "' . $nation->name . '".'
-                        . ' Income applied: ' . json_encode($delta['base'])
+                        . ' Income applied: ' . json_encode(['base' => $delta['base'], 'advanced' => $delta['advanced']])
                         . '. Maintenance details: ' . ($maintenanceDetails ? implode('; ', $maintenanceDetails) : 'none')
                         . '. Negative balances: ' . ($negativeKeys ? implode(', ', $negativeKeys) : 'none') . '.',
                         ['nation_id' => $nation->id, 'year' => $yearNumber, 'negative_balances' => $negativeKeys]
@@ -1553,23 +1838,42 @@ class AdminController extends Controller
     {
         $resourceRow = DB::table('nation_resources')->where('nation_id', $nationId)->first();
         $extra = json_decode($resourceRow->extra_json ?? '{}', true) ?: [];
+        $baseExtra = is_array($extra['base'] ?? null) ? $extra['base'] : [];
+        $advanced = is_array($extra['advanced'] ?? null) ? $extra['advanced'] : [];
         $refined = $extra['refined'] ?? [];
         $currencies = $extra['currencies'] ?? [];
 
+        $updatedBase = [
+            'cow' => (float) $resourceRow->cow,
+            'wood' => (float) $resourceRow->wood,
+            'ore' => (float) $resourceRow->ore,
+            'food' => (float) $resourceRow->food,
+        ];
+
+        foreach (($delta['base'] ?? []) as $key => $value) {
+            $resourceKey = (string) $key;
+            if (array_key_exists($resourceKey, $updatedBase)) {
+                $updatedBase[$resourceKey] = (float) $updatedBase[$resourceKey] + (float) $value;
+            } else {
+                $baseExtra[$resourceKey] = (float) ($baseExtra[$resourceKey] ?? 0) + (float) $value;
+            }
+        }
+
+        foreach (($delta['advanced'] ?? []) as $key => $value) {
+            $advanced[$key] = ($advanced[$key] ?? 0) + (float) $value;
+            $refined[$key] = ($refined[$key] ?? 0) + (float) $value;
+        }
+
         foreach (($delta['refined'] ?? []) as $key => $value) {
             $refined[$key] = ($refined[$key] ?? 0) + (float) $value;
+            $advanced[$key] = ($advanced[$key] ?? 0) + (float) $value;
         }
         foreach (($delta['currencies'] ?? []) as $key => $value) {
             $currencies[$key] = ($currencies[$key] ?? 0) + (float) $value;
         }
 
-        $updatedBase = [
-            'cow' => (float) $resourceRow->cow + (float) (($delta['base']['cow'] ?? 0)),
-            'wood' => (float) $resourceRow->wood + (float) (($delta['base']['wood'] ?? 0)),
-            'ore' => (float) $resourceRow->ore + (float) (($delta['base']['ore'] ?? 0)),
-            'food' => (float) $resourceRow->food + (float) (($delta['base']['food'] ?? 0)),
-        ];
-
+        $extra['base'] = $baseExtra;
+        $extra['advanced'] = $advanced;
         $extra['refined'] = $refined;
         $extra['currencies'] = $currencies;
 
@@ -1582,20 +1886,102 @@ class AdminController extends Controller
             'updated_at' => now(),
         ]);
 
-        return ['base' => $updatedBase, 'refined' => $refined, 'currencies' => $currencies];
+        return [
+            'base' => array_merge($baseExtra, $updatedBase),
+            'advanced' => $advanced,
+            'refined' => $refined,
+            'currencies' => $currencies,
+        ];
     }
 
     private function applyDeltaValue(array &$delta, string $key, float $value): void
     {
+        if (str_starts_with($key, 'base:')) {
+            $baseKey = substr($key, 5);
+            if ($baseKey !== '') {
+                $delta['base'][$baseKey] = ($delta['base'][$baseKey] ?? 0) + $value;
+            }
+            return;
+        }
+
+        if (str_starts_with($key, 'advanced:')) {
+            $advancedKey = substr($key, 9);
+            if ($advancedKey !== '') {
+                $delta['advanced'][$advancedKey] = ($delta['advanced'][$advancedKey] ?? 0) + $value;
+            }
+            return;
+        }
+
         if (in_array($key, ['cow', 'wood', 'ore', 'food'], true)) {
             $delta['base'][$key] = ($delta['base'][$key] ?? 0) + $value;
         } elseif (str_starts_with($key, 'ref_')) {
             $rKey = substr($key, 4);
+            $delta['advanced'][$rKey] = ($delta['advanced'][$rKey] ?? 0) + $value;
             $delta['refined'][$rKey] = ($delta['refined'][$rKey] ?? 0) + $value;
         } elseif (str_starts_with($key, 'cur_')) {
             $cKey = substr($key, 4);
             $delta['currencies'][$cKey] = ($delta['currencies'][$cKey] ?? 0) + $value;
         }
+    }
+
+    private function normalizeIncomeMap(array $extra): array
+    {
+        if (is_array($extra['income_resources'] ?? null)) {
+            $out = [];
+            foreach ($extra['income_resources'] as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $type = ($entry['type'] ?? '') === 'advanced' ? 'advanced' : 'base';
+                $name = trim((string) ($entry['name'] ?? ''));
+                if ($name === '') {
+                    continue;
+                }
+                $out[$type . ':' . $name] = (float) ($entry['amount'] ?? 0);
+            }
+            return $out;
+        }
+
+        $income = is_array($extra['income'] ?? null) ? $extra['income'] : [];
+        return $this->normalizeIncomeMapInput($income);
+    }
+
+    private function normalizeIncomeMapInput(array $income): array
+    {
+        $out = [];
+        foreach ($income as $key => $value) {
+            $rawKey = (string) $key;
+            $normalizedKey = '';
+
+            if (str_contains($rawKey, ':')) {
+                [$type, $name] = explode(':', $rawKey, 2);
+                $type = trim(strtolower($type));
+                $name = trim($name);
+                if (($type === 'base' || $type === 'advanced') && $name !== '') {
+                    $normalizedKey = $type . ':' . $name;
+                }
+            } elseif (str_starts_with($rawKey, 'ref_')) {
+                $name = substr($rawKey, 4);
+                if ($name !== '') {
+                    $normalizedKey = 'advanced:' . $name;
+                }
+            } elseif (str_starts_with($rawKey, 'cur_')) {
+                $normalizedKey = '';
+            } else {
+                $name = trim($rawKey);
+                if ($name !== '') {
+                    $normalizedKey = 'base:' . $name;
+                }
+            }
+
+            if ($normalizedKey === '') {
+                continue;
+            }
+
+            $out[$normalizedKey] = (float) $value;
+        }
+
+        return $out;
     }
 
     private function createNotification(string $type, string $title, string $body, array $meta = []): void

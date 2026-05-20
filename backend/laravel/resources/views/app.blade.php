@@ -206,6 +206,230 @@
     }
     .admin-asset-row:last-child { border-bottom: 0; }
     .admin-asset-remove { background:#8a1a1a; }
+    .topbar-admin-shell {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      background: linear-gradient(180deg, var(--panel), var(--bg));
+    }
+    .topbar-admin-grid { display:grid; grid-template-columns:1fr; gap:10px; }
+    .topbar-admin-block {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      background: var(--panel);
+    }
+    .topbar-admin-block-head {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:8px;
+      margin-bottom:8px;
+      flex-wrap:wrap;
+    }
+    .topbar-admin-count {
+      font-size:11px;
+      font-weight:700;
+      letter-spacing:0.02em;
+      border:1px solid var(--border);
+      border-radius:999px;
+      padding:2px 8px;
+      background:var(--bg-alt);
+      color:var(--text);
+    }
+    .topbar-admin-groups {
+      display:grid;
+      gap:10px;
+      grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+      max-height:260px;
+      overflow:auto;
+      border:1px solid var(--border);
+      border-radius:8px;
+      padding:8px;
+      background:var(--bg);
+    }
+    .topbar-admin-group {
+      border:1px solid var(--border);
+      border-radius:8px;
+      padding:8px;
+      background:var(--panel);
+    }
+    .topbar-admin-group-title { font-size:12px; font-weight:700; margin:0 0 6px 0; color:var(--text); }
+    .topbar-admin-items { display:grid; gap:6px; }
+    .topbar-admin-item {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 8px;
+      border:1px solid #d7dee7;
+      border-radius:7px;
+      background:var(--bg);
+      font-size:12px;
+      line-height:1.2;
+    }
+    .topbar-admin-item input[type="checkbox"] {
+      width:16px;
+      height:16px;
+      margin:0;
+      flex:0 0 auto;
+    }
+    .topbar-admin-type {
+      font-size:10px;
+      font-weight:700;
+      border-radius:999px;
+      padding:2px 6px;
+      color:#fff;
+      background:#314f72;
+      flex:0 0 auto;
+    }
+    .topbar-admin-item.advanced .topbar-admin-type { background:#8c4a22; }
+    .topbar-admin-name { flex:1; min-width:0; }
+    .defaults-admin-shell {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      background: linear-gradient(180deg, var(--panel), var(--bg));
+    }
+    .defaults-admin-grid { display:grid; grid-template-columns:1fr; gap:10px; }
+    .defaults-admin-block {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      background: var(--panel);
+    }
+    .defaults-admin-form {
+      display:grid;
+      grid-template-columns:minmax(220px,1fr) 130px auto;
+      gap:8px;
+      align-items:end;
+    }
+    .defaults-admin-row {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      border:1px solid var(--border);
+      border-radius:8px;
+      padding:7px 8px;
+      background:var(--bg);
+    }
+    .defaults-admin-row .type-pill {
+      font-size:10px;
+      font-weight:700;
+      border-radius:999px;
+      padding:2px 7px;
+      color:#fff;
+      background:#314f72;
+      flex:0 0 auto;
+    }
+    .defaults-admin-row.advanced .type-pill { background:#8c4a22; }
+    .defaults-admin-row .resource-name { flex:1; min-width:0; }
+    .defaults-admin-row .resource-amount { max-width:130px; }
+    .resource-def-card {
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:10px;
+      background:var(--panel);
+      margin:6px 0;
+    }
+    .resource-def-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));
+      gap:8px;
+      align-items:end;
+    }
+    .resource-def-actions {
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .nation-editor-shell {
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:10px;
+      background:linear-gradient(180deg, var(--panel), var(--bg));
+      margin-bottom:12px;
+    }
+    .nation-editor-grid {
+      display:grid;
+      grid-template-columns:repeat(2, minmax(220px, 1fr));
+      gap:8px;
+      align-items:end;
+    }
+    .nation-editor-block {
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:10px;
+      background:var(--panel);
+      margin-top:8px;
+    }
+    .nation-income-row {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      border:1px solid var(--border);
+      border-radius:8px;
+      padding:6px 8px;
+      background:var(--bg);
+    }
+    .nation-income-row .type-pill {
+      font-size:10px;
+      font-weight:700;
+      border-radius:999px;
+      padding:2px 7px;
+      color:#fff;
+      background:#314f72;
+      flex:0 0 auto;
+    }
+    .nation-income-row.advanced .type-pill { background:#8c4a22; }
+    .nation-income-row .name { flex:1; min-width:0; }
+    .nation-income-row .amt { max-width:140px; }
+    .alln-grid { display:grid; grid-template-columns:1fr 320px; gap:12px; }
+    .alln-panel {
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:10px;
+      background:linear-gradient(180deg, var(--panel), var(--bg));
+    }
+    .alln-panel-title { margin:0 0 8px 0; font-size:15px; }
+    .nation-select-btn {
+      display:block;
+      width:100%;
+      margin-bottom:8px;
+      text-align:left;
+      border:1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+      background:linear-gradient(180deg, color-mix(in srgb, var(--panel) 75%, var(--bg) 25%), var(--bg));
+      color:var(--text);
+      font-weight:600;
+    }
+    .nation-select-btn:hover { filter: brightness(0.98); }
+    .vis-rule-row {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:8px 10px;
+      border:1px solid #d7dee7;
+      border-radius:8px;
+      background:var(--panel);
+      margin-bottom:6px;
+    }
+    .vis-rule-row:last-child { margin-bottom:0; }
+    .vis-controls-grid {
+      display:grid;
+      grid-template-columns:1fr 1fr auto;
+      gap:8px;
+      align-items:end;
+    }
+    @media (max-width: 900px) {
+      .defaults-admin-form { grid-template-columns:1fr; }
+      .defaults-admin-row { flex-wrap:wrap; }
+      .defaults-admin-row .resource-amount { max-width:100%; }
+      .nation-editor-grid { grid-template-columns:1fr; }
+      .nation-income-row { flex-wrap:wrap; }
+      .nation-income-row .amt { max-width:100%; }
+      .alln-grid { grid-template-columns:1fr; }
+      .vis-controls-grid { grid-template-columns:1fr; }
+    }
     .doc-create {
       margin-top: 12px;
       border: 1px solid var(--border);
@@ -354,7 +578,7 @@ const nav = document.getElementById('nav');
 const resourcesBar = document.getElementById('resourcesBar');
 
 const playerMenu = ['Player', 'Announcements', 'Game Information and Rules', 'Map', 'Combat', 'Chat', 'Other Nations', 'Shop', 'Settings'];
-const adminMenu = ['Announcements', 'All Nations', 'Notifications', 'Game Information and Rules', 'New Accounts', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
+const adminMenu = ['Announcements', 'All Nations', 'Notifications', 'Game Information and Rules', 'Resource Management', 'New Accounts', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
 
 const goofyAudio = new Audio('https://actions.google.com/sounds/v1/cartoon/boing.ogg');
 goofyAudio.preload = 'auto';
@@ -574,12 +798,21 @@ async function loadResources() {
   if (!res || !res.ok) return;
   const r = await res.json();
   const base = r.base || {};
-  const chips = [
-    { icon: '🐄', label: 'Cow',  val: base.cow  },
-    { icon: '🌳', label: 'Wood', val: base.wood },
-    { icon: '⛏',  label: 'Ore',  val: base.ore  },
-    { icon: '🍞', label: 'Food', val: base.food },
+  const defaultChips = [
+    { type: 'base', name: 'cow', icon: '🐄', label: 'Cow', val: base.cow },
+    { type: 'base', name: 'wood', icon: '🌳', label: 'Wood', val: base.wood },
+    { type: 'base', name: 'ore', icon: '⛏', label: 'Ore', val: base.ore },
+    { type: 'base', name: 'food', icon: '🍞', label: 'Food', val: base.food },
   ];
+  const chips = Array.isArray(r.topbar_display) && r.topbar_display.length > 0
+    ? r.topbar_display.map(item => ({
+      type: item.type || 'base',
+      name: item.name || '',
+      icon: (item.type === 'advanced') ? '⚙' : ({ cow: '🐄', wood: '🌳', ore: '⛏', food: '🍞' }[item.name] || '•'),
+      label: item.label || labelKey(item.name || ''),
+      val: toFiniteNumber(item.value, 0),
+    }))
+    : defaultChips;
   resourcesBar.innerHTML = chips.map(c =>
     `<div class="chip" title="${c.label}: ${fmtNum(c.val)}">${c.icon} <span class="chip-label">${c.label}</span>${fmtNum(c.val, { abbrev: true })}</div>`
   ).join('');
@@ -687,7 +920,600 @@ async function loadSection(name) {
     if (name === 'All Nations') return await loadAllNations();
     if (name === 'Notifications') return await loadNotifications();
     if (name === 'Game Information and Rules') return await loadGameInformationRules();
+    if (name === 'Resource Management') return await loadResourceManagement();
     if (name === 'About') return await loadAboutPage();
+  // Admin Resource Management UI
+  async function loadResourceManagement() {
+    view.innerHTML = `<div class="card"><h2>Resource Management</h2><div id="resourceMgmtPanel"><div class="muted">Loading…</div></div></div>`;
+    try {
+      const [res, defaultsRes, usersRes, topbarCfgRes] = await Promise.all([
+        api('/api/admin/resources'),
+        api('/api/admin/new-account-defaults'),
+        api('/api/admin/users?role=player'),
+        api('/api/admin/resource-topbar-config'),
+      ]);
+      if (!res || !res.ok) throw new Error('Failed to load resource definitions.');
+      if (!defaultsRes || !defaultsRes.ok) throw new Error('Failed to load new account defaults.');
+      if (!usersRes || !usersRes.ok) throw new Error('Failed to load players.');
+      const defs = await res.json();
+      const defaults = await defaultsRes.json();
+      const players = await usersRes.json();
+      const topbarCfg = (topbarCfgRes && topbarCfgRes.ok) ? await topbarCfgRes.json() : { global: [], overrides: [], available: { base: [], advanced: [] } };
+      renderResourceMgmt(defs, defaults, players, topbarCfg);
+    } catch (e) {
+      document.getElementById('resourceMgmtPanel').innerHTML = `<div class="danger">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function renderResourceMgmt(defs, defaults, players, topbarCfg) {
+    // defs: { base: {group: [defs]}, advanced: {group: [defs]} }
+    const panel = document.getElementById('resourceMgmtPanel');
+    const topbarGlobal = Array.isArray(topbarCfg?.global) ? topbarCfg.global : [];
+    const topbarOverrides = Array.isArray(topbarCfg?.overrides) ? topbarCfg.overrides : [];
+    const collectTopbarDefs = (type) => {
+      const groups = defs[type] || {};
+      return Object.values(groups)
+        .flat()
+        .map(def => ({
+          type,
+          name: String(def?.name || ''),
+          display_name: String(def?.display_name || def?.name || ''),
+        }))
+        .filter(item => item.name !== '');
+    };
+    const topbarResources = [
+      ...collectTopbarDefs('base'),
+      ...collectTopbarDefs('advanced'),
+    ];
+    const topbarSelectionValues = (selection) => {
+      if (!Array.isArray(selection)) return [];
+      return selection
+        .map(item => `${item.type || ''}|${item.name || ''}`)
+        .filter(v => v !== '|');
+    };
+    const topbarResourceCheckboxes = (prefix, selectedValues) => {
+      if (!topbarResources.length) return '<div class="muted">No resource definitions found.</div>';
+      const renderTypeGroup = (type, title) => {
+        const items = topbarResources.filter(item => item.type === type);
+        if (!items.length) return '';
+        return `
+          <div class="topbar-admin-group">
+            <div class="topbar-admin-group-title">${title}</div>
+            <div class="topbar-admin-items">
+              ${items.map(item => {
+                const val = `${item.type}|${item.name}`;
+                const checked = selectedValues.includes(val) ? 'checked' : '';
+                return `<label class="topbar-admin-item ${item.type}"><input type="checkbox" class="${prefix}" value="${val}" ${checked}><span class="topbar-admin-type">${item.type === 'advanced' ? 'ADV' : 'BASE'}</span><span class="topbar-admin-name">${escapeHtml(item.display_name || item.name)}</span></label>`;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      };
+
+      return `${renderTypeGroup('base', 'Base Resources')}${renderTypeGroup('advanced', 'Advanced Resources')}`;
+    };
+    let html = '';
+    html += `<div class="row" style="margin-bottom:10px;"><button class="primary" id="addResourceBtn">+ Add Resource</button></div>`;
+    ['base','advanced'].forEach(type => {
+      const groups = defs[type] || {};
+      html += `<details open style="margin-bottom:10px;"><summary style="font-size:16px;font-weight:600;">${type.charAt(0).toUpperCase()+type.slice(1)} Resources</summary>`;
+      Object.entries(groups).forEach(([group, arr]) => {
+        html += `<details open style="margin:6px 0 0 12px;"><summary style="font-size:15px;">Group: ${escapeHtml(group)}</summary>`;
+        html += arr.length === 0 ? '<div class="muted">No resources in this group.</div>' : arr.map(def => `
+          <div class="resource-def-card">
+            <form class="resourceEditForm" data-id="${def.id}">
+              <div class="resource-def-grid">
+                <label>Name <input name="name" value="${escapeHtml(def.name)}" required></label>
+                <label>Display <input name="display_name" value="${escapeHtml(def.display_name)}" required></label>
+                <label>Type <select name="type"><option value="base"${def.type==='base'?' selected':''}>Base</option><option value="advanced"${def.type==='advanced'?' selected':''}>Advanced</option></select></label>
+                <label>Group <input name="group" value="${escapeHtml(def.group)}" required></label>
+                <label>Order <input name="order" type="number" value="${Number(def.order)||0}"></label>
+                <label>Meta <input name="meta" value="${escapeHtml(JSON.stringify(def.meta||{}))}"></label>
+              </div>
+              <div class="resource-def-actions" style="margin-top:8px;">
+                <button class="primary saveResourceBtn" type="submit">Save</button>
+                <button class="primary deleteResourceBtn" type="button" style="background:#8a1a1a;">Delete</button>
+                <span class="muted resourceMsg"></span>
+              </div>
+            </form>
+          </div>
+        `).join('');
+        html += '</details>';
+      });
+      html += '</details>';
+    });
+    html += `
+      <details open style="margin-top:12px;">
+        <summary style="font-size:16px;font-weight:600;">New Account Resource Defaults</summary>
+        <div class="defaults-admin-shell" style="margin-top:8px;">
+          <p class="muted" style="margin-top:0;">Configure starting resources and yearly income for newly created nations. Duplicates are not allowed.</p>
+
+          <div class="defaults-admin-grid">
+            <details open style="margin-top:8px;">
+              <summary>Starting Resources</summary>
+              <div class="defaults-admin-block" style="margin-top:8px;">
+                <div class="topbar-admin-block-head">
+                  <span class="muted">Resources each new nation starts with.</span>
+                  <span class="topbar-admin-count" id="rm-start-count">0 selected</span>
+                </div>
+                <div class="defaults-admin-form">
+                  <div>
+                    <label style="font-size:12px;">Resource</label>
+                    <select id="rm-start-resource"></select>
+                  </div>
+                  <div>
+                    <label style="font-size:12px;">Amount</label>
+                    <input id="rm-start-amount" type="number" value="0">
+                  </div>
+                  <button class="primary" type="button" id="rm-start-add">Add</button>
+                </div>
+                <div id="rm-start-rows" style="display:grid;gap:6px;margin-top:8px;"></div>
+              </div>
+            </details>
+
+            <details open style="margin-top:8px;">
+              <summary>Income Per Game Year</summary>
+              <div class="defaults-admin-block" style="margin-top:8px;">
+                <div class="topbar-admin-block-head">
+                  <span class="muted">Passive yearly resources each new nation gains.</span>
+                  <span class="topbar-admin-count" id="rm-income-count">0 selected</span>
+                </div>
+                <div class="defaults-admin-form">
+                  <div>
+                    <label style="font-size:12px;">Resource</label>
+                    <select id="rm-income-resource"></select>
+                  </div>
+                  <div>
+                    <label style="font-size:12px;">Amount</label>
+                    <input id="rm-income-amount" type="number" value="0">
+                  </div>
+                  <button class="primary" type="button" id="rm-income-add">Add</button>
+                </div>
+                <div id="rm-income-rows" style="display:grid;gap:6px;margin-top:8px;"></div>
+              </div>
+            </details>
+
+            <div class="row" style="margin-top:4px;">
+              <button class="primary" type="button" id="rm-save-defaults">Save New Account Resource Defaults</button>
+              <span class="muted" id="rm-defaults-msg"></span>
+            </div>
+          </div>
+        </div>
+      </details>
+      <details open style="margin-top:12px;">
+        <summary style="font-size:16px;font-weight:600;">Topbar Resources</summary>
+        <div class="topbar-admin-shell" style="margin-top:8px;">
+          <p class="muted" style="margin-top:0;">Select which resources appear in the top-right resource bar. Set global defaults and optional per-player overrides.</p>
+
+          <div class="topbar-admin-grid">
+            <details open style="margin-top:8px;">
+              <summary>Global Topbar Resources</summary>
+              <div class="topbar-admin-block" style="margin-top:8px;">
+                <div class="topbar-admin-block-head">
+                  <span class="muted">Visible to all players unless overridden.</span>
+                  <span class="topbar-admin-count" id="rmTopbarGlobalCount">0 selected</span>
+                </div>
+                <div id="rmTopbarGlobalWrap" class="topbar-admin-groups">
+                  ${topbarResourceCheckboxes('rm-topbar-global', topbarSelectionValues(topbarGlobal))}
+                </div>
+              </div>
+            </details>
+
+            <details style="margin-top:8px;">
+              <summary>Per-Player Override</summary>
+              <div class="topbar-admin-block" style="margin-top:8px;">
+                <label>Player Account</label>
+                <select id="rmTopbarPlayerId">${(players || []).map(player => `<option value="${player.id}">${escapeHtml(player.name)} (${escapeHtml(player.email)})</option>`).join('')}</select>
+                <label style="margin-top:8px;display:flex;align-items:center;gap:6px;"><input type="checkbox" id="rmTopbarOverrideEnabled"> Enable override for this player</label>
+                <label>Override Mode</label>
+                <select id="rmTopbarOverrideMode">
+                  <option value="replace">Replace global resources</option>
+                  <option value="append">Add to global resources</option>
+                </select>
+                <div class="topbar-admin-block-head" style="margin-top:8px;">
+                  <span class="muted">Choose resources for this player override.</span>
+                  <span class="topbar-admin-count" id="rmTopbarPlayerCount">0 selected</span>
+                </div>
+                <div id="rmTopbarPlayerWrap" class="topbar-admin-groups">
+                  ${topbarResourceCheckboxes('rm-topbar-player', [])}
+                </div>
+              </div>
+            </details>
+
+            <div class="row" style="margin-top:4px;">
+              <button class="primary" id="rmSaveTopbarConfigBtn" type="button">Save Topbar Configuration</button>
+              <span class="muted" id="rmSaveTopbarConfigMsg"></span>
+            </div>
+          </div>
+        </div>
+      </details>
+    `;
+
+    panel.innerHTML = html;
+
+    bindNewAccountResourceDefaults(defs, defaults || {});
+    bindTopbarConfigSection(players || [], topbarGlobal, topbarOverrides);
+
+    // Add resource
+    document.getElementById('addResourceBtn').onclick = () => {
+      panel.insertAdjacentHTML('afterbegin', `
+        <div class="resource-def-card">
+          <form class="resourceEditForm" data-id="">
+            <div class="resource-def-grid">
+              <label>Name <input name="name" required></label>
+              <label>Display <input name="display_name" required></label>
+              <label>Type <select name="type"><option value="base">Base</option><option value="advanced">Advanced</option></select></label>
+              <label>Group <input name="group" required></label>
+              <label>Order <input name="order" type="number" value="0"></label>
+              <label>Meta <input name="meta" value="{}"></label>
+            </div>
+            <div class="resource-def-actions" style="margin-top:8px;">
+              <button class="primary saveResourceBtn" type="submit">Create</button>
+              <button class="primary deleteResourceBtn" type="button" style="background:#8a1a1a;">Delete</button>
+              <span class="muted resourceMsg"></span>
+            </div>
+          </form>
+        </div>
+      `);
+      bindResourceMgmtEvents();
+    };
+    bindResourceMgmtEvents();
+  }
+
+  function bindNewAccountResourceDefaults(defs, defaults) {
+    const optionGroups = (type) => {
+      const groups = defs[type] || {};
+      return Object.entries(groups).map(([group, arr]) => {
+        if (!arr.length) return '';
+        const label = type === 'advanced' ? `Advanced Resources - ${group}` : `Base Resources - ${group}`;
+        const options = arr.map(def => `<option value="${type}|${def.name}">${escapeHtml(def.display_name)} (${escapeHtml(group)})</option>`).join('');
+        return `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
+      }).join('');
+    };
+
+    const allOptions = `${optionGroups('base')}${optionGroups('advanced')}`;
+    const startSelect = document.getElementById('rm-start-resource');
+    const incomeSelect = document.getElementById('rm-income-resource');
+    if (startSelect) startSelect.innerHTML = allOptions;
+    if (incomeSelect) incomeSelect.innerHTML = allOptions;
+
+    const normalizeRows = (rows) => {
+      if (!Array.isArray(rows)) return [];
+      const seen = new Set();
+      const out = [];
+      rows.forEach(row => {
+        const type = row?.type === 'advanced' ? 'advanced' : 'base';
+        const name = String(row?.name || '').trim();
+        if (!name) return;
+        const key = `${type}|${name}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push({ type, name, amount: Number(row?.amount || 0) });
+      });
+      return out;
+    };
+
+    const oldResources = defaults.resources || {};
+    const oldRefined = defaults.refined_resources || {};
+    const oldIncome = defaults.income_defaults || {};
+
+    const hasCanonicalStarting = Array.isArray(defaults.starting_resources);
+    const hasCanonicalIncome = Array.isArray(defaults.income_resources);
+
+    const startRows = normalizeRows(
+      hasCanonicalStarting
+        ? defaults.starting_resources
+        : [
+            ...Object.entries(oldResources).map(([name, amount]) => ({ type: 'base', name, amount })),
+            ...Object.entries(oldRefined).map(([name, amount]) => ({ type: 'advanced', name, amount })),
+          ]
+    );
+    const incomeRows = normalizeRows(
+      hasCanonicalIncome
+        ? defaults.income_resources
+        : Object.entries(oldIncome).map(([name, amount]) => ({ type: 'base', name, amount }))
+    );
+
+    const displayName = (type, name) => {
+      const groups = defs[type] || {};
+      for (const arr of Object.values(groups)) {
+        const found = (arr || []).find(def => def.name === name);
+        if (found) return found.display_name;
+      }
+      return name;
+    };
+
+    const renderRows = (rows, containerId, removeClass, amountClass) => {
+      const el = document.getElementById(containerId);
+      if (!el) return;
+      if (!rows.length) {
+        el.innerHTML = '<div class="muted">No rows configured.</div>';
+        return;
+      }
+      el.innerHTML = rows.map((row, idx) => `
+        <div class="defaults-admin-row ${row.type === 'advanced' ? 'advanced' : 'base'}">
+          <span class="type-pill">${row.type === 'advanced' ? 'ADV' : 'BASE'}</span>
+          <div class="resource-name">${escapeHtml(displayName(row.type, row.name))} <span class="muted">(${escapeHtml(row.name)})</span></div>
+          <input type="number" class="${amountClass} resource-amount" data-idx="${idx}" value="${Number(row.amount || 0)}">
+          <button class="primary ${removeClass}" type="button" data-idx="${idx}" style="background:#8a1a1a;">Remove</button>
+        </div>
+      `).join('');
+    };
+
+    const updateDefaultsCounts = () => {
+      const startCountEl = document.getElementById('rm-start-count');
+      const incomeCountEl = document.getElementById('rm-income-count');
+      if (startCountEl) startCountEl.textContent = `${startRows.length} selected`;
+      if (incomeCountEl) incomeCountEl.textContent = `${incomeRows.length} selected`;
+    };
+
+    const rerender = () => {
+      renderRows(startRows, 'rm-start-rows', 'rm-start-remove', 'rm-start-amount-input');
+      renderRows(incomeRows, 'rm-income-rows', 'rm-income-remove', 'rm-income-amount-input');
+      updateDefaultsCounts();
+
+      document.querySelectorAll('.rm-start-amount-input').forEach(input => {
+        input.addEventListener('input', () => {
+          const idx = Number(input.dataset.idx);
+          if (Number.isFinite(idx) && startRows[idx]) startRows[idx].amount = Number(input.value || 0);
+        });
+      });
+      document.querySelectorAll('.rm-income-amount-input').forEach(input => {
+        input.addEventListener('input', () => {
+          const idx = Number(input.dataset.idx);
+          if (Number.isFinite(idx) && incomeRows[idx]) incomeRows[idx].amount = Number(input.value || 0);
+        });
+      });
+
+      document.querySelectorAll('.rm-start-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.dataset.idx);
+          if (Number.isFinite(idx) && startRows[idx]) {
+            startRows.splice(idx, 1);
+            rerender();
+          }
+        });
+      });
+      document.querySelectorAll('.rm-income-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.dataset.idx);
+          if (Number.isFinite(idx) && incomeRows[idx]) {
+            incomeRows.splice(idx, 1);
+            rerender();
+          }
+        });
+      });
+    };
+
+    const addUniqueRow = (rows, rawValue, amount, msgEl) => {
+      if (!rawValue || !rawValue.includes('|')) {
+        if (msgEl) msgEl.textContent = 'Select a resource first.';
+        return;
+      }
+      const [typeRaw, nameRaw] = rawValue.split('|', 2);
+      const type = typeRaw === 'advanced' ? 'advanced' : 'base';
+      const name = String(nameRaw || '').trim();
+      if (!name) {
+        if (msgEl) msgEl.textContent = 'Invalid resource selection.';
+        return;
+      }
+      const duplicate = rows.some(row => row.type === type && row.name === name);
+      if (duplicate) {
+        if (msgEl) msgEl.textContent = 'Duplicate resources are not allowed.';
+        return;
+      }
+      rows.push({ type, name, amount: Number(amount || 0) });
+      if (msgEl) msgEl.textContent = '';
+      rerender();
+    };
+
+    const msgEl = document.getElementById('rm-defaults-msg');
+    document.getElementById('rm-start-add')?.addEventListener('click', () => {
+      addUniqueRow(startRows, document.getElementById('rm-start-resource')?.value, document.getElementById('rm-start-amount')?.value, msgEl);
+    });
+    document.getElementById('rm-income-add')?.addEventListener('click', () => {
+      addUniqueRow(incomeRows, document.getElementById('rm-income-resource')?.value, document.getElementById('rm-income-amount')?.value, msgEl);
+    });
+
+    document.getElementById('rm-save-defaults')?.addEventListener('click', async () => {
+      const payload = {
+        starting_resources: startRows,
+        income_resources: incomeRows,
+      };
+      const save = await api('/api/admin/new-account-defaults', { method: 'PATCH', body: JSON.stringify(payload) });
+      if (msgEl) msgEl.textContent = save?.ok ? 'Saved new account resource defaults.' : await readErrorMessage(save, 'Could not save defaults.');
+      barkIfEnabled();
+    });
+
+    rerender();
+  }
+
+  function bindTopbarConfigSection(players, topbarGlobal, topbarOverrides) {
+    const topbarSelectionValues = (selection) => {
+      if (!Array.isArray(selection)) return [];
+      return selection
+        .map(item => `${item.type || ''}|${item.name || ''}`)
+        .filter(v => v !== '|');
+    };
+
+    const topbarOverrideMap = new Map();
+    (topbarOverrides || []).forEach(override => {
+      const userId = Number(override.user_id || 0);
+      if (!userId || !Array.isArray(override.resources) || override.resources.length === 0) return;
+      topbarOverrideMap.set(userId, {
+        user_id: userId,
+        mode: override.mode === 'append' ? 'append' : 'replace',
+        resources: override.resources,
+      });
+    });
+
+    const getCheckedTopbarSelections = (className) => Array.from(document.querySelectorAll(`.${className}:checked`)).map(el => {
+      const [type, name] = String(el.value || '').split('|');
+      return { type, name };
+    }).filter(item => (item.type === 'base' || item.type === 'advanced') && item.name);
+
+    const setCheckedTopbarSelections = (className, values) => {
+      const selected = new Set(values || []);
+      document.querySelectorAll(`.${className}`).forEach(el => {
+        el.checked = selected.has(el.value);
+      });
+    };
+
+    const updateTopbarSelectionCount = (className, countId) => {
+      const count = document.querySelectorAll(`.${className}:checked`).length;
+      const el = document.getElementById(countId);
+      if (el) el.textContent = `${count} selected`;
+    };
+
+    const bindTopbarSelectionCountWatcher = (className, countId) => {
+      document.querySelectorAll(`.${className}`).forEach(el => {
+        el.addEventListener('change', () => updateTopbarSelectionCount(className, countId));
+      });
+      updateTopbarSelectionCount(className, countId);
+    };
+
+    const applyPlayerTopbarEditorEnabledState = (enabled) => {
+      const wrap = document.getElementById('rmTopbarPlayerWrap');
+      const modeEl = document.getElementById('rmTopbarOverrideMode');
+      if (wrap) wrap.style.opacity = enabled ? '1' : '0.55';
+      document.querySelectorAll('.rm-topbar-player').forEach(el => {
+        el.disabled = !enabled;
+      });
+      if (modeEl) modeEl.disabled = !enabled;
+    };
+
+    const persistCurrentTopbarPlayerEditor = () => {
+      const playerId = Number(document.getElementById('rmTopbarPlayerId')?.value || 0);
+      if (!playerId) return;
+      const enabled = !!document.getElementById('rmTopbarOverrideEnabled')?.checked;
+      if (!enabled) {
+        topbarOverrideMap.delete(playerId);
+        return;
+      }
+      const resourcesSelected = getCheckedTopbarSelections('rm-topbar-player');
+      if (resourcesSelected.length === 0) {
+        topbarOverrideMap.delete(playerId);
+        return;
+      }
+      const mode = document.getElementById('rmTopbarOverrideMode')?.value === 'append' ? 'append' : 'replace';
+      topbarOverrideMap.set(playerId, {
+        user_id: playerId,
+        mode,
+        resources: resourcesSelected,
+      });
+    };
+
+    const loadTopbarPlayerEditor = () => {
+      const playerId = Number(document.getElementById('rmTopbarPlayerId')?.value || 0);
+      const wrap = document.getElementById('rmTopbarPlayerWrap');
+      const enabledEl = document.getElementById('rmTopbarOverrideEnabled');
+      const modeEl = document.getElementById('rmTopbarOverrideMode');
+      if (!wrap || !enabledEl || !modeEl) return;
+
+      const override = topbarOverrideMap.get(playerId);
+      enabledEl.checked = !!override;
+      modeEl.value = override?.mode === 'append' ? 'append' : 'replace';
+      setCheckedTopbarSelections('rm-topbar-player', topbarSelectionValues(override?.resources || []));
+      updateTopbarSelectionCount('rm-topbar-player', 'rmTopbarPlayerCount');
+      applyPlayerTopbarEditorEnabledState(enabledEl.checked);
+    };
+
+    setCheckedTopbarSelections('rm-topbar-global', topbarSelectionValues(topbarGlobal));
+    bindTopbarSelectionCountWatcher('rm-topbar-global', 'rmTopbarGlobalCount');
+    bindTopbarSelectionCountWatcher('rm-topbar-player', 'rmTopbarPlayerCount');
+    if ((players || []).length > 0) {
+      document.getElementById('rmTopbarPlayerId')?.addEventListener('change', () => {
+        persistCurrentTopbarPlayerEditor();
+        loadTopbarPlayerEditor();
+      });
+      document.getElementById('rmTopbarOverrideEnabled')?.addEventListener('change', () => {
+        const enabled = !!document.getElementById('rmTopbarOverrideEnabled')?.checked;
+        applyPlayerTopbarEditorEnabledState(enabled);
+      });
+      loadTopbarPlayerEditor();
+    }
+
+    document.getElementById('rmSaveTopbarConfigBtn')?.addEventListener('click', async () => {
+      persistCurrentTopbarPlayerEditor();
+
+      const msgEl = document.getElementById('rmSaveTopbarConfigMsg');
+      const globalSelection = getCheckedTopbarSelections('rm-topbar-global');
+      if (globalSelection.length === 0) {
+        if (msgEl) msgEl.textContent = 'Select at least one global topbar resource.';
+        return;
+      }
+
+      const payload = {
+        global: globalSelection,
+        overrides: Array.from(topbarOverrideMap.values()),
+      };
+      const save = await api('/api/admin/resource-topbar-config', { method: 'PUT', body: JSON.stringify(payload) });
+      if (msgEl) msgEl.textContent = save?.ok ? 'Topbar configuration saved.' : await readErrorMessage(save, 'Topbar configuration could not be saved.');
+      if (save?.ok) {
+        await loadResources();
+      }
+      barkIfEnabled();
+    });
+  }
+
+  function bindResourceMgmtEvents() {
+    document.querySelectorAll('.resourceEditForm').forEach(form => {
+      const id = form.dataset.id;
+      const saveBtn = form.querySelector('.saveResourceBtn');
+      const delBtn = form.querySelector('.deleteResourceBtn');
+      const msg = form.querySelector('.resourceMsg');
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        saveBtn.disabled = true;
+        msg.textContent = 'Saving…';
+        try {
+          const fd = new FormData(form);
+          const payload = {
+            name: fd.get('name'),
+            display_name: fd.get('display_name'),
+            type: fd.get('type'),
+            group: fd.get('group'),
+            order: Number(fd.get('order')||0),
+            meta: JSON.parse(fd.get('meta')||'{}'),
+          };
+          let res;
+          if (id) {
+            res = await api(`/api/admin/resources/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+          } else {
+            res = await api('/api/admin/resources', { method: 'POST', body: JSON.stringify(payload) });
+          }
+          if (!res || !res.ok) throw new Error(await readErrorMessage(res, 'Save failed'));
+          msg.textContent = 'Saved';
+          setTimeout(() => { msg.textContent = ''; }, 1200);
+          await loadResourceManagement();
+        } catch (err) {
+          msg.textContent = err.message || 'Save failed';
+        } finally {
+          saveBtn.disabled = false;
+        }
+      };
+      delBtn.onclick = async () => {
+        if (!id) {
+          form.parentElement.remove();
+          return;
+        }
+        if (!window.confirm('Delete this resource?')) return;
+        delBtn.disabled = true;
+        msg.textContent = 'Deleting…';
+        try {
+          const res = await api(`/api/admin/resources/${id}`, { method: 'DELETE' });
+          if (!res || !res.ok) throw new Error(await readErrorMessage(res, 'Delete failed'));
+          msg.textContent = 'Deleted';
+          setTimeout(() => { msg.textContent = ''; }, 1200);
+          await loadResourceManagement();
+        } catch (err) {
+          msg.textContent = err.message || 'Delete failed';
+        } finally {
+          delBtn.disabled = false;
+        }
+      };
+    });
+  }
   } catch (error) {
     if (activeSectionName === name) {
       renderSectionError(name, error);
@@ -696,27 +1522,91 @@ async function loadSection(name) {
 }
 
 async function loadPlayer() {
-  const [dashRes, sqMilesRes] = await Promise.all([
+  // Fetch dashboard, terrain, and resource definitions
+  const [dashRes, sqMilesRes, resDefRes] = await Promise.all([
     api('/api/me/dashboard'),
     api('/api/me/terrain-square-miles'),
+    api('/api/resources'),
   ]);
   const data = await dashRes.json();
   const sqMiles = await sqMilesRes.json();
+  const resourceDefs = await resDefRes.json();
   const normalizedSqMiles = normalizeTerrainSquareMiles(sqMiles);
   const terrainRows = Object.entries(normalizedSqMiles).length
     ? Object.entries(normalizedSqMiles).map(([k, v]) => `<span>${labelTerrainKey(k)}: <strong>${fmtNum(v)} sq mi</strong></span>`).join(' &nbsp;|&nbsp; ')
     : 'No terrain data';
 
   const res = data.resources || {};
-  const base = res.base || {};
-  const refined = res.refined || {};
-  const currencies = res.currencies || {};
-  const yearly = data.yearly_projection || { income: { base: {}, refined: {}, currencies: {} }, maintenance: { base: {}, refined: {}, currencies: {} }, net: { base: {}, refined: {}, currencies: {} }, maintenance_breakdown: [] };
-
+  const yearly = data.yearly_projection || { income: {}, maintenance: {}, net: {}, maintenance_breakdown: [] };
   const ownedUnits = data.units.owned || [];
   const trainingUnits = data.units.training || [];
   const builtBuildings = data.buildings.built || [];
   const progressBuildings = data.buildings.in_progress || [];
+
+  // Helper to render resource groups
+  function renderResourceGroups(type, values) {
+    const groups = resourceDefs[type] || {};
+    return Object.entries(groups).map(([group, defs]) => {
+      const openDefault = (
+        (type === 'base' && (group === 'Currencies' || group === 'Common')) ||
+        (type === 'advanced' && (group === 'Uncommon' || group === 'Rare'))
+      );
+      return `<details style="margin-top:6px;"${openDefault ? ' open' : ''}>
+        <summary>${group}</summary>
+        <div class="res-panel">
+          ${defs.length === 0 ? '<div class="muted">none</div>' : defs.map(def => {
+            const val = values?.[def.name] ?? 0;
+            return `<div class="res-kv"><span>${escapeHtml(def.display_name)}</span><span>${fmtNum(val)}</span></div>`;
+          }).join('')}
+        </div>
+      </details>`;
+    }).join('');
+  }
+
+  // Helper to render income groups
+  function renderIncomeGroups() {
+    const groups = [
+      { key: 'income', label: 'Income', open: true },
+      { key: 'production', label: 'Production', open: false },
+      { key: 'upkeep', label: 'Upkeep', open: false },
+    ];
+    return groups.map(g => {
+      const vals = yearly[g.key] || {};
+      const entries = [];
+      if (vals && typeof vals === 'object') {
+        const baseVals = (vals.base && typeof vals.base === 'object') ? vals.base : {};
+        const advancedVals = (vals.advanced && typeof vals.advanced === 'object') ? vals.advanced : {};
+        const currencyVals = (vals.currencies && typeof vals.currencies === 'object') ? vals.currencies : {};
+        const refinedVals = (vals.refined && typeof vals.refined === 'object') ? vals.refined : {};
+
+        // Preferred dynamic structure
+        Object.entries(baseVals).forEach(([k, v]) => entries.push([k, v]));
+        Object.entries(advancedVals).forEach(([k, v]) => entries.push([k, v]));
+        Object.entries(currencyVals).forEach(([k, v]) => entries.push([`cur_${k}`, v]));
+
+        // Backward-compatible refined fallback when advanced bucket is absent.
+        if (Object.keys(advancedVals).length === 0) {
+          Object.entries(refinedVals).forEach(([k, v]) => entries.push([`ref_${k}`, v]));
+        }
+
+        // Legacy flat structure fallback.
+        const hasNestedBuckets = Object.keys(baseVals).length || Object.keys(advancedVals).length || Object.keys(currencyVals).length || Object.keys(refinedVals).length;
+        if (!hasNestedBuckets) {
+          Object.entries(vals).forEach(([k, v]) => entries.push([k, v]));
+        }
+      }
+
+      const nonZeroEntries = entries.filter(([_, v]) => toFiniteNumber(v, 0) !== 0);
+      return `<details style="margin-top:6px;"${g.open ? ' open' : ''}>
+        <summary>${g.label}</summary>
+        <div class="res-panel">
+          ${nonZeroEntries.length === 0 ? '<div class="muted">none</div>' : nonZeroEntries.map(([k, v]) => {
+            return `<div class="res-kv"><span>${escapeHtml(labelKey(k))}</span><span>${fmtNum(v)}</span></div>`;
+          }).join('')}
+        </div>
+      </details>`;
+    }).join('');
+  }
 
   view.innerHTML = `
     <div class="card">
@@ -731,48 +1621,17 @@ async function loadPlayer() {
 
           <details style="margin-top:12px;">
             <summary>Base Resources</summary>
-            <div class="res-panel">
-              <div class="res-kv"><span>🐄 Cow</span><span>${fmtNum(base.cow)}</span></div>
-              <div class="res-kv"><span>🪵 Wood</span><span>${fmtNum(base.wood)}</span></div>
-              <div class="res-kv"><span>⛏ Ore</span><span>${fmtNum(base.ore)}</span></div>
-              <div class="res-kv"><span>🍞 Food</span><span>${fmtNum(base.food)}</span></div>
-            </div>
+            ${renderResourceGroups('base', res.base || {})}
           </details>
 
           <details style="margin-top:8px;">
-            <summary>Refined Resources</summary>
-            <div class="res-panel">
-              <details open><summary style="font-size:13px;">⛏ Ore-derived</summary>${renderKVList(ORE_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;font-size:13px;">None yet.</div>'}</details>
-              <details open><summary style="font-size:13px;">🌲 Wood-derived</summary>${renderKVList(WOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;font-size:13px;">None yet.</div>'}</details>
-              <details open><summary style="font-size:13px;">🍞 Food-derived</summary>${renderKVList(FOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:4px 6px;font-size:13px;">None yet.</div>'}</details>
-            </div>
+            <summary>Advanced Resources</summary>
+            ${renderResourceGroups('advanced', res.advanced || {})}
           </details>
 
           <details style="margin-top:8px;" open>
-            <summary>Expected Yearly Income / Maintenance</summary>
-            <div class="res-panel" style="padding:8px;">
-              <div style="font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Net (Income − Maintenance)</div>
-              <div>${(() => {
-                const netBase = yearly.net?.base || {};
-                const rows = Object.entries({cow:'🐄 Cow',wood:'🪵 Wood',ore:'⛏ Ore',food:'🍞 Food'})
-                  .filter(([k]) => toFiniteNumber(netBase[k], 0) !== 0)
-                  .map(([k,label]) => {
-                    const v = toFiniteNumber(netBase[k], 0);
-                    const cls = v > 0 ? 'num-pos' : 'num-neg';
-                    return `<div class="res-kv"><span>${label}</span><span class="${cls}">${fmtNum(v, { signed: true })}</span></div>`;
-                  }).join('');
-                return rows || '<div class="muted" style="padding:4px 6px;font-size:13px;">No yearly net base changes.</div>';
-              })()}</div>
-              <div style="margin-top:10px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Maintenance breakdown</div>
-              <div>${(yearly.maintenance_breakdown || []).map(m => `<div class="res-kv"><span>${m.asset} <span class="muted" style="font-size:11px;">(${m.key})</span></span><span class="num-neg">−${fmtNum(m.amount)}</span></div>`).join('') || '<div class="muted" style="padding:4px 6px;font-size:13px;">No maintenance costs.</div>'}</div>
-            </div>
-          </details>
-
-          <details style="margin-top:8px;">
-            <summary>Currency</summary>
-            <div class="res-panel">
-              ${(() => { const rows = renderKVList(CURRENCIES, currencies, { showZero: false }); return rows || '<div class="muted" style="padding:4px 6px;font-size:13px;">No currencies held.</div>'; })()}
-            </div>
+            <summary>Income</summary>
+            ${renderIncomeGroups()}
           </details>
 
           <label style="margin-top:12px;display:block;">About</label>
@@ -2989,9 +3848,18 @@ async function loadOtherNations() {
       }
       const d = await parseJsonResponse(detailRes, {});
       const visibility = d.visibility || {};
-      const resourceExtra = safeJsonParse(d.resources?.extra_json, {}) || {};
-      const refined = resourceExtra.refined || {};
-      const currencies = resourceExtra.currencies || {};
+      const resourceDefsRes = await api('/api/resources');
+      const resourceDefs = resourceDefsRes && resourceDefsRes.ok ? await resourceDefsRes.json() : { base: {}, advanced: {} };
+      const resources = d.resources || {};
+      const extra = safeJsonParse(resources.extra_json, {}) || {};
+      const advanced = resources.advanced || extra.advanced || extra.refined || {};
+      const base = resources.base || {
+        cow: resources.cow,
+        wood: resources.wood,
+        ore: resources.ore,
+        food: resources.food,
+      };
+      const currencies = extra.currencies || {};
       const terrainSqMiles = normalizeTerrainSquareMiles(d.terrain?.square_miles_json || {});
       const terrainTotal = Math.max(1, Object.values(terrainSqMiles).reduce((sum, value) => sum + toFiniteNumber(value, 0), 0));
       const sections = [];
@@ -3017,22 +3885,38 @@ async function loadOtherNations() {
         sections.push(renderSection('Overview', overviewRows.join('')));
       }
 
-      if (visibility.resources_base && d.resources) {
-        sections.push(renderSection(
-          'Base Resources',
-          renderKVList({ cow: 'Cow', wood: 'Wood', ore: 'Ore', food: 'Food' }, d.resources, { showZero: false }) || '<div class="muted">No base resource data visible.</div>'
-        ));
+      // Base Resources
+      if (visibility.resources_base && base) {
+        const groups = resourceDefs.base || {};
+        const html = Object.entries(groups).map(([group, defs]) => {
+          return `<details style="margin-top:6px;" open>
+            <summary>${group}</summary>
+            <div class="res-panel">
+              ${defs.length === 0 ? '<div class="muted">none</div>' : defs.map(def => {
+                const val = base?.[def.name] ?? 0;
+                return `<div class="res-kv"><span>${escapeHtml(def.display_name)}</span><span>${fmtNum(val)}</span></div>`;
+              }).join('')}
+            </div>
+          </details>`;
+        }).join('');
+        sections.push(renderSection('Base Resources', html));
       }
 
-      if (visibility.resources_refined) {
-        sections.push(renderSection(
-          'Refined Resources',
-          [
-            `<div style="font-size:12px;color:var(--muted);font-weight:600;margin-bottom:4px;">⛏ Ore-derived</div>${renderKVList(ORE_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:2px 6px;font-size:13px;">None</div>'}`,
-            `<div style="font-size:12px;color:var(--muted);font-weight:600;margin:8px 0 4px;">🌲 Wood-derived</div>${renderKVList(WOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:2px 6px;font-size:13px;">None</div>'}`,
-            `<div style="font-size:12px;color:var(--muted);font-weight:600;margin:8px 0 4px;">🍞 Food-derived</div>${renderKVList(FOOD_REFS, refined, { showZero: false }) || '<div class="muted" style="padding:2px 6px;font-size:13px;">None</div>'}`,
-          ].join('')
-        ));
+      // Advanced Resources
+      if (visibility.resources_advanced && advanced) {
+        const groups = resourceDefs.advanced || {};
+        const html = Object.entries(groups).map(([group, defs]) => {
+          return `<details style="margin-top:6px;" open>
+            <summary>${group}</summary>
+            <div class="res-panel">
+              ${defs.length === 0 ? '<div class="muted">none</div>' : defs.map(def => {
+                const val = advanced?.[def.name] ?? 0;
+                return `<div class="res-kv"><span>${escapeHtml(def.display_name)}</span><span>${fmtNum(val)}</span></div>`;
+              }).join('')}
+            </div>
+          </details>`;
+        }).join('');
+        sections.push(renderSection('Advanced Resources', html));
       }
 
       if (visibility.resources_currencies) {
@@ -3427,25 +4311,28 @@ async function loadShop() {
 }
 
 async function loadNewAccounts() {
-  const [defaultsRes, usersRes] = await Promise.all([
+  const [defaultsRes, usersRes, defsRes] = await Promise.all([
     api('/api/admin/new-account-defaults'),
     api('/api/admin/users?role=player'),
+    api('/api/admin/resources'),
   ]);
   const d = await defaultsRes.json();
   const players = await usersRes.json();
-  const resources = d.resources || {};
-  const refined = d.refined_resources || {};
-  const currencies = d.currencies || {};
+  const defs = defsRes && defsRes.ok ? await defsRes.json() : { base: {}, advanced: {} };
   const terrainSq = d.terrain_square_miles || {};
-  const income = d.income_defaults || {};
+  const isStrongTempPassword = (value) => /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(String(value || ''));
+  const createPasswordSeed = isStrongTempPassword(d.default_temp_password) ? d.default_temp_password : 'Password123';
 
-  const makeRefInputs = (groupName, map) => `
-    <details style="margin:6px 0;">
-      <summary style="font-size:13px;">${groupName}</summary>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
-        ${Object.entries(map).map(([k,label]) => `<label style="font-size:12px;">${label}</label><input id="na-ref-${k}" type="number" value="${Number(refined[k] || 0)}">`).join('')}
-      </div>
-    </details>`;
+  const optionGroups = (type) => {
+    const groups = defs[type] || {};
+    return Object.entries(groups).map(([group, arr]) => {
+      if (!arr.length) return '';
+      const label = type === 'advanced' ? `Advanced Resources - ${group}` : `Base Resources - ${group}`;
+      const options = arr.map(def => `<option value="${type}|${def.name}">${escapeHtml(def.display_name)} (${escapeHtml(group)})</option>`).join('');
+      return `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
+    }).join('');
+  };
+  const allResourceOptions = `${optionGroups('base')}${optionGroups('advanced')}`;
 
   view.innerHTML = `
     <div class="card">
@@ -3464,51 +4351,36 @@ async function loadNewAccounts() {
       <textarea id="na-about" rows="3">${d.about_text || ''}</textarea>
 
       <details open style="margin-top:8px;">
-        <summary>Base Resources</summary>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
-          <label>Cow</label><input id="na-cow" type="number" value="${Number(resources.cow || 0)}">
-          <label>Wood</label><input id="na-wood" type="number" value="${Number(resources.wood || 0)}">
-          <label>Ore</label><input id="na-ore" type="number" value="${Number(resources.ore || 0)}">
-          <label>Food</label><input id="na-food" type="number" value="${Number(resources.food || 0)}">
-        </div>
-      </details>
-
-      <details style="margin-top:8px;">
-        <summary>Refined Resources</summary>
-        ${makeRefInputs('Ore-derived', ORE_REFS)}
-        ${makeRefInputs('Wood-derived', WOOD_REFS)}
-        ${makeRefInputs('Food-derived', FOOD_REFS)}
-        <details style="margin:6px 0;">
-          <summary style="font-size:13px;">Special</summary>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
-            <label style="font-size:12px;">K</label><input id="na-ref-K" type="number" value="${Number(refined.K || 0)}">
-            <label style="font-size:12px;">RK</label><input id="na-ref-RK" type="number" value="${Number(refined.RK || 0)}">
-            <label style="font-size:12px;">DP</label><input id="na-ref-DP" type="number" value="${Number(refined.DP || 0)}">
+        <summary>Starting Resources (Dynamic)</summary>
+        <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap;">
+          <div style="min-width:280px;flex:1;">
+            <label style="font-size:12px;">Resource</label>
+            <select id="na-start-resource">${allResourceOptions}</select>
           </div>
-        </details>
+          <div style="min-width:140px;">
+            <label style="font-size:12px;">Amount</label>
+            <input id="na-start-amount" type="number" value="0">
+          </div>
+          <button class="primary" type="button" id="na-start-add">Add</button>
+        </div>
+        <div id="na-start-rows" style="display:grid;gap:6px;margin-top:8px;"></div>
       </details>
 
       <details style="margin-top:8px;">
-        <summary>Currencies</summary>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
-          ${Object.entries(CURRENCIES).map(([k,label]) => `<label style="font-size:12px;">${label}</label><input id="na-cur-${k}" type="number" value="${Number(currencies[k] || 0)}">`).join('')}
+        <summary>Income Per Game Year (Dynamic)</summary>
+        <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap;">
+          <div style="min-width:280px;flex:1;">
+            <label style="font-size:12px;">Resource</label>
+            <select id="na-income-resource">${allResourceOptions}</select>
+          </div>
+          <div style="min-width:140px;">
+            <label style="font-size:12px;">Amount</label>
+            <input id="na-income-amount" type="number" value="0">
+          </div>
+          <button class="primary" type="button" id="na-income-add">Add</button>
         </div>
-      </details>
-
-      <details style="margin-top:8px;">
-        <summary>Base Income Per Game Year</summary>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
-          <label>Cow</label><input id="na-income-cow" type="number" value="${Number(income.cow || 30)}">
-          <label>Wood</label><input id="na-income-wood" type="number" value="${Number(income.wood || 3)}">
-          <label>Ore</label><input id="na-income-ore" type="number" value="${Number(income.ore || 3)}">
-          <label>Food</label><input id="na-income-food" type="number" value="${Number(income.food || 3)}">
-          <label><input type="checkbox" id="na-rand-res" ${d.income_randomize_resources ? 'checked' : ''}> Randomize resources</label><span></span>
-          <label>Resource Min</label><input id="na-rand-res-min" type="number" value="${Number(d.income_resource_min || 1)}">
-          <label>Resource Max</label><input id="na-rand-res-max" type="number" value="${Number(d.income_resource_max || 5)}">
-          <label><input type="checkbox" id="na-rand-cow" ${d.income_randomize_cow ? 'checked' : ''}> Randomize Cow</label><span></span>
-          <label>Cow Min</label><input id="na-rand-cow-min" type="number" value="${Number(d.income_cow_min || 30)}">
-          <label>Cow Max</label><input id="na-rand-cow-max" type="number" value="${Number(d.income_cow_max || 30)}">
-        </div>
+        <div id="na-income-rows" style="display:grid;gap:6px;margin-top:8px;"></div>
+        <div class="muted" id="na-resource-msg" style="font-size:12px;"></div>
       </details>
 
       <details style="margin-top:8px;">
@@ -3530,12 +4402,17 @@ async function loadNewAccounts() {
       <label>Email</label>
       <input id="na-create-email" type="email" placeholder="account@example.com">
       <label>Temporary Password</label>
-      <input id="na-create-password" value="${d.default_temp_password || 'password123'}">
+      <input id="na-create-password" value="${createPasswordSeed}">
       <label>Role</label>
       <select id="na-create-role"><option value="player">Player</option><option value="admin">Admin</option></select>
       <label style="display:flex;align-items:center;gap:6px;margin-top:8px;"><input type="checkbox" id="na-create-nation" checked> Create nation for this account</label>
       <label style="display:flex;align-items:center;gap:6px;margin-top:8px;"><input type="checkbox" id="na-force-reset" checked> Require password reset on first login</label>
-      <div class="row"><button class="primary" id="createManagedAccountBtn">Create Account</button><span class="muted" id="createManagedAccountMsg"></span></div>
+      <div class="row" style="flex-wrap:wrap;align-items:center;gap:8px;">
+        <button class="primary" type="button" id="createManagedAccountBtn">Create Account</button>
+        <button class="primary" type="button" id="saveNewAccountDefaults">Save Defaults</button>
+        <span class="muted" id="createManagedAccountMsg"></span>
+        <span class="muted" id="saveNewAccountDefaultsMsg"></span>
+      </div>
 
       <hr style="margin:12px 0;">
       <h3>Delete Player Account</h3>
@@ -3546,10 +4423,6 @@ async function loadNewAccounts() {
       <input id="deletePlayerConfirmName" placeholder="Exact username required">
       <div class="row"><button class="primary" id="deletePlayerBtn" style="background:#8a1a1a;">Delete Player Permanently</button><span class="muted" id="deletePlayerMsg"></span></div>
 
-      <div class="row" style="margin-top:10px;">
-        <button class="primary" id="saveNewAccountDefaults">Save Defaults</button>
-        <span class="muted" id="saveNewAccountDefaultsMsg"></span>
-      </div>
     </div>
   `;
 
@@ -3573,6 +4446,133 @@ async function loadNewAccounts() {
   });
   updateSqLabels();
 
+  const normalizeRows = (rows) => {
+    if (!Array.isArray(rows)) return [];
+    const seen = new Set();
+    const out = [];
+    rows.forEach(row => {
+      const type = row?.type === 'advanced' ? 'advanced' : 'base';
+      const name = String(row?.name || '').trim();
+      if (!name) return;
+      const key = `${type}|${name}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ type, name, amount: Number(row?.amount || 0) });
+    });
+    return out;
+  };
+
+  const hasCanonicalStarting = Array.isArray(d.starting_resources);
+  const hasCanonicalIncome = Array.isArray(d.income_resources);
+
+  const startRows = normalizeRows(
+    hasCanonicalStarting
+      ? d.starting_resources
+      : [
+          ...Object.entries(d.resources || {}).map(([name, amount]) => ({ type: 'base', name, amount })),
+          ...Object.entries(d.refined_resources || {}).map(([name, amount]) => ({ type: 'advanced', name, amount })),
+        ]
+  );
+  const incomeRows = normalizeRows(
+    hasCanonicalIncome
+      ? d.income_resources
+      : Object.entries(d.income_defaults || {}).map(([name, amount]) => ({ type: 'base', name, amount }))
+  );
+
+  const displayName = (type, name) => {
+    const groups = defs[type] || {};
+    for (const arr of Object.values(groups)) {
+      const found = (arr || []).find(def => def.name === name);
+      if (found) return found.display_name;
+    }
+    return name;
+  };
+
+  const renderRows = (rows, containerId, removeClass, amountClass) => {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    if (!rows.length) {
+      el.innerHTML = '<div class="muted">No rows configured.</div>';
+      return;
+    }
+    el.innerHTML = rows.map((row, idx) => `
+      <div class="row" style="border:1px solid var(--border);border-radius:8px;padding:6px;align-items:center;gap:8px;">
+        <div style="min-width:90px;">${row.type === 'advanced' ? 'Advanced' : 'Base'}</div>
+        <div style="flex:1;">${escapeHtml(displayName(row.type, row.name))} <span class="muted">(${escapeHtml(row.name)})</span></div>
+        <input type="number" class="${amountClass}" data-idx="${idx}" value="${Number(row.amount || 0)}" style="max-width:140px;">
+        <button class="primary ${removeClass}" type="button" data-idx="${idx}" style="background:#8a1a1a;">Remove</button>
+      </div>
+    `).join('');
+  };
+
+  const rerenderRows = () => {
+    renderRows(startRows, 'na-start-rows', 'na-start-remove', 'na-start-amount-input');
+    renderRows(incomeRows, 'na-income-rows', 'na-income-remove', 'na-income-amount-input');
+
+    document.querySelectorAll('.na-start-amount-input').forEach(input => {
+      input.addEventListener('input', () => {
+        const idx = Number(input.dataset.idx);
+        if (Number.isFinite(idx) && startRows[idx]) startRows[idx].amount = Number(input.value || 0);
+      });
+    });
+    document.querySelectorAll('.na-income-amount-input').forEach(input => {
+      input.addEventListener('input', () => {
+        const idx = Number(input.dataset.idx);
+        if (Number.isFinite(idx) && incomeRows[idx]) incomeRows[idx].amount = Number(input.value || 0);
+      });
+    });
+
+    document.querySelectorAll('.na-start-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.dataset.idx);
+        if (Number.isFinite(idx) && startRows[idx]) {
+          startRows.splice(idx, 1);
+          rerenderRows();
+        }
+      });
+    });
+    document.querySelectorAll('.na-income-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.dataset.idx);
+        if (Number.isFinite(idx) && incomeRows[idx]) {
+          incomeRows.splice(idx, 1);
+          rerenderRows();
+        }
+      });
+    });
+  };
+
+  const addUniqueRow = (rows, rawValue, amount) => {
+    const msgEl = document.getElementById('na-resource-msg');
+    if (!rawValue || !rawValue.includes('|')) {
+      if (msgEl) msgEl.textContent = 'Select a resource first.';
+      return;
+    }
+    const [typeRaw, nameRaw] = rawValue.split('|', 2);
+    const type = typeRaw === 'advanced' ? 'advanced' : 'base';
+    const name = String(nameRaw || '').trim();
+    if (!name) {
+      if (msgEl) msgEl.textContent = 'Invalid resource selection.';
+      return;
+    }
+    const duplicate = rows.some(row => row.type === type && row.name === name);
+    if (duplicate) {
+      if (msgEl) msgEl.textContent = 'Duplicate resources are not allowed.';
+      return;
+    }
+    rows.push({ type, name, amount: Number(amount || 0) });
+    if (msgEl) msgEl.textContent = '';
+    rerenderRows();
+  };
+
+  document.getElementById('na-start-add')?.addEventListener('click', () => {
+    addUniqueRow(startRows, document.getElementById('na-start-resource')?.value, document.getElementById('na-start-amount')?.value);
+  });
+  document.getElementById('na-income-add')?.addEventListener('click', () => {
+    addUniqueRow(incomeRows, document.getElementById('na-income-resource')?.value, document.getElementById('na-income-amount')?.value);
+  });
+  rerenderRows();
+
   document.getElementById('na-create-role').addEventListener('change', (e) => {
     const createNationToggle = document.getElementById('na-create-nation');
     if (e.target.value === 'admin') {
@@ -3583,44 +4583,14 @@ async function loadNewAccounts() {
   });
 
   document.getElementById('saveNewAccountDefaults').onclick = async () => {
-    const refinedResources = {};
-    Object.keys(ORE_REFS).concat(Object.keys(WOOD_REFS)).concat(Object.keys(FOOD_REFS)).concat(['K', 'RK', 'DP']).forEach(k => {
-      const el = document.getElementById('na-ref-' + k);
-      if (el) refinedResources[k] = Number(el.value);
-    });
-
-    const currencyPayload = {};
-    Object.keys(CURRENCIES).forEach(k => {
-      const el = document.getElementById('na-cur-' + k);
-      if (el) currencyPayload[k] = Number(el.value);
-    });
-
     const payload = {
       nation_name_template: document.getElementById('na-nation-template').value,
       leader_name_template: document.getElementById('na-leader-template').value,
       alliance_name: document.getElementById('na-alliance').value,
       default_temp_password: document.getElementById('na-temp-password').value,
       about_text: document.getElementById('na-about').value,
-      resources: {
-        cow: Number(document.getElementById('na-cow').value),
-        wood: Number(document.getElementById('na-wood').value),
-        ore: Number(document.getElementById('na-ore').value),
-        food: Number(document.getElementById('na-food').value),
-      },
-      refined_resources: refinedResources,
-      currencies: currencyPayload,
-      income_defaults: {
-        cow: Number(document.getElementById('na-income-cow').value),
-        wood: Number(document.getElementById('na-income-wood').value),
-        ore: Number(document.getElementById('na-income-ore').value),
-        food: Number(document.getElementById('na-income-food').value),
-      },
-      income_randomize_resources: document.getElementById('na-rand-res').checked,
-      income_resource_min: Number(document.getElementById('na-rand-res-min').value),
-      income_resource_max: Number(document.getElementById('na-rand-res-max').value),
-      income_randomize_cow: document.getElementById('na-rand-cow').checked,
-      income_cow_min: Number(document.getElementById('na-rand-cow-min').value),
-      income_cow_max: Number(document.getElementById('na-rand-cow-max').value),
+      starting_resources: startRows,
+      income_resources: incomeRows,
       terrain_square_miles: {
         grassland: Number(document.getElementById('na-sq-grassland').value),
         mountain: Number(document.getElementById('na-sq-mountain').value),
@@ -3637,16 +4607,23 @@ async function loadNewAccounts() {
   };
 
   document.getElementById('createManagedAccountBtn').onclick = async () => {
+    const msgEl = document.getElementById('createManagedAccountMsg');
+    const password = document.getElementById('na-create-password').value;
+    if (!isStrongTempPassword(password)) {
+      if (msgEl) msgEl.textContent = 'Password must be at least 8 chars and include uppercase, lowercase, and a number.';
+      return;
+    }
+
     const payload = {
       name: document.getElementById('na-create-name').value.trim(),
       email: document.getElementById('na-create-email').value.trim(),
-      password: document.getElementById('na-create-password').value,
+      password,
       role: document.getElementById('na-create-role').value,
       create_nation: document.getElementById('na-create-nation').checked,
       force_password_reset: document.getElementById('na-force-reset').checked,
     };
     const create = await api('/api/admin/users', { method: 'POST', body: JSON.stringify(payload) });
-    document.getElementById('createManagedAccountMsg').textContent = create?.ok ? 'Account created.' : await readErrorMessage(create, 'The account could not be created.');
+    if (msgEl) msgEl.textContent = create?.ok ? 'Account created.' : await readErrorMessage(create, 'The account could not be created.');
     if (create?.ok) {
       await loadNewAccounts();
     }
@@ -3850,21 +4827,27 @@ async function loadAllNations() {
   view.innerHTML = `
     <div class="card">
       <h2>All Nations (Admin)</h2>
-      <div>
-        <div class="card" style="margin-top:0;">
-          <h3 style="margin-top:0;">Nation Stats Editor</h3>
-          <div id="adminNationEditor" class="list" style="margin-bottom:12px;">Select nation to edit.</div>
-        </div>
-      </div>
       <div class="card">
         <h3 style="margin-top:0;">Nation Management</h3>
-        <div class="twocol">
-          <div>
+        <div class="alln-panel" style="margin-bottom:12px;">
+          <h4 class="alln-panel-title">Nation Stats Editor</h4>
+          <label style="font-size:12px;">Select Nation To Edit</label>
+          <select id="adminNationSelect" style="margin-top:4px;">
+            <option value="">Select a nation...</option>
+            ${(nations || []).map(n => `<option value="${n.id}">${n.name}</option>`).join('')}
+          </select>
+          <div id="adminNationEditor" class="nation-editor-shell" style="margin-top:8px;"><div class="muted">Select a nation from the dropdown to edit.</div></div>
+        </div>
+
+        <div class="alln-grid">
+          <div class="alln-panel">
+            <h4 class="alln-panel-title">Create Placeholder Nation</h4>
             <input id="newPlaceholder" placeholder="New placeholder nation name">
             <button class="primary" id="createPlaceholder" style="margin-top:8px; width:100%;">Create Placeholder Nation</button>
           </div>
-          <div>
-            <div class="list" id="adminNationList">${nations.map(n => `<button class="primary editNationBtn" data-id="${n.id}" style="display:block; width:100%; margin-bottom:8px;">${n.name}</button>`).join('')}</div>
+          <div class="alln-panel">
+            <h4 class="alln-panel-title">Manage Nations</h4>
+            <div class="muted">Use the Nation Stats Editor dropdown above to choose and edit a nation.</div>
           </div>
         </div>
       </div>
@@ -3872,16 +4855,16 @@ async function loadAllNations() {
       <div class="card">
         <h3 style="margin-top:0;">Nation Visibility Matrix</h3>
         <p class="muted" style="margin-top:0;">Control what one nation can see about another nation in Other Nations.</p>
-        <div class="row" style="flex-wrap:wrap;">
-          <div style="min-width:260px;flex:1;">
+        <div class="vis-controls-grid">
+          <div>
             <label style="font-size:12px;">Nation View (viewer)</label>
             <select id="visViewerNation"></select>
           </div>
-          <div style="min-width:260px;flex:1;">
+          <div>
             <label style="font-size:12px;">Nation To Be Seen (subject)</label>
             <select id="visSubjectNation"></select>
           </div>
-          <button class="primary" id="loadVisibilityRulesBtn" style="align-self:flex-end;">Load Rules</button>
+          <button class="primary" id="loadVisibilityRulesBtn">Load Rules</button>
         </div>
         <div id="visRuleGrid" class="list" style="margin-top:8px;max-height:260px;">Select nations to load rules.</div>
         <div class="row"><button class="primary" id="saveVisibilityRulesBtn">Save Visibility Rules</button><span class="muted" id="saveVisibilityMsg"></span></div>
@@ -3900,7 +4883,7 @@ async function loadAllNations() {
 
   const renderVisGrid = (ruleMap = {}) => {
     document.getElementById('visRuleGrid').innerHTML = visFields.map(field => `
-      <label style="display:flex;align-items:center;justify-content:space-between;padding:6px 4px;border-bottom:1px solid #d7dee7;">
+      <label class="vis-rule-row">
         <span>${field.label}</span>
         <input type="checkbox" class="vis-rule-box" data-key="${field.key}" ${ruleMap[field.key] !== false ? 'checked' : ''}>
       </label>
@@ -3975,69 +4958,167 @@ async function loadAllNations() {
   };
 
   const openEditor = async (id) => {
+    const nationSelectEl = document.getElementById('adminNationSelect');
+    if (nationSelectEl && String(nationSelectEl.value || '') !== String(id)) {
+      nationSelectEl.value = String(id);
+    }
+
     const detailRes = await api('/api/nations/' + id);
     const d = await detailRes.json();
 
-    // Parse extra_json for refined + currencies
-    let extra = {};
-    try { extra = JSON.parse(d.resources?.extra_json || '{}'); } catch {}
-    const ref = extra.refined || {};
-    const cur = extra.currencies || {};
-    const income = extra.income || { cow: 30, wood: 3, ore: 3, food: 3 };
+
+    // Fetch resource definitions for dynamic base/advanced resource fields
+    const resourceDefsRes = await api('/api/resources');
+    const resourceDefs = resourceDefsRes && resourceDefsRes.ok ? await resourceDefsRes.json() : { base: {}, advanced: {} };
+    const extra = safeJsonParse(d.resources?.extra_json, {}) || {};
+    const baseRes = {
+      cow: Number(d.resources?.cow || 0),
+      wood: Number(d.resources?.wood || 0),
+      ore: Number(d.resources?.ore || 0),
+      food: Number(d.resources?.food || 0),
+      ...(extra.base || {}),
+      ...(d.resources?.base || {}),
+    };
+    const advancedRes = d.resources?.advanced || extra.advanced || extra.refined || {};
+
+    // Canonical dynamic income rows: [{type:'base'|'advanced', name:'resource_name', amount:number}]
+    const initialIncomeRows = [];
+    if (Array.isArray(extra.income_resources) && extra.income_resources.length > 0) {
+      extra.income_resources.forEach(entry => {
+        const type = entry?.type === 'advanced' ? 'advanced' : 'base';
+        const name = String(entry?.name || '').trim();
+        if (!name) return;
+        initialIncomeRows.push({ type, name, amount: Number(entry?.amount || 0) });
+      });
+    } else {
+      const incomeMap = d.resources?.income || extra.income || {};
+      Object.entries(incomeMap).forEach(([key, value]) => {
+        if (key.includes(':')) {
+          const [rawType, rawName] = key.split(':', 2);
+          const type = rawType === 'advanced' ? 'advanced' : 'base';
+          const name = String(rawName || '').trim();
+          if (!name) return;
+          initialIncomeRows.push({ type, name, amount: Number(value || 0) });
+          return;
+        }
+        if (key.startsWith('ref_')) {
+          const name = key.substring(4);
+          if (!name) return;
+          initialIncomeRows.push({ type: 'advanced', name, amount: Number(value || 0) });
+          return;
+        }
+        if (key.startsWith('cur_')) {
+          return;
+        }
+        initialIncomeRows.push({ type: 'base', name: key, amount: Number(value || 0) });
+      });
+    }
+
+    const hasConfiguredIncome = initialIncomeRows.length > 0;
+    const seenIncomeRows = new Set();
+    const dedupedIncomeRows = [];
+    initialIncomeRows.forEach(row => {
+      const type = row?.type === 'advanced' ? 'advanced' : 'base';
+      const name = String(row?.name || '').trim();
+      if (!name) return;
+      const key = `${type}|${name}`;
+      if (seenIncomeRows.has(key)) return;
+      seenIncomeRows.add(key);
+      dedupedIncomeRows.push({ type, name, amount: Number(row?.amount || 0) });
+    });
+    initialIncomeRows.length = 0;
+    initialIncomeRows.push(...dedupedIncomeRows);
+
+    // Ensure income rows include all base resources currently associated to this nation.
+    Object.keys(baseRes || {}).forEach(name => {
+      const resourceName = String(name || '').trim();
+      if (!resourceName) return;
+      const key = `base|${resourceName}`;
+      if (seenIncomeRows.has(key)) return;
+      const defaultAmount = !hasConfiguredIncome
+        ? (resourceName === 'cow' ? 30 : (resourceName === 'wood' || resourceName === 'ore' || resourceName === 'food' ? 3 : 0))
+        : 0;
+      seenIncomeRows.add(key);
+      initialIncomeRows.push({ type: 'base', name: resourceName, amount: defaultAmount });
+    });
     let sqMiles = {};
     try { sqMiles = d.terrain?.square_miles_json ? JSON.parse(d.terrain.square_miles_json) : {}; } catch {}
 
-    const makeRefInput = (group, map) => `
-      <details style="margin:6px 0;">
-        <summary style="font-size:13px;">${group}</summary>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
-          ${Object.entries(map).map(([k,label]) => `<label style="font-size:12px;">${label}</label><input id="ref-${k}" type="number" value="${ref[k]||0}" style="padding:4px;">`).join('')}
-        </div>
-      </details>`;
+    // Render grouped resource inputs
+    function makeResourceInputs(type, values) {
+      const groups = resourceDefs[type] || {};
+      return Object.entries(groups).map(([group, defs]) => `
+        <details style="margin:6px 0;" open>
+          <summary style="font-size:13px;">${group}</summary>
+          <div class="nation-editor-grid" style="margin-top:6px;">
+            ${defs.map(def => `<label style="font-size:12px;">${escapeHtml(def.display_name)}<input id="${type}-res-${def.name}" type="number" value="${values[def.name] || 0}" style="margin-top:4px;"></label>`).join('')}
+          </div>
+        </details>
+      `).join('');
+    }
 
-    const makeCurInput = () => `
-      <details style="margin:6px 0;">
-        <summary style="font-size:13px;">Currency</summary>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
-          ${Object.entries(CURRENCIES).map(([k,label]) => `<label style="font-size:12px;">${label}</label><input id="cur-${k}" type="number" value="${cur[k]||0}" style="padding:4px;">`).join('')}
-        </div>
-      </details>`;
+    function buildIncomeResourceOptions() {
+      const buildGroup = (type) => {
+        const groups = resourceDefs[type] || {};
+        return Object.entries(groups).map(([group, defs]) => {
+          const options = defs.map(def => `<option value="${type}|${def.name}">${escapeHtml(def.display_name)} (${escapeHtml(group)})</option>`).join('');
+          if (!options) return '';
+          const label = type === 'base' ? `Base Resources - ${group}` : `Advanced Resources - ${group}`;
+          return `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
+        }).join('');
+      };
+
+      return `${buildGroup('base')}${buildGroup('advanced')}`;
+    }
 
     document.getElementById('adminNationEditor').innerHTML = `
-      <label>Name</label><input id="nName" value="${d.nation.name}">
-      <label>Leader</label><input id="nLeader" value="${d.nation.leader_name || ''}">
-      <label>Alliance</label><input id="nAlliance" value="${d.nation.alliance_name || ''}">
-      <label>About</label><textarea id="nAbout">${d.nation.about_text || ''}</textarea>
+      <div class="nation-editor-block" style="margin-top:0;">
+        <div class="nation-editor-grid">
+          <label>Name<input id="nName" value="${d.nation.name}" style="margin-top:4px;"></label>
+          <label>Leader<input id="nLeader" value="${d.nation.leader_name || ''}" style="margin-top:4px;"></label>
+          <label>Alliance<input id="nAlliance" value="${d.nation.alliance_name || ''}" style="margin-top:4px;"></label>
+        </div>
+        <label style="display:block;margin-top:8px;">About<textarea id="nAbout" style="margin-top:4px;">${d.nation.about_text || ''}</textarea></label>
+      </div>
       <details style="margin-top:8px;" open>
         <summary>Base Resources</summary>
-        <label>Cow</label><input id="nCow" type="number" value="${d.resources?.cow || 0}">
-        <label>Wood</label><input id="nWood" type="number" value="${d.resources?.wood || 0}">
-        <label>Ore</label><input id="nOre" type="number" value="${d.resources?.ore || 0}">
-        <label>Food</label><input id="nFood" type="number" value="${d.resources?.food || 0}">
+        <div class="nation-editor-block">${makeResourceInputs('base', baseRes)}</div>
+      </details>
+      <details style="margin-top:8px;">
+        <summary>Advanced Resources</summary>
+        <div class="nation-editor-block">${makeResourceInputs('advanced', advancedRes)}</div>
       </details>
       <details style="margin-top:8px;">
         <summary>Income Per Game Year</summary>
-        <label>Cow</label><input id="nIncomeCow" type="number" value="${income.cow || 30}">
-        <label>Wood</label><input id="nIncomeWood" type="number" value="${income.wood || 3}">
-        <label>Ore</label><input id="nIncomeOre" type="number" value="${income.ore || 3}">
-        <label>Food</label><input id="nIncomeFood" type="number" value="${income.food || 3}">
+        <div class="nation-editor-block">
+          <div class="defaults-admin-form">
+            <div>
+              <label style="font-size:12px;">Add Resource Income</label>
+              <select id="nIncomeResourceSelect">${buildIncomeResourceOptions()}</select>
+            </div>
+            <div>
+              <label style="font-size:12px;">Amount Per Year</label>
+              <input id="nIncomeAmountInput" type="number" value="0">
+            </div>
+            <button class="primary" type="button" id="nAddIncomeRowBtn">Add Income Row</button>
+          </div>
+          <div id="nIncomeRows" style="margin-top:8px;display:grid;gap:6px;"></div>
+          <div class="muted" id="nIncomeMsg" style="font-size:12px;"></div>
+        </div>
       </details>
       <details style="margin-top:8px;">
         <summary>Terrain Square Miles</summary>
-        <label>Grassland</label><input id="nSqGrassland" type="number" value="${sqMiles.grassland || 0}">
-        <label>Mountain</label><input id="nSqMountain" type="number" value="${sqMiles.mountain || 0}">
-        <label>Freshwater</label><input id="nSqFreshwater" type="number" value="${sqMiles.freshwater || 0}">
-        <label>Hills</label><input id="nSqHills" type="number" value="${sqMiles.hills || 0}">
-        <label>Desert</label><input id="nSqDesert" type="number" value="${sqMiles.desert || 0}">
-        <label>Sea Front</label><input id="nSqSeafront" type="number" value="${sqMiles.seafront || 0}">
+        <div class="nation-editor-block">
+          <div class="nation-editor-grid">
+            <label>Grassland<input id="nSqGrassland" type="number" value="${sqMiles.grassland || 0}" style="margin-top:4px;"></label>
+            <label>Mountain<input id="nSqMountain" type="number" value="${sqMiles.mountain || 0}" style="margin-top:4px;"></label>
+            <label>Freshwater<input id="nSqFreshwater" type="number" value="${sqMiles.freshwater || 0}" style="margin-top:4px;"></label>
+            <label>Hills<input id="nSqHills" type="number" value="${sqMiles.hills || 0}" style="margin-top:4px;"></label>
+            <label>Desert<input id="nSqDesert" type="number" value="${sqMiles.desert || 0}" style="margin-top:4px;"></label>
+            <label>Sea Front<input id="nSqSeafront" type="number" value="${sqMiles.seafront || 0}" style="margin-top:4px;"></label>
+          </div>
+        </div>
       </details>
-      <details style="margin-top:8px;">
-        <summary>Refined Resources</summary>
-        ${makeRefInput('⛏ Ore-derived', ORE_REFS)}
-        ${makeRefInput('🌲 Wood-derived', WOOD_REFS)}
-        ${makeRefInput('🍞 Food-derived', FOOD_REFS)}
-      </details>
-      ${makeCurInput()}
       <div class="row"><button class="primary" id="saveNation">Save Nation</button><span class="muted" id="saveNationMsg"></span></div>
 
       <hr style="margin:12px 0;">
@@ -4091,6 +5172,82 @@ async function loadAllNations() {
       </div>
     `;
 
+    const incomeRows = initialIncomeRows.slice();
+    const incomeDisplayName = (type, name) => {
+      const defs = resourceDefs[type] || {};
+      for (const defsInGroup of Object.values(defs)) {
+        const found = (defsInGroup || []).find(def => def.name === name);
+        if (found) return found.display_name;
+      }
+      return name;
+    };
+
+    const renderIncomeRows = () => {
+      const rowsEl = document.getElementById('nIncomeRows');
+      if (!rowsEl) return;
+      if (incomeRows.length === 0) {
+        rowsEl.innerHTML = '<div class="muted">No yearly income resources configured.</div>';
+        return;
+      }
+      rowsEl.innerHTML = incomeRows.map((row, idx) => {
+        return `
+          <div class="nation-income-row ${row.type === 'advanced' ? 'advanced' : 'base'}">
+            <span class="type-pill">${row.type === 'advanced' ? 'ADV' : 'BASE'}</span>
+            <div class="name">${escapeHtml(incomeDisplayName(row.type, row.name))} <span class="muted">(${escapeHtml(row.name)})</span></div>
+            <input type="number" class="n-income-row-amount amt" data-idx="${idx}" value="${Number(row.amount || 0)}">
+            <button class="primary n-remove-income-row" type="button" data-idx="${idx}" style="background:#8a1a1a;">Remove</button>
+          </div>
+        `;
+      }).join('');
+
+      rowsEl.querySelectorAll('.n-income-row-amount').forEach(input => {
+        input.addEventListener('input', () => {
+          const idx = Number(input.dataset.idx);
+          if (!Number.isFinite(idx) || !incomeRows[idx]) return;
+          incomeRows[idx].amount = Number(input.value || 0);
+        });
+      });
+
+      rowsEl.querySelectorAll('.n-remove-income-row').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.dataset.idx);
+          if (!Number.isFinite(idx) || !incomeRows[idx]) return;
+          incomeRows.splice(idx, 1);
+          renderIncomeRows();
+          const msgEl = document.getElementById('nIncomeMsg');
+          if (msgEl) msgEl.textContent = '';
+        });
+      });
+    };
+
+    document.getElementById('nAddIncomeRowBtn')?.addEventListener('click', () => {
+      const selectEl = document.getElementById('nIncomeResourceSelect');
+      const amountEl = document.getElementById('nIncomeAmountInput');
+      const msgEl = document.getElementById('nIncomeMsg');
+      const raw = String(selectEl?.value || '');
+      if (!raw.includes('|')) {
+        if (msgEl) msgEl.textContent = 'Select a resource to add.';
+        return;
+      }
+      const [typeRaw, nameRaw] = raw.split('|', 2);
+      const type = typeRaw === 'advanced' ? 'advanced' : 'base';
+      const name = String(nameRaw || '').trim();
+      if (!name) {
+        if (msgEl) msgEl.textContent = 'Select a valid resource to add.';
+        return;
+      }
+      const duplicate = incomeRows.some(row => row.type === type && row.name === name);
+      if (duplicate) {
+        if (msgEl) msgEl.textContent = 'That resource is already in the income list.';
+        return;
+      }
+      incomeRows.push({ type, name, amount: Number(amountEl?.value || 0) });
+      if (msgEl) msgEl.textContent = '';
+      renderIncomeRows();
+    });
+
+    renderIncomeRows();
+
     const [unitCatalogRes, buildingCatalogRes] = await Promise.all([
       api('/api/admin/unit-catalog'),
       api('/api/admin/building-catalog'),
@@ -4125,15 +5282,23 @@ async function loadAllNations() {
     document.getElementById('buildingCatalogSearch').addEventListener('input', (e) => renderBuildingOptions(e.target.value));
 
     document.getElementById('saveNation').onclick = async () => {
-      const refined_resources = {};
-      Object.keys(ORE_REFS).concat(Object.keys(WOOD_REFS)).concat(Object.keys(FOOD_REFS)).forEach(k => {
-        const el = document.getElementById('ref-' + k);
-        if (el) refined_resources[k] = Number(el.value);
-      });
-      const currencies = {};
-      Object.keys(CURRENCIES).forEach(k => {
-        const el = document.getElementById('cur-' + k);
-        if (el) currencies[k] = Number(el.value);
+      // Collect dynamic base/advanced resources
+      const collectResourceInputs = (type) => {
+        const out = {};
+        const inputs = document.querySelectorAll(`[id^="${type}-res-"]`);
+        inputs.forEach(input => {
+          const name = input.id.replace(`${type}-res-`, '');
+          out[name] = Number(input.value);
+        });
+        return out;
+      };
+      const baseResources = collectResourceInputs('base');
+      const advancedResources = collectResourceInputs('advanced');
+      const incomePayload = {};
+      incomeRows.forEach(row => {
+        if (!row?.name) return;
+        const type = row.type === 'advanced' ? 'advanced' : 'base';
+        incomePayload[`${type}:${row.name}`] = Number(row.amount || 0);
       });
       const payload = {
         name: document.getElementById('nName').value,
@@ -4141,17 +5306,10 @@ async function loadAllNations() {
         alliance_name: document.getElementById('nAlliance').value,
         about_text: document.getElementById('nAbout').value,
         resources: {
-          cow: Number(document.getElementById('nCow').value),
-          wood: Number(document.getElementById('nWood').value),
-          ore: Number(document.getElementById('nOre').value),
-          food: Number(document.getElementById('nFood').value),
+          base: baseResources,
+          advanced: advancedResources,
         },
-        income: {
-          cow: Number(document.getElementById('nIncomeCow').value),
-          wood: Number(document.getElementById('nIncomeWood').value),
-          ore: Number(document.getElementById('nIncomeOre').value),
-          food: Number(document.getElementById('nIncomeFood').value),
-        },
+        income: incomePayload,
         terrain_square_miles: {
           grassland: Number(document.getElementById('nSqGrassland').value),
           mountain: Number(document.getElementById('nSqMountain').value),
@@ -4160,8 +5318,6 @@ async function loadAllNations() {
           desert: Number(document.getElementById('nSqDesert').value),
           seafront: Number(document.getElementById('nSqSeafront').value),
         },
-        refined_resources,
-        currencies,
       };
       const save = await api('/api/admin/nations/' + id, { method: 'PUT', body: JSON.stringify(payload) });
       document.getElementById('saveNationMsg').textContent = save.ok ? 'Saved' : 'Failed';
@@ -4226,7 +5382,15 @@ async function loadAllNations() {
     });
   };
 
-  document.querySelectorAll('.editNationBtn').forEach(btn => btn.onclick = () => openEditor(btn.dataset.id));
+  document.getElementById('adminNationSelect')?.addEventListener('change', (e) => {
+    const id = Number(e.target.value || 0);
+    if (!id) {
+      document.getElementById('adminNationEditor').innerHTML = '<div class="muted">Select a nation from the dropdown to edit.</div>';
+      return;
+    }
+    openEditor(id);
+  });
+
   document.getElementById('createPlaceholder').onclick = async () => {
     const name = document.getElementById('newPlaceholder').value;
     await api('/api/admin/nations', { method: 'POST', body: JSON.stringify({ name }) });
@@ -4863,7 +6027,7 @@ helpSelect.addEventListener('change', async (e) => {
     await loadAboutPage();
   }
   if (e.target.value === 'docs') {
-    window.open(user.role === 'admin' ? '/docs/developer' : '/docs/player', '_blank');
+    window.open(user.role === 'admin' ? '/docs/admin' : '/docs/player', '_blank');
   }
   if (e.target.value === 'report-issue') {
     window.open('https://github.com/TheBuilderHero/AzveriaOnline/issues', '_blank', 'noopener,noreferrer');

@@ -7,6 +7,7 @@ use App\Http\Requests\Api\UpdateAboutRequest;
 use App\Http\Requests\Api\UpdateSettingsRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 
 class MeController extends Controller
 {
@@ -45,47 +46,63 @@ class MeController extends Controller
             ->get();
 
         $extra = json_decode($resources->extra_json ?? '{}', true) ?: [];
-        $income = $extra['income'] ?? ['cow' => 30, 'wood' => 3, 'ore' => 3, 'food' => 3];
+        $incomeMap = $this->normalizeIncomeMap($extra);
+        $baseResources = [
+            'cow'  => (float) $resources->cow,
+            'wood' => (float) $resources->wood,
+            'ore'  => (float) $resources->ore,
+            'food' => (float) $resources->food,
+        ];
+        foreach (($extra['base'] ?? []) as $key => $value) {
+            if (in_array($key, ['cow', 'wood', 'ore', 'food'], true)) {
+                continue;
+            }
+            $baseResources[(string) $key] = (float) $value;
+        }
+        $advancedResources = is_array($extra['advanced'] ?? null)
+            ? $extra['advanced']
+            : (is_array($extra['refined'] ?? null) ? $extra['refined'] : []);
+
         $structuredResources = [
-            'base' => [
-                'cow'  => (float) $resources->cow,
-                'wood' => (float) $resources->wood,
-                'ore'  => (float) $resources->ore,
-                'food' => (float) $resources->food,
-            ],
-            'refined'    => $extra['refined']    ?? [],
+            'base' => $baseResources,
+            'advanced' => $advancedResources,
+            'refined'    => $extra['refined']    ?? $advancedResources,
             'currencies' => $extra['currencies'] ?? [],
         ];
 
         $projection = [
             'income' => [
-                'base' => [
-                    'cow' => (float) ($income['cow'] ?? 30),
-                    'wood' => (float) ($income['wood'] ?? 3),
-                    'ore' => (float) ($income['ore'] ?? 3),
-                    'food' => (float) ($income['food'] ?? 3),
-                ],
+                'base' => [],
+                'advanced' => [],
                 'refined' => [],
                 'currencies' => [],
             ],
             'maintenance' => [
                 'base' => [],
+                'advanced' => [],
                 'refined' => [],
                 'currencies' => [],
             ],
             'net' => [
-                'base' => [
-                    'cow' => (float) ($income['cow'] ?? 30),
-                    'wood' => (float) ($income['wood'] ?? 3),
-                    'ore' => (float) ($income['ore'] ?? 3),
-                    'food' => (float) ($income['food'] ?? 3),
-                ],
+                'base' => [],
+                'advanced' => [],
                 'refined' => [],
                 'currencies' => [],
             ],
             'income_breakdown' => [],
             'maintenance_breakdown' => [],
         ];
+
+        foreach ($incomeMap as $incomeKey => $incomeValue) {
+            $amount = (float) $incomeValue;
+            $this->accumulateProjection($projection['income'], $incomeKey, $amount);
+            $this->accumulateProjection($projection['net'], $incomeKey, $amount);
+            $projection['income_breakdown'][] = [
+                'asset' => 'Nation Base Income',
+                'key' => $incomeKey,
+                'amount' => $amount,
+            ];
+        }
 
         $assets = DB::table('nation_assets as na')
             ->join('shop_items as si', 'na.shop_item_id', '=', 'si.id')
@@ -149,16 +166,61 @@ class MeController extends Controller
         if (!$row) {
             return response()->json(['message' => 'No resources found'], 404);
         }
+
         $extra = json_decode($row->extra_json ?? '{}', true) ?: [];
+        $base = [
+            'cow'  => (float) $row->cow,
+            'wood' => (float) $row->wood,
+            'ore'  => (float) $row->ore,
+            'food' => (float) $row->food,
+        ];
+        foreach (($extra['base'] ?? []) as $key => $value) {
+            if (in_array($key, ['cow', 'wood', 'ore', 'food'], true)) {
+                continue;
+            }
+            $base[(string) $key] = (float) $value;
+        }
+        $advanced = $extra['advanced'] ?? $extra['refined'] ?? [];
+
+        $displayNames = $this->resourceDisplayNames();
+        $selection = $this->resolveTopbarSelectionForUser((int) $request->user()->id, $displayNames);
+        $topbarDisplay = [];
+        foreach ($selection as $item) {
+            $type = (string) ($item['type'] ?? 'base');
+            $name = (string) ($item['name'] ?? '');
+            if ($name === '') {
+                continue;
+            }
+            $value = $type === 'advanced'
+                ? (float) ($advanced[$name] ?? 0)
+                : (float) ($base[$name] ?? 0);
+
+            $label = (string) ($displayNames[$type][$name] ?? $name);
+            $topbarDisplay[] = [
+                'type' => $type,
+                'name' => $name,
+                'label' => $label,
+                'value' => $value,
+            ];
+        }
+
+        if (empty($topbarDisplay)) {
+            foreach (['cow', 'wood', 'ore', 'food'] as $name) {
+                $topbarDisplay[] = [
+                    'type' => 'base',
+                    'name' => $name,
+                    'label' => (string) ($displayNames['base'][$name] ?? ucfirst($name)),
+                    'value' => (float) ($base[$name] ?? 0),
+                ];
+            }
+        }
+
         return response()->json([
-            'base' => [
-                'cow'  => (float) $row->cow,
-                'wood' => (float) $row->wood,
-                'ore'  => (float) $row->ore,
-                'food' => (float) $row->food,
-            ],
-            'refined'    => $extra['refined']    ?? [],
+            'base' => $base,
+            'advanced' => $advanced,
+            'refined'    => $extra['refined']    ?? $advanced,
             'currencies' => $extra['currencies'] ?? [],
+            'topbar_display' => $topbarDisplay,
         ]);
     }
 
@@ -302,6 +364,120 @@ class MeController extends Controller
         return response()->json($rows);
     }
 
+    private function resourceDisplayNames(): array
+    {
+        $map = [
+            'base' => [
+                'cow' => 'Cow',
+                'wood' => 'Wood',
+                'ore' => 'Ore',
+                'food' => 'Food',
+            ],
+            'advanced' => [],
+        ];
+
+        $rows = DB::table('resource_definitions')
+            ->select('type', 'name', 'display_name')
+            ->whereIn('type', ['base', 'advanced'])
+            ->get();
+
+        foreach ($rows as $row) {
+            $type = (string) ($row->type ?? '');
+            $name = trim((string) ($row->name ?? ''));
+            $displayName = trim((string) ($row->display_name ?? $name));
+            if (!in_array($type, ['base', 'advanced'], true) || $name === '') {
+                continue;
+            }
+            $map[$type][$name] = $displayName !== '' ? $displayName : $name;
+        }
+
+        return $map;
+    }
+
+    private function resolveTopbarSelectionForUser(int $userId, array $displayNames): array
+    {
+        $config = $this->loadResourceTopbarConfigRaw();
+        $global = $this->normalizeTopbarSelection($config['global'] ?? [], $displayNames);
+        if (empty($global)) {
+            $global = [
+                ['type' => 'base', 'name' => 'cow'],
+                ['type' => 'base', 'name' => 'wood'],
+                ['type' => 'base', 'name' => 'ore'],
+                ['type' => 'base', 'name' => 'food'],
+            ];
+        }
+
+        $override = collect($config['overrides'] ?? [])
+            ->first(fn ($row) => (int) ($row['user_id'] ?? 0) === $userId);
+
+        if (!is_array($override)) {
+            return $global;
+        }
+
+        $overrideResources = $this->normalizeTopbarSelection($override['resources'] ?? [], $displayNames);
+        if (empty($overrideResources)) {
+            return $global;
+        }
+
+        $mode = (string) ($override['mode'] ?? 'replace');
+        if ($mode === 'append') {
+            return $this->normalizeTopbarSelection(array_merge($global, $overrideResources), $displayNames);
+        }
+
+        return $overrideResources;
+    }
+
+    private function normalizeTopbarSelection(array $selection, array $displayNames): array
+    {
+        $out = [];
+        $seen = [];
+        foreach ($selection as $item) {
+            $type = (string) ($item['type'] ?? '');
+            $name = trim((string) ($item['name'] ?? ''));
+            if (!in_array($type, ['base', 'advanced'], true) || $name === '') {
+                continue;
+            }
+            if (!array_key_exists($name, $displayNames[$type] ?? [])) {
+                continue;
+            }
+            $key = $type . ':' . $name;
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $out[] = [
+                'type' => $type,
+                'name' => $name,
+            ];
+        }
+
+        return $out;
+    }
+
+    private function loadResourceTopbarConfigRaw(): array
+    {
+        $path = storage_path('app/resource_topbar_config.json');
+        if (!File::exists($path)) {
+            return [
+                'global' => [],
+                'overrides' => [],
+            ];
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        if (!is_array($decoded)) {
+            return [
+                'global' => [],
+                'overrides' => [],
+            ];
+        }
+
+        return [
+            'global' => is_array($decoded['global'] ?? null) ? $decoded['global'] : [],
+            'overrides' => is_array($decoded['overrides'] ?? null) ? $decoded['overrides'] : [],
+        ];
+    }
+
     private function findNation(int $userId): ?object
     {
         return DB::table('nations')->where('owner_user_id', $userId)->first();
@@ -309,6 +485,23 @@ class MeController extends Controller
 
     private function accumulateProjection(array &$bucket, string $key, float $value): void
     {
+        if (str_starts_with($key, 'base:')) {
+            $baseKey = substr($key, 5);
+            if ($baseKey !== '') {
+                $bucket['base'][$baseKey] = (float) ($bucket['base'][$baseKey] ?? 0) + $value;
+            }
+            return;
+        }
+
+        if (str_starts_with($key, 'advanced:')) {
+            $advancedKey = substr($key, 9);
+            if ($advancedKey !== '') {
+                $bucket['advanced'][$advancedKey] = (float) ($bucket['advanced'][$advancedKey] ?? 0) + $value;
+                $bucket['refined'][$advancedKey] = (float) ($bucket['refined'][$advancedKey] ?? 0) + $value;
+            }
+            return;
+        }
+
         if (in_array($key, ['cow', 'wood', 'ore', 'food'], true)) {
             $bucket['base'][$key] = (float) ($bucket['base'][$key] ?? 0) + $value;
             return;
@@ -316,6 +509,7 @@ class MeController extends Controller
 
         if (str_starts_with($key, 'ref_')) {
             $refinedKey = substr($key, 4);
+            $bucket['advanced'][$refinedKey] = (float) ($bucket['advanced'][$refinedKey] ?? 0) + $value;
             $bucket['refined'][$refinedKey] = (float) ($bucket['refined'][$refinedKey] ?? 0) + $value;
             return;
         }
@@ -324,5 +518,62 @@ class MeController extends Controller
             $currencyKey = substr($key, 4);
             $bucket['currencies'][$currencyKey] = (float) ($bucket['currencies'][$currencyKey] ?? 0) + $value;
         }
+    }
+
+    private function normalizeIncomeMap(array $extra): array
+    {
+        if (is_array($extra['income_resources'] ?? null)) {
+            $out = [];
+            foreach ($extra['income_resources'] as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $type = ($entry['type'] ?? '') === 'advanced' ? 'advanced' : 'base';
+                $name = trim((string) ($entry['name'] ?? ''));
+                if ($name === '') {
+                    continue;
+                }
+                $out[$type . ':' . $name] = (float) ($entry['amount'] ?? 0);
+            }
+            return $out;
+        }
+
+        $income = is_array($extra['income'] ?? null) ? $extra['income'] : [];
+        if (empty($income)) {
+            return ['base:cow' => 30, 'base:wood' => 3, 'base:ore' => 3, 'base:food' => 3];
+        }
+
+        $out = [];
+        foreach ($income as $key => $value) {
+            $rawKey = (string) $key;
+            if (str_contains($rawKey, ':')) {
+                [$type, $name] = explode(':', $rawKey, 2);
+                $type = trim(strtolower($type));
+                $name = trim($name);
+                if (($type === 'base' || $type === 'advanced') && $name !== '') {
+                    $out[$type . ':' . $name] = (float) $value;
+                }
+                continue;
+            }
+
+            if (str_starts_with($rawKey, 'ref_')) {
+                $name = substr($rawKey, 4);
+                if ($name !== '') {
+                    $out['advanced:' . $name] = (float) $value;
+                }
+                continue;
+            }
+
+            if (str_starts_with($rawKey, 'cur_')) {
+                continue;
+            }
+
+            $name = trim($rawKey);
+            if ($name !== '') {
+                $out['base:' . $name] = (float) $value;
+            }
+        }
+
+        return $out;
     }
 }

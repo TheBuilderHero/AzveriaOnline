@@ -363,6 +363,91 @@ If a page starts hanging again, first inspect:
 - `storage/logs/laravel.log`
 - `docker compose logs app nginx websocket`
 
+### 11.1) Console Error Triage (May 2026)
+
+If you see errors like these in browser devtools:
+
+- `api/me/resources:1 Failed to load resource: the server responded with a status of 404 ()`
+- `WebSocket connection to 'ws://localhost:18081/' failed`
+- `A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received`
+
+Use this triage flow.
+
+#### A) api/me/resources returns 404
+
+Expected route definition is in `backend/laravel/routes/api.php` under auth:sanctum routes.
+
+If source code has the route but browser still gets 404, most common causes are:
+
+- Browser is hitting a different deployment than the one you just edited.
+- Wrong Docker context is active (local vs remote mismatch).
+- Reverse proxy is pointing to an old container/image.
+- Route/cache state is stale in the running app container.
+
+Verify from the same deployment context:
+
+```powershell
+docker context ls
+docker compose ps
+docker compose exec app php artisan route:list | Select-String "api/me/resources|api/ws/token|api/announcements"
+docker compose exec app php artisan route:clear
+docker compose exec app php artisan config:clear
+docker compose exec app php artisan cache:clear
+docker compose exec app php artisan route:list | Select-String "api/me/resources|api/ws/token|api/announcements"
+```
+
+If route:list shows the route but browser still gets 404, you are almost certainly reaching a different host/context than this shell session.
+
+#### B) WebSocket ws://localhost:18081 fails
+
+Current frontend websocket setup uses localhost in the SPA. That works only when the browser is on the same machine as the websocket endpoint.
+
+For remote/domain access:
+
+- `localhost` in browser means the browser machine, not the server.
+- HTTPS pages should use `wss://`, not `ws://`.
+
+Recommended frontend behavior:
+
+- Build websocket URL from `window.location.hostname`.
+- Use `wss` when `window.location.protocol === 'https:'`, else `ws`.
+- Keep websocket port configurable for local development.
+
+Operational checks:
+
+```powershell
+docker compose ps
+docker compose logs websocket --tail=100
+```
+
+Confirm websocket container is up and that any tunnel/proxy forwards websocket traffic correctly.
+
+#### C) Async listener message-channel error
+
+This error is commonly emitted by browser extensions, not Laravel app code.
+
+Quick validation:
+
+1. Reproduce in an Incognito/Private window with extensions disabled.
+2. If error disappears, treat as extension noise.
+3. Continue debugging only app/network errors that remain reproducible without extensions.
+
+#### D) One-pass recovery for route/websocket drift
+
+Run from the same context that serves your browser traffic:
+
+```powershell
+docker context ls
+docker compose up -d --build
+docker compose exec app php artisan route:clear
+docker compose exec app php artisan config:clear
+docker compose exec app php artisan cache:clear
+docker compose exec app php artisan route:list | Select-String "api/me/resources|api/ws/token|api/announcements"
+docker compose ps
+```
+
+Then hard refresh browser and re-test Player, Announcements, and Chat.
+
 ## 12) Storage and Public Assets
 
 Map layers and other public assets depend on the Laravel storage symlink.
@@ -407,3 +492,101 @@ make sure to connect to localhost:18080
 docker network connect azveriaonline_azveria_frontend AzveriaCloudFlare
 
 sudo ufw allow 18080/tcp
+
+## 6) Resource System Migration (May 2026 Overhaul)
+
+### New Resource System
+- The game now uses a dynamic resource system with two main fields: `base_resources` and `advanced_resources`, each with groups (see below).
+- Resource definitions are stored in the new `resource_definitions` table (see migration file: `database/migrations/2026_05_18_000000_create_resource_definitions_table.php`).
+- Resources and groups are editable via the admin menu after deployment.
+
+### Migration Steps (Remote Docker Context)
+1. Ensure your Docker context is set to the correct remote:
+   ```powershell
+   docker context use remote
+   ```
+2. Deploy the latest code and build the containers:
+   ```powershell
+   docker compose up -d --build
+   ```
+3. Run the new migration to create the resource definitions table:
+   ```powershell
+   docker compose exec app php artisan migrate --force
+   ```
+   - If you see a DB connection error, check your `.env` file for correct `DB_HOST`, `DB_USERNAME`, and `DB_PASSWORD` values for the remote MySQL server.
+   - If you see an authentication error, ensure the MySQL user has access from the app container's IP.
+4. (Optional but recommended) Clear Laravel config and cache:
+   ```powershell
+   docker compose exec app php artisan config:clear
+   docker compose exec app php artisan cache:clear
+   ```
+5. Verify the migration:
+   ```powershell
+   docker compose exec app php artisan migrate:status
+   ```
+
+### Resource Groups
+- **Base Resources:** Currencies, Common, Uncommon, Rare, Legendary+
+- **Advanced Resources:** Uncommon, Rare, Legendary, Mythical, Bombs
+
+### After Migration
+- Use the admin menu to add, edit, or reorder resources and groups as needed.
+- All resource CRUD is now managed dynamically; see `READMEADMIN` for admin workflow.
+- Update any custom scripts or queries to use the new resource structure.
+
+## 7) Manually Marking Migrations as Completed
+
+If your database schema is already up-to-date but Laravel's `migrate:status` shows migrations as 'Pending', you can manually update the `migrations` table to prevent rerunning them.
+
+### When to Use This
+- You restored a DB backup or imported schema manually.
+- You ran migrations outside of Laravel (e.g., with raw SQL).
+- You want to skip rerunning migrations that are already applied.
+
+### How to Do It
+
+1. **Get the migration filenames:**
+   List all migration files in `backend/laravel/database/migrations/`. Example:
+   ```
+   2014_10_12_000000_create_users_table.php
+   2014_10_12_100000_create_password_resets_table.php
+   2019_08_19_000000_create_failed_jobs_table.php
+   2019_12_14_000001_create_personal_access_tokens_table.php
+   2026_04_06_000000_create_azveria_core_tables.php
+   2026_05_17_000000_create_game_document_visibility_table.php
+   2026_05_18_000000_create_resource_definitions_table.php
+   ```
+
+2. **Insert migration records manually:**
+   Connect to your MySQL database (from inside the container or with TablePlus/etc) and run:
+   ```sql
+   INSERT INTO migrations (migration, batch) VALUES
+     ('2014_10_12_000000_create_users_table', 1),
+     ('2014_10_12_100000_create_password_resets_table', 1),
+     ('2019_08_19_000000_create_failed_jobs_table', 1),
+     ('2019_12_14_000001_create_personal_access_tokens_table', 1),
+     ('2026_04_06_000000_create_azveria_core_tables', 1),
+     ('2026_05_17_000000_create_game_document_visibility_table', 1)
+   ;
+   -- Do NOT insert the last migration if you want to run it with artisan!
+   -- Example: leave out 2026_05_18_000000_create_resource_definitions_table if you want it to run next.
+   ```
+
+3. **Verify:**
+   Run:
+   ```powershell
+   docker compose exec app php artisan migrate:status
+   ```
+   The migrations you inserted should now show as 'Yes' (up), and only the last migration will be 'No' (pending).
+
+4. **Run the final migration:**
+   ```powershell
+   docker compose exec app php artisan migrate --force
+   ```
+
+**Note:** If you ever need to reset, you can delete from the `migrations` table:
+```sql
+DELETE FROM migrations WHERE migration = '2026_05_18_000000_create_resource_definitions_table';
+```
+
+This process ensures Laravel does not rerun migrations that are already applied to your schema.
