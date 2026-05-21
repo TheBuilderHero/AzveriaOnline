@@ -496,9 +496,18 @@ sudo ufw allow 18080/tcp
 ## 6) Resource System Migration (May 2026 Overhaul)
 
 ### New Resource System
-- The game now uses a dynamic resource system with two main fields: `base_resources` and `advanced_resources`, each with groups (see below).
+- The game now uses dynamic resource definitions as the source of truth for all resource UIs and resource key selection.
+- Canonical resource keys in cost/effect/income payloads are:
+   - `base:<resource_name>`
+   - `advanced:<resource_name>`
+   - `currencies:<currency_name>`
 - Resource definitions are stored in the new `resource_definitions` table (see migration file: `database/migrations/2026_05_18_000000_create_resource_definitions_table.php`).
 - Resources and groups are editable via the admin menu after deployment.
+
+### Compatibility Notes
+- Legacy keys (`ref_*`, `cur_*`, and legacy `refined` buckets) are still read for backward compatibility.
+- New writes should always use canonical keys and `advanced` as the primary advanced-resource bucket.
+- `refined` is now a compatibility alias derived from `advanced` for older clients/data.
 
 ### Migration Steps (Remote Docker Context)
 1. Ensure your Docker context is set to the correct remote:

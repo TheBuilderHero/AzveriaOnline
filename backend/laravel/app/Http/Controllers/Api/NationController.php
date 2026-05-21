@@ -141,7 +141,9 @@ class NationController extends Controller
                         $resources->ore = null;
                         $resources->food = null;
                     }
-                    if (!$visibility['resources_refined']) {
+                    $advancedVisible = ($visibility['resources_advanced'] ?? true) && ($visibility['resources_refined'] ?? true);
+                    if (!$advancedVisible) {
+                        $extra['advanced'] = [];
                         $extra['refined'] = [];
                     }
                     if (!$visibility['resources_currencies']) {
@@ -179,6 +181,7 @@ class NationController extends Controller
             'alliance_name' => true,
             'about_text' => true,
             'resources_base' => true,
+            'resources_advanced' => true,
             'resources_refined' => true,
             'resources_currencies' => true,
             'terrain' => true,

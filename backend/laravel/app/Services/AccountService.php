@@ -42,12 +42,6 @@ class AccountService
             'income_randomize_cow' => false,
             'income_cow_min' => 30,
             'income_cow_max' => 30,
-            'refined_resources' => [
-                'M' => 0, 'RM' => 0, 'FS' => 0, 'URM' => 0, 'AD' => 0, 'AM' => 0, 'DM' => 0, 'DE' => 0,
-                'H' => 0, 'TW' => 0, 'CB' => 0, 'MYC' => 0, 'SM' => 0, 'CFB' => 0, 'BST' => 0, 'CGM' => 0,
-                'GBR' => 0, 'CHB' => 0, 'SR' => 0, 'ZZ' => 0, 'PZA' => 0, 'IC' => 0, 'WSH' => 0, 'SD' => 0, 'NS' => 0,
-                'K' => 0, 'RK' => 0, 'DP' => 0,
-            ],
             'currencies' => ['GB' => 0, 'P' => 0, 'G' => 0, 'S' => 0, 'B' => 0, 'X' => 0, 'CD' => 0, 'FD' => 0, 'cheese' => 0, 'SP' => 0, 'R' => 0, 'MK' => 0],
             'terrain_percentages' => ['grassland' => 40, 'mountain' => 20, 'freshwater' => 10, 'hills' => 20, 'desert' => 10, 'seafront' => 0],
             'terrain_square_miles' => ['grassland' => 400, 'mountain' => 200, 'freshwater' => 100, 'hills' => 200, 'desert' => 100, 'seafront' => 0],
@@ -157,7 +151,6 @@ class AccountService
         $resources = $defaults['resources'] ?? [];
         $startingRows = $this->normalizeDefaultResourceRows($defaults['starting_resources'] ?? []);
         $incomeRows = $this->normalizeDefaultResourceRows($defaults['income_resources'] ?? []);
-        $refined = $defaults['refined_resources'] ?? [];
         $currencies = $defaults['currencies'] ?? [];
 
         // Backward-compatible fallback for old defaults format.
@@ -167,9 +160,6 @@ class AccountService
                     continue;
                 }
                 $startingRows[] = ['type' => 'base', 'name' => $k, 'amount' => (float) $resources[$k]];
-            }
-            foreach ($refined as $k => $v) {
-                $startingRows[] = ['type' => 'advanced', 'name' => (string) $k, 'amount' => (float) $v];
             }
         }
 
@@ -234,7 +224,6 @@ class AccountService
             'extra_json' => json_encode([
                 'base' => $extraBase,
                 'advanced' => $advanced,
-                'refined' => $advanced,
                 'currencies' => is_array($currencies) ? $currencies : [],
                 'income' => $income,
                 'income_resources' => $incomeResources,

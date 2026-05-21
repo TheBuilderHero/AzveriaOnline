@@ -47,16 +47,9 @@ class MeController extends Controller
 
         $extra = json_decode($resources->extra_json ?? '{}', true) ?: [];
         $incomeMap = $this->normalizeIncomeMap($extra);
-        $baseResources = [
-            'cow'  => (float) $resources->cow,
-            'wood' => (float) $resources->wood,
-            'ore'  => (float) $resources->ore,
-            'food' => (float) $resources->food,
-        ];
+        // Only use canonical dynamic resources for base resources
+        $baseResources = [];
         foreach (($extra['base'] ?? []) as $key => $value) {
-            if (in_array($key, ['cow', 'wood', 'ore', 'food'], true)) {
-                continue;
-            }
             $baseResources[(string) $key] = (float) $value;
         }
         $advancedResources = is_array($extra['advanced'] ?? null)
@@ -66,7 +59,7 @@ class MeController extends Controller
         $structuredResources = [
             'base' => $baseResources,
             'advanced' => $advancedResources,
-            'refined'    => $extra['refined']    ?? $advancedResources,
+            'refined' => $advancedResources,
             'currencies' => $extra['currencies'] ?? [],
         ];
 
@@ -180,7 +173,9 @@ class MeController extends Controller
             }
             $base[(string) $key] = (float) $value;
         }
-        $advanced = $extra['advanced'] ?? $extra['refined'] ?? [];
+        $advanced = is_array($extra['advanced'] ?? null)
+            ? $extra['advanced']
+            : (is_array($extra['refined'] ?? null) ? $extra['refined'] : []);
 
         $displayNames = $this->resourceDisplayNames();
         $selection = $this->resolveTopbarSelectionForUser((int) $request->user()->id, $displayNames);
@@ -191,9 +186,10 @@ class MeController extends Controller
             if ($name === '') {
                 continue;
             }
-            $value = $type === 'advanced'
-                ? (float) ($advanced[$name] ?? 0)
-                : (float) ($base[$name] ?? 0);
+            $value = $this->resolveResourceValueByName(
+                $type === 'advanced' ? $advanced : $base,
+                $name
+            );
 
             $label = (string) ($displayNames[$type][$name] ?? $name);
             $topbarDisplay[] = [
@@ -218,7 +214,7 @@ class MeController extends Controller
         return response()->json([
             'base' => $base,
             'advanced' => $advanced,
-            'refined'    => $extra['refined']    ?? $advanced,
+            'refined' => $advanced,
             'currencies' => $extra['currencies'] ?? [],
             'topbar_display' => $topbarDisplay,
         ]);
@@ -437,21 +433,69 @@ class MeController extends Controller
             if (!in_array($type, ['base', 'advanced'], true) || $name === '') {
                 continue;
             }
-            if (!array_key_exists($name, $displayNames[$type] ?? [])) {
+            $canonicalName = $this->resolveTopbarName($type, $name, $displayNames);
+            if ($canonicalName === null) {
                 continue;
             }
-            $key = $type . ':' . $name;
+            $key = $type . ':' . $canonicalName;
             if (isset($seen[$key])) {
                 continue;
             }
             $seen[$key] = true;
             $out[] = [
                 'type' => $type,
-                'name' => $name,
+                'name' => $canonicalName,
             ];
         }
 
         return $out;
+    }
+
+    private function resolveTopbarName(string $type, string $name, array $displayNames): ?string
+    {
+        $map = $displayNames[$type] ?? [];
+        if (!is_array($map) || $name === '') {
+            return null;
+        }
+
+        if (array_key_exists($name, $map)) {
+            return $name;
+        }
+
+        $needle = mb_strtolower(trim($name));
+        if ($needle === '') {
+            return null;
+        }
+
+        foreach ($map as $resourceName => $displayName) {
+            $resourceNameLower = mb_strtolower(trim((string) $resourceName));
+            $displayLower = mb_strtolower(trim((string) $displayName));
+            if ($resourceNameLower === $needle || $displayLower === $needle) {
+                return (string) $resourceName;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveResourceValueByName(array $bucket, string $name): float
+    {
+        if (array_key_exists($name, $bucket)) {
+            return (float) $bucket[$name];
+        }
+
+        $needle = mb_strtolower(trim($name));
+        if ($needle === '') {
+            return 0.0;
+        }
+
+        foreach ($bucket as $key => $value) {
+            if (mb_strtolower(trim((string) $key)) === $needle) {
+                return (float) $value;
+            }
+        }
+
+        return 0.0;
     }
 
     private function loadResourceTopbarConfigRaw(): array
@@ -506,18 +550,6 @@ class MeController extends Controller
             $bucket['base'][$key] = (float) ($bucket['base'][$key] ?? 0) + $value;
             return;
         }
-
-        if (str_starts_with($key, 'ref_')) {
-            $refinedKey = substr($key, 4);
-            $bucket['advanced'][$refinedKey] = (float) ($bucket['advanced'][$refinedKey] ?? 0) + $value;
-            $bucket['refined'][$refinedKey] = (float) ($bucket['refined'][$refinedKey] ?? 0) + $value;
-            return;
-        }
-
-        if (str_starts_with($key, 'cur_')) {
-            $currencyKey = substr($key, 4);
-            $bucket['currencies'][$currencyKey] = (float) ($bucket['currencies'][$currencyKey] ?? 0) + $value;
-        }
     }
 
     private function normalizeIncomeMap(array $extra): array
@@ -553,18 +585,6 @@ class MeController extends Controller
                 if (($type === 'base' || $type === 'advanced') && $name !== '') {
                     $out[$type . ':' . $name] = (float) $value;
                 }
-                continue;
-            }
-
-            if (str_starts_with($rawKey, 'ref_')) {
-                $name = substr($rawKey, 4);
-                if ($name !== '') {
-                    $out['advanced:' . $name] = (float) $value;
-                }
-                continue;
-            }
-
-            if (str_starts_with($rawKey, 'cur_')) {
                 continue;
             }
 

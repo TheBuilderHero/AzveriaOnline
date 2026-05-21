@@ -27,8 +27,6 @@ class UpdateNationRequest extends FormRequest
             'resources.base.*' => ['numeric'],
             'resources.advanced' => ['sometimes', 'array'],
             'resources.advanced.*' => ['numeric'],
-            'refined_resources' => ['sometimes', 'nullable', 'array'],
-            'refined_resources.*' => ['numeric'],
             'currencies' => ['sometimes', 'nullable', 'array'],
             'currencies.*' => ['numeric'],
             'income' => ['sometimes', 'nullable', 'array'],

@@ -68,6 +68,14 @@ Those remain REST API calls with normal caching and pagination.
 - POST `/api/shop/buy` (player)
 - PUT `/api/admin/shop/items/{item}` (admin)
 
+### Dynamic Resource Key Contract
+- Canonical resource key format for `cost_json`, `maintenance_json`, `yearly_effect_json`, and resource-income maps:
+  - `base:<name>`
+  - `advanced:<name>`
+  - `currencies:<name>`
+- `advanced` is the canonical advanced-resource bucket in API responses/storage.
+- Legacy aliases (`ref_*`, `cur_*`, `refined`) are adapter-only and should not be used for new writes.
+
 ### Settings
 - GET `/api/me/settings`
 - PATCH `/api/me/settings`

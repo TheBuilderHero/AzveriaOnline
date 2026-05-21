@@ -118,6 +118,7 @@ The `meta` field is a JSON object that can store any extra data needed for a res
 ```
 { "category": "currency", "icon": "💰" }
 ```
+Unicode symbols, text emojis, or character symbols for the following: Ore, Coin, Food, wood
 
 **5. Complex Example**
 

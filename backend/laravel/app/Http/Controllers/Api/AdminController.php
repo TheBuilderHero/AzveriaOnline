@@ -39,8 +39,6 @@ class AdminController extends Controller
             'default_temp_password' => ['sometimes', 'nullable', 'string', 'max:120'],
             'resources' => ['sometimes', 'array'],
             'resources.*' => ['numeric', 'min:0'],
-            'refined_resources' => ['sometimes', 'array'],
-            'refined_resources.*' => ['numeric', 'min:0'],
             'currencies' => ['sometimes', 'array'],
             'currencies.*' => ['numeric', 'min:0'],
             'terrain_square_miles' => ['sometimes', 'array'],
@@ -182,7 +180,7 @@ class AdminController extends Controller
             'updated_at' => now(),
         ]);
 
-        if (isset($data['resources']) || isset($data['refined_resources']) || isset($data['currencies']) || isset($data['income'])) {
+        if (isset($data['resources']) || isset($data['currencies']) || isset($data['income'])) {
             $res = DB::table('nation_resources')->where('nation_id', $nationId)->first();
             $extra = json_decode($res->extra_json ?? '{}', true) ?: [];
 
@@ -192,7 +190,6 @@ class AdminController extends Controller
 
             $extraBase = is_array($extra['base'] ?? null) ? $extra['base'] : [];
             $extraAdvanced = is_array($extra['advanced'] ?? null) ? $extra['advanced'] : [];
-            $extraRefined = is_array($extra['refined'] ?? null) ? $extra['refined'] : [];
 
             if (!empty($basePayload)) {
                 foreach ($basePayload as $key => $value) {
@@ -207,18 +204,14 @@ class AdminController extends Controller
                 foreach ($advancedPayload as $key => $value) {
                     $extraAdvanced[(string) $key] = (float) $value;
                 }
-                // Keep legacy refined mirror in sync for compatibility.
-                $extraRefined = array_merge($extraRefined, $extraAdvanced);
             }
 
-            if (isset($data['refined_resources']) && is_array($data['refined_resources'])) {
-                foreach ($data['refined_resources'] as $key => $value) {
-                    $extraRefined[(string) $key] = (float) $value;
-                    $extraAdvanced[(string) $key] = (float) $value;
-                }
-            }
             if (isset($data['currencies']) && is_array($data['currencies'])) {
-                $extra['currencies'] = array_merge($extra['currencies'] ?? [], $data['currencies']);
+                $currencies = is_array($extra['currencies'] ?? null) ? $extra['currencies'] : [];
+                foreach ($data['currencies'] as $key => $value) {
+                    $currencies[(string) $key] = (float) $value;
+                }
+                $extra['currencies'] = $currencies;
             }
             if (isset($data['income']) && is_array($data['income'])) {
                 $extra['income'] = $this->normalizeIncomeMapInput($data['income']);
@@ -226,7 +219,6 @@ class AdminController extends Controller
 
             $extra['base'] = $extraBase;
             $extra['advanced'] = $extraAdvanced;
-            $extra['refined'] = $extraRefined;
 
             DB::table('nation_resources')->where('nation_id', $nationId)->update([
                 'cow' => array_key_exists('cow', $basePayload) ? (float) $basePayload['cow'] : ($res->cow ?? 0),
@@ -402,7 +394,7 @@ class AdminController extends Controller
             ['key' => 'alliance_name', 'label' => 'Alliance Name'],
             ['key' => 'about_text', 'label' => 'About Text'],
             ['key' => 'resources_base', 'label' => 'Base Resources'],
-            ['key' => 'resources_refined', 'label' => 'Refined Resources'],
+            ['key' => 'resources_advanced', 'label' => 'Advanced Resources'],
             ['key' => 'resources_currencies', 'label' => 'Currencies'],
             ['key' => 'terrain', 'label' => 'Terrain'],
             ['key' => 'units', 'label' => 'Units'],
@@ -1757,7 +1749,6 @@ class AdminController extends Controller
                 $delta = [
                     'base' => [],
                     'advanced' => [],
-                    'refined' => [],
                     'currencies' => [],
                 ];
                 foreach ($incomeMap as $incomeKey => $incomeValue) {
@@ -1797,7 +1788,7 @@ class AdminController extends Controller
                         $negativeKeys[] = $key . '=' . $value;
                     }
                 }
-                foreach (($updated['refined'] ?? []) as $key => $value) {
+                foreach (($updated['advanced'] ?? []) as $key => $value) {
                     if ($value < 0) {
                         $negativeKeys[] = $key . '=' . $value;
                     }
@@ -1840,7 +1831,6 @@ class AdminController extends Controller
         $extra = json_decode($resourceRow->extra_json ?? '{}', true) ?: [];
         $baseExtra = is_array($extra['base'] ?? null) ? $extra['base'] : [];
         $advanced = is_array($extra['advanced'] ?? null) ? $extra['advanced'] : [];
-        $refined = $extra['refined'] ?? [];
         $currencies = $extra['currencies'] ?? [];
 
         $updatedBase = [
@@ -1861,20 +1851,14 @@ class AdminController extends Controller
 
         foreach (($delta['advanced'] ?? []) as $key => $value) {
             $advanced[$key] = ($advanced[$key] ?? 0) + (float) $value;
-            $refined[$key] = ($refined[$key] ?? 0) + (float) $value;
         }
 
-        foreach (($delta['refined'] ?? []) as $key => $value) {
-            $refined[$key] = ($refined[$key] ?? 0) + (float) $value;
-            $advanced[$key] = ($advanced[$key] ?? 0) + (float) $value;
-        }
         foreach (($delta['currencies'] ?? []) as $key => $value) {
             $currencies[$key] = ($currencies[$key] ?? 0) + (float) $value;
         }
 
         $extra['base'] = $baseExtra;
         $extra['advanced'] = $advanced;
-        $extra['refined'] = $refined;
         $extra['currencies'] = $currencies;
 
         DB::table('nation_resources')->where('nation_id', $nationId)->update([
@@ -1889,7 +1873,6 @@ class AdminController extends Controller
         return [
             'base' => array_merge($baseExtra, $updatedBase),
             'advanced' => $advanced,
-            'refined' => $refined,
             'currencies' => $currencies,
         ];
     }
@@ -1914,13 +1897,6 @@ class AdminController extends Controller
 
         if (in_array($key, ['cow', 'wood', 'ore', 'food'], true)) {
             $delta['base'][$key] = ($delta['base'][$key] ?? 0) + $value;
-        } elseif (str_starts_with($key, 'ref_')) {
-            $rKey = substr($key, 4);
-            $delta['advanced'][$rKey] = ($delta['advanced'][$rKey] ?? 0) + $value;
-            $delta['refined'][$rKey] = ($delta['refined'][$rKey] ?? 0) + $value;
-        } elseif (str_starts_with($key, 'cur_')) {
-            $cKey = substr($key, 4);
-            $delta['currencies'][$cKey] = ($delta['currencies'][$cKey] ?? 0) + $value;
         }
     }
 
@@ -1960,13 +1936,6 @@ class AdminController extends Controller
                 if (($type === 'base' || $type === 'advanced') && $name !== '') {
                     $normalizedKey = $type . ':' . $name;
                 }
-            } elseif (str_starts_with($rawKey, 'ref_')) {
-                $name = substr($rawKey, 4);
-                if ($name !== '') {
-                    $normalizedKey = 'advanced:' . $name;
-                }
-            } elseif (str_starts_with($rawKey, 'cur_')) {
-                $normalizedKey = '';
             } else {
                 $name = trim($rawKey);
                 if ($name !== '') {

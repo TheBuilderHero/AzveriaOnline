@@ -794,6 +794,16 @@ async function refreshChatBadge() {
 }
 
 async function loadResources() {
+  if (!window.resourceDefs) {
+    try {
+      const defsRes = await api('/api/resources');
+      if (defsRes && defsRes.ok) {
+        const defs = await defsRes.json();
+        window.resourceDefs = defs;
+        setDynamicResourceLabels(defs);
+      }
+    } catch {}
+  }
   const res = await api('/api/me/resources');
   if (!res || !res.ok) return;
   const r = await res.json();
@@ -804,11 +814,38 @@ async function loadResources() {
     { type: 'base', name: 'ore', icon: '⛏', label: 'Ore', val: base.ore },
     { type: 'base', name: 'food', icon: '🍞', label: 'Food', val: base.food },
   ];
+  // Resolve icons from resource definitions, tolerating old payload name/label formats.
+  const getResourceIcon = (type, name, label = '') => {
+    const normalizedType = String(type || '').trim().toLowerCase();
+    const normalizedName = String(name || '').trim().toLowerCase();
+    const normalizedLabel = String(label || '').trim().toLowerCase();
+    const canonical = canonicalResourceKey(name);
+    const canonicalName = canonical.includes(':') ? canonical.split(':', 2)[1].trim().toLowerCase() : '';
+
+    if (window.resourceDefs && window.resourceDefs[normalizedType]) {
+      for (const groupArr of Object.values(window.resourceDefs[normalizedType])) {
+        const def = (groupArr || []).find(d => {
+          const defName = String(d?.name || '').trim().toLowerCase();
+          const defDisplay = String(d?.display_name || d?.name || '').trim().toLowerCase();
+          return !!defName && (
+            defName === normalizedName ||
+            defDisplay === normalizedName ||
+            (canonicalName && (defName === canonicalName || defDisplay === canonicalName)) ||
+            (normalizedLabel && (defName === normalizedLabel || defDisplay === normalizedLabel))
+          );
+        });
+        if (def && def.meta && def.meta.icon) return def.meta.icon;
+      }
+    }
+
+    if (normalizedType === 'advanced') return '⚙';
+    return ({ cow: '🐄', wood: '🌳', ore: '⛏', food: '🍞' }[normalizedName] || '•');
+  };
   const chips = Array.isArray(r.topbar_display) && r.topbar_display.length > 0
     ? r.topbar_display.map(item => ({
       type: item.type || 'base',
       name: item.name || '',
-      icon: (item.type === 'advanced') ? '⚙' : ({ cow: '🐄', wood: '🌳', ore: '⛏', food: '🍞' }[item.name] || '•'),
+      icon: getResourceIcon(item.type || 'base', item.name || '', item.label || ''),
       label: item.label || labelKey(item.name || ''),
       val: toFiniteNumber(item.value, 0),
     }))
@@ -818,8 +855,8 @@ async function loadResources() {
   ).join('');
 }
 
-// Human-readable names for all resource/currency cost keys
-const RESOURCE_LABELS = {
+// Legacy fallback labels for older payloads. Dynamic definitions are the primary source.
+const LEGACY_RESOURCE_LABELS = {
   cow:'Cow', wood:'Wood', ore:'Ore', food:'Food',
   ref_M:'Metal', ref_RM:'Radioactive Metal', ref_FS:'Fovium Steel', ref_URM:'Uranium',
   ref_AD:'Aderite', ref_AM:'Antimatter', ref_DM:'Dark Matter', ref_DE:'Dark Energy',
@@ -832,19 +869,75 @@ const RESOURCE_LABELS = {
   cur_X:'codebuX', cur_CD:'Credits', cur_FD:'Fairy Dust', cur_cheese:'Cheese',
   cur_SP:'SPores', cur_R:'Rupees', cur_MK:'MarKs',
 };
-function labelKey(k) { return RESOURCE_LABELS[k] || k; }
+let DYNAMIC_RESOURCE_LABELS = {};
+
+function toTitleCase(value) {
+  const input = String(value || '').replace(/[_-]+/g, ' ').trim();
+  if (!input) return '';
+  return input.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function canonicalResourceKey(rawKey) {
+  const key = String(rawKey || '').trim();
+  if (!key) return '';
+
+  if (key.includes(':')) {
+    const [rawType, rawName] = key.split(':', 2);
+    const type = String(rawType || '').trim().toLowerCase();
+    const name = String(rawName || '').trim();
+    if (!name) return '';
+    if (type === 'base') return `base:${name}`;
+    if (type === 'advanced' || type === 'refined') return `advanced:${name}`;
+    if (type === 'currency' || type === 'curr' || type === 'currencies') return `currencies:${name}`;
+    return '';
+  }
+
+  if (key.startsWith('ref_')) return `advanced:${key.substring(4)}`;
+  if (key.startsWith('cur_')) return `currencies:${key.substring(4)}`;
+  return `base:${key}`;
+}
+
+function setDynamicResourceLabels(defs) {
+  const labels = {};
+  ['base', 'advanced'].forEach(type => {
+    const groups = defs?.[type] || {};
+    Object.values(groups).forEach(arr => {
+      (arr || []).forEach(def => {
+        const name = String(def?.name || '').trim();
+        if (!name) return;
+        const display = String(def?.display_name || name).trim() || name;
+        const canonical = `${type}:${name}`;
+        labels[canonical] = display;
+        if (type === 'base') {
+          labels[name] = display;
+        } else {
+          labels[`ref_${name}`] = display;
+        }
+      });
+    });
+  });
+  DYNAMIC_RESOURCE_LABELS = labels;
+}
+
+function labelKey(k) {
+  const raw = String(k || '');
+  const canonical = canonicalResourceKey(raw);
+  if (canonical && DYNAMIC_RESOURCE_LABELS[canonical]) return DYNAMIC_RESOURCE_LABELS[canonical];
+  if (DYNAMIC_RESOURCE_LABELS[raw]) return DYNAMIC_RESOURCE_LABELS[raw];
+  if (LEGACY_RESOURCE_LABELS[raw]) return LEGACY_RESOURCE_LABELS[raw];
+
+  if (canonical.startsWith('base:') || canonical.startsWith('advanced:') || canonical.startsWith('currencies:')) {
+    return toTitleCase(canonical.split(':', 2)[1] || raw);
+  }
+  return toTitleCase(raw) || raw;
+}
+
 function formatCost(costJson) {
   try {
     const obj = typeof costJson === 'string' ? JSON.parse(costJson) : costJson;
     return Object.entries(obj || {}).map(([k,v]) => `${labelKey(k)}: <strong>${v}</strong>`).join(' &nbsp;+&nbsp; ') || 'Free';
   } catch { return costJson || 'Free'; }
 }
-
-// Ore / wood / food refined resource groups for display
-const ORE_REFS   = {M:'Metal', RM:'Radioactive Metal', FS:'Fovium Steel', URM:'Uranium', AD:'Aderite', AM:'Antimatter', DM:'Dark Matter', DE:'Dark Energy'};
-const WOOD_REFS  = {H:'Hardwood', TW:'Toxic Waste', CB:'Carbon Battery', MYC:'Mycelium', SM:'Shroomium', CFB:'Carbon Fiber', BST:'Bulistium', CGM:'Chaos Gem'};
-const FOOD_REFS  = {GBR:'Granola Bars', CHB:'Chocolate Bar', SR:'Sushi Rolls', ZZ:'Zaza', PZA:'Pizza', IC:'Ice Cream', WSH:'Whale Sushi', SD:'StarDust', NS:'Neutron StarDust'};
-const CURRENCIES = {GB:'Gobbo Bucks', P:'Psycoin', G:'Gold', S:'Silver', B:'Bronze', X:'codebuX', CD:'Credits', FD:'Fairy Dust', cheese:'Cheese', SP:'SPores', R:'Rupees', MK:'MarKs'};
 
 function renderKVList(map, data, opts = {}) {
   const showZero = opts.showZero !== false;
@@ -1195,10 +1288,8 @@ async function loadSection(name) {
 
     const oldResources = defaults.resources || {};
     const oldRefined = defaults.refined_resources || {};
-    const oldIncome = defaults.income_defaults || {};
 
     const hasCanonicalStarting = Array.isArray(defaults.starting_resources);
-    const hasCanonicalIncome = Array.isArray(defaults.income_resources);
 
     const startRows = normalizeRows(
       hasCanonicalStarting
@@ -1208,11 +1299,8 @@ async function loadSection(name) {
             ...Object.entries(oldRefined).map(([name, amount]) => ({ type: 'advanced', name, amount })),
           ]
     );
-    const incomeRows = normalizeRows(
-      hasCanonicalIncome
-        ? defaults.income_resources
-        : Object.entries(oldIncome).map(([name, amount]) => ({ type: 'base', name, amount }))
-    );
+    // Only use canonical dynamic resources for income
+    const incomeRows = normalizeRows(Array.isArray(defaults.income_resources) ? defaults.income_resources : []);
 
     const displayName = (type, name) => {
       const groups = defs[type] || {};
@@ -1337,6 +1425,7 @@ async function loadSection(name) {
     };
 
     const topbarOverrideMap = new Map();
+    let activeTopbarPlayerId = 0;
     (topbarOverrides || []).forEach(override => {
       const userId = Number(override.user_id || 0);
       if (!userId || !Array.isArray(override.resources) || override.resources.length === 0) return;
@@ -1382,8 +1471,8 @@ async function loadSection(name) {
       if (modeEl) modeEl.disabled = !enabled;
     };
 
-    const persistCurrentTopbarPlayerEditor = () => {
-      const playerId = Number(document.getElementById('rmTopbarPlayerId')?.value || 0);
+    const persistCurrentTopbarPlayerEditor = (playerIdOverride = null) => {
+      const playerId = Number(playerIdOverride || document.getElementById('rmTopbarPlayerId')?.value || 0);
       if (!playerId) return;
       const enabled = !!document.getElementById('rmTopbarOverrideEnabled')?.checked;
       if (!enabled) {
@@ -1403,14 +1492,36 @@ async function loadSection(name) {
       });
     };
 
-    const loadTopbarPlayerEditor = () => {
+    const loadTopbarPlayerEditor = async () => {
       const playerId = Number(document.getElementById('rmTopbarPlayerId')?.value || 0);
+      activeTopbarPlayerId = playerId;
       const wrap = document.getElementById('rmTopbarPlayerWrap');
       const enabledEl = document.getElementById('rmTopbarOverrideEnabled');
       const modeEl = document.getElementById('rmTopbarOverrideMode');
       if (!wrap || !enabledEl || !modeEl) return;
 
-      const override = topbarOverrideMap.get(playerId);
+      // Always fetch latest override from backend
+      let override = null;
+      try {
+        const res = await api(`/api/admin/resource-topbar-override/${playerId}`);
+        if (res && res.ok) {
+          override = await res.json();
+          if (override && override.user_id) {
+            topbarOverrideMap.set(Number(override.user_id), {
+              user_id: Number(override.user_id),
+              mode: override.mode === 'append' ? 'append' : 'replace',
+              resources: Array.isArray(override.resources) ? override.resources : [],
+            });
+          } else {
+            topbarOverrideMap.delete(playerId);
+          }
+        } else {
+          override = topbarOverrideMap.get(playerId) || null;
+        }
+      } catch (e) {
+        // fallback to in-memory if fetch fails
+        override = topbarOverrideMap.get(playerId) || null;
+      }
       enabledEl.checked = !!override;
       modeEl.value = override?.mode === 'append' ? 'append' : 'replace';
       setCheckedTopbarSelections('rm-topbar-player', topbarSelectionValues(override?.resources || []));
@@ -1422,9 +1533,9 @@ async function loadSection(name) {
     bindTopbarSelectionCountWatcher('rm-topbar-global', 'rmTopbarGlobalCount');
     bindTopbarSelectionCountWatcher('rm-topbar-player', 'rmTopbarPlayerCount');
     if ((players || []).length > 0) {
-      document.getElementById('rmTopbarPlayerId')?.addEventListener('change', () => {
-        persistCurrentTopbarPlayerEditor();
-        loadTopbarPlayerEditor();
+      document.getElementById('rmTopbarPlayerId')?.addEventListener('change', async () => {
+        persistCurrentTopbarPlayerEditor(activeTopbarPlayerId);
+        await loadTopbarPlayerEditor();
       });
       document.getElementById('rmTopbarOverrideEnabled')?.addEventListener('change', () => {
         const enabled = !!document.getElementById('rmTopbarOverrideEnabled')?.checked;
@@ -1531,6 +1642,8 @@ async function loadPlayer() {
   const data = await dashRes.json();
   const sqMiles = await sqMilesRes.json();
   const resourceDefs = await resDefRes.json();
+  window.resourceDefs = resourceDefs;
+  setDynamicResourceLabels(resourceDefs);
   const normalizedSqMiles = normalizeTerrainSquareMiles(sqMiles);
   const terrainRows = Object.entries(normalizedSqMiles).length
     ? Object.entries(normalizedSqMiles).map(([k, v]) => `<span>${labelTerrainKey(k)}: <strong>${fmtNum(v)} sq mi</strong></span>`).join(' &nbsp;|&nbsp; ')
@@ -1580,20 +1693,15 @@ async function loadPlayer() {
         const refinedVals = (vals.refined && typeof vals.refined === 'object') ? vals.refined : {};
 
         // Preferred dynamic structure
-        Object.entries(baseVals).forEach(([k, v]) => entries.push([k, v]));
-        Object.entries(advancedVals).forEach(([k, v]) => entries.push([k, v]));
-        Object.entries(currencyVals).forEach(([k, v]) => entries.push([`cur_${k}`, v]));
+        Object.entries(baseVals).forEach(([k, v]) => entries.push([`base:${k}`, v]));
+        Object.entries(advancedVals).forEach(([k, v]) => entries.push([`advanced:${k}`, v]));
+        Object.entries(currencyVals).forEach(([k, v]) => entries.push([`currencies:${k}`, v]));
 
         // Backward-compatible refined fallback when advanced bucket is absent.
         if (Object.keys(advancedVals).length === 0) {
-          Object.entries(refinedVals).forEach(([k, v]) => entries.push([`ref_${k}`, v]));
+          Object.entries(refinedVals).forEach(([k, v]) => entries.push([`advanced:${k}`, v]));
         }
-
-        // Legacy flat structure fallback.
-        const hasNestedBuckets = Object.keys(baseVals).length || Object.keys(advancedVals).length || Object.keys(currencyVals).length || Object.keys(refinedVals).length;
-        if (!hasNestedBuckets) {
-          Object.entries(vals).forEach(([k, v]) => entries.push([k, v]));
-        }
+        // REMOVE legacy flat structure fallback. Only render canonical dynamic resources.
       }
 
       const nonZeroEntries = entries.filter(([_, v]) => toFiniteNumber(v, 0) !== 0);
@@ -3850,6 +3958,7 @@ async function loadOtherNations() {
       const visibility = d.visibility || {};
       const resourceDefsRes = await api('/api/resources');
       const resourceDefs = resourceDefsRes && resourceDefsRes.ok ? await resourceDefsRes.json() : { base: {}, advanced: {} };
+      setDynamicResourceLabels(resourceDefs);
       const resources = d.resources || {};
       const extra = safeJsonParse(resources.extra_json, {}) || {};
       const advanced = resources.advanced || extra.advanced || extra.refined || {};
@@ -3903,7 +4012,8 @@ async function loadOtherNations() {
       }
 
       // Advanced Resources
-      if (visibility.resources_advanced && advanced) {
+      const canViewAdvanced = !!(visibility.resources_advanced ?? visibility.resources_refined);
+      if (canViewAdvanced && advanced) {
         const groups = resourceDefs.advanced || {};
         const html = Object.entries(groups).map(([group, defs]) => {
           return `<details style="margin-top:6px;" open>
@@ -3920,7 +4030,11 @@ async function loadOtherNations() {
       }
 
       if (visibility.resources_currencies) {
-        sections.push(renderSection('Currencies', renderKVList(CURRENCIES, currencies, { showZero: false }) || '<div class="muted">No currency data visible.</div>'));
+        const currencyHtml = Object.entries(currencies || {})
+          .filter(([, value]) => toFiniteNumber(value, 0) !== 0)
+          .map(([key, value]) => `<div class="res-kv"><span>${escapeHtml(labelKey(`currencies:${key}`))}</span><span>${fmtNum(value)}</span></div>`)
+          .join('');
+        sections.push(renderSection('Currencies', currencyHtml || '<div class="muted">No currency data visible.</div>'));
       }
 
       if (visibility.terrain && d.terrain) {
@@ -3962,6 +4076,10 @@ async function loadOtherNations() {
 
 async function loadShop() {
   const isAdmin = user.role === 'admin';
+  const defsRes = await api('/api/resources');
+  const shopDefs = defsRes && defsRes.ok ? await defsRes.json() : { base: {}, advanced: {} };
+  setDynamicResourceLabels(shopDefs);
+
   const calls = [api('/api/shop/categories'), api('/api/shop/items?per_page=300'), api('/api/me/buildings?status=built')];
   if (isAdmin) calls.push(api('/api/players'));
   if (isAdmin) calls.push(api('/api/admin/shop/item-templates'));
@@ -4038,36 +4156,72 @@ async function loadShop() {
 
   let activeCategory = null;
 
-  // All valid cost key options for the dropdown
-  const ALL_COST_KEYS = ['cow','wood','ore','food',
-    'ref_M','ref_RM','ref_FS','ref_URM','ref_AD','ref_AM','ref_DM','ref_DE',
-    'ref_H','ref_TW','ref_CB','ref_MYC','ref_SM','ref_CFB','ref_BST','ref_CGM',
-    'ref_GBR','ref_CHB','ref_SR','ref_ZZ','ref_PZA','ref_IC','ref_WSH','ref_SD','ref_NS',
-    'ref_K','ref_RK','ref_DP',
-    'cur_GB','cur_P','cur_G','cur_S','cur_B','cur_X','cur_CD','cur_FD','cur_cheese','cur_SP','cur_R','cur_MK'];
+  const buildShopResourceKeys = () => {
+    const out = [];
+    const seen = new Set();
+    ['base', 'advanced'].forEach(type => {
+      const groups = shopDefs?.[type] || {};
+      Object.values(groups).forEach(arr => {
+        (arr || []).forEach(def => {
+          const name = String(def?.name || '').trim();
+          if (!name) return;
+          const key = `${type}:${name}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          out.push(key);
+        });
+      });
+    });
+    return out;
+  };
+
+  const ALL_COST_KEYS = buildShopResourceKeys();
+  if (ALL_COST_KEYS.length === 0) {
+    ALL_COST_KEYS.push('base:cow', 'base:wood', 'base:ore', 'base:food');
+  }
+
+  const ensureCostKeyOption = (key) => {
+    const normalized = canonicalResourceKey(key) || String(key || '').trim();
+    if (!normalized) return '';
+    if (!ALL_COST_KEYS.includes(normalized)) {
+      ALL_COST_KEYS.push(normalized);
+    }
+    return normalized;
+  };
+
+  const resourceOptionsMarkup = (selectedKey = '') => {
+    const normalizedSelected = ensureCostKeyOption(selectedKey);
+    return ALL_COST_KEYS.map(ck => `<option value="${ck}" ${ck === normalizedSelected ? 'selected' : ''}>${labelKey(ck)}</option>`).join('');
+  };
 
   function costEditorRows(costObj, itemId) {
-    const rows = Object.entries(costObj).map(([k,v]) => `
+    const rows = Object.entries(costObj).map(([k,v]) => {
+      const selectedKey = ensureCostKeyOption(k);
+      return `
       <div class="row cost-row" style="align-items:center;gap:4px;">
         <select class="cost-key" style="flex:1;padding:4px;">
-          ${ALL_COST_KEYS.map(ck => `<option value="${ck}" ${ck===k?'selected':''}>${labelKey(ck)}</option>`).join('')}
+          ${resourceOptionsMarkup(selectedKey)}
         </select>
         <input type="number" class="cost-val" value="${v}" style="width:80px;padding:4px;">
         <button type="button" class="danger" onclick="this.closest('.cost-row').remove()" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0;">✕</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     return `<div id="cost-rows-${itemId}">${rows}</div>
       <button type="button" onclick="addCostRow(${itemId})" style="font-size:12px;margin-top:4px;background:none;border:1px solid #aaa;border-radius:6px;padding:3px 8px;cursor:pointer;">+ Add</button>`;
   }
 
   function jsonEditorRows(obj, itemId, editorIdPrefix) {
-    const rows = Object.entries(obj || {}).map(([k, v]) => `
+    const rows = Object.entries(obj || {}).map(([k, v]) => {
+      const selectedKey = ensureCostKeyOption(k);
+      return `
       <div class="row dyn-row" style="align-items:center;gap:4px;">
         <select class="dyn-key" style="flex:1;padding:4px;">
-          ${ALL_COST_KEYS.map(ck => `<option value="${ck}" ${ck === k ? 'selected' : ''}>${labelKey(ck)}</option>`).join('')}
+          ${resourceOptionsMarkup(selectedKey)}
         </select>
         <input type="number" class="dyn-val" value="${v}" style="width:80px;padding:4px;">
         <button type="button" class="danger" onclick="this.closest('.dyn-row').remove()" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0;">✕</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     return `<div id="${editorIdPrefix}-${itemId}">${rows}</div>
       <button type="button" onclick="addDynRow('${editorIdPrefix}', ${itemId})" style="font-size:12px;margin-top:4px;background:none;border:1px solid #aaa;border-radius:6px;padding:3px 8px;cursor:pointer;">+ Add</button>`;
   }
@@ -4080,7 +4234,7 @@ async function loadShop() {
     div.style.cssText = 'align-items:center;gap:4px;';
     div.innerHTML = `
       <select class="cost-key" style="flex:1;padding:4px;">
-        ${ALL_COST_KEYS.map(ck => `<option value="${ck}">${labelKey(ck)}</option>`).join('')}
+        ${resourceOptionsMarkup()}
       </select>
       <input type="number" class="cost-val" value="1" style="width:80px;padding:4px;">
       <button type="button" class="danger" onclick="this.closest('.cost-row').remove()" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0;">✕</button>`;
@@ -4095,7 +4249,7 @@ async function loadShop() {
     div.style.cssText = 'align-items:center;gap:4px;';
     div.innerHTML = `
       <select class="dyn-key" style="flex:1;padding:4px;">
-        ${ALL_COST_KEYS.map(ck => `<option value="${ck}">${labelKey(ck)}</option>`).join('')}
+        ${resourceOptionsMarkup()}
       </select>
       <input type="number" class="dyn-val" value="1" style="width:80px;padding:4px;">
       <button type="button" class="danger" onclick="this.closest('.dyn-row').remove()" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0;">✕</button>`;
@@ -4106,7 +4260,7 @@ async function loadShop() {
     const rows = document.querySelectorAll(`#cost-rows-${itemId} .cost-row`);
     const obj = {};
     rows.forEach(row => {
-      const k = row.querySelector('.cost-key').value;
+      const k = canonicalResourceKey(row.querySelector('.cost-key').value);
       const v = Number(row.querySelector('.cost-val').value);
       if (k && v) obj[k] = v;
     });
@@ -4117,7 +4271,7 @@ async function loadShop() {
     const rows = document.querySelectorAll(`#${prefix}-${itemId} .dyn-row`);
     const obj = {};
     rows.forEach(row => {
-      const k = row.querySelector('.dyn-key').value;
+      const k = canonicalResourceKey(row.querySelector('.dyn-key').value);
       const v = Number(row.querySelector('.dyn-val').value);
       if (k && v) obj[k] = v;
     });
@@ -4319,6 +4473,7 @@ async function loadNewAccounts() {
   const d = await defaultsRes.json();
   const players = await usersRes.json();
   const defs = defsRes && defsRes.ok ? await defsRes.json() : { base: {}, advanced: {} };
+  setDynamicResourceLabels(defs);
   const terrainSq = d.terrain_square_miles || {};
   const isStrongTempPassword = (value) => /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(String(value || ''));
   const createPasswordSeed = isStrongTempPassword(d.default_temp_password) ? d.default_temp_password : 'Password123';
@@ -4473,11 +4628,8 @@ async function loadNewAccounts() {
           ...Object.entries(d.refined_resources || {}).map(([name, amount]) => ({ type: 'advanced', name, amount })),
         ]
   );
-  const incomeRows = normalizeRows(
-    hasCanonicalIncome
-      ? d.income_resources
-      : Object.entries(d.income_defaults || {}).map(([name, amount]) => ({ type: 'base', name, amount }))
-  );
+  // Only use canonical dynamic resources for income
+  const incomeRows = normalizeRows(Array.isArray(d.income_resources) ? d.income_resources : []);
 
   const displayName = (type, name) => {
     const groups = defs[type] || {};
@@ -4844,10 +4996,6 @@ async function loadAllNations() {
             <h4 class="alln-panel-title">Create Placeholder Nation</h4>
             <input id="newPlaceholder" placeholder="New placeholder nation name">
             <button class="primary" id="createPlaceholder" style="margin-top:8px; width:100%;">Create Placeholder Nation</button>
-          </div>
-          <div class="alln-panel">
-            <h4 class="alln-panel-title">Manage Nations</h4>
-            <div class="muted">Use the Nation Stats Editor dropdown above to choose and edit a nation.</div>
           </div>
         </div>
       </div>

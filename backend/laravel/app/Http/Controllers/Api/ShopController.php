@@ -115,55 +115,89 @@ class ShopController extends Controller
         }
 
         $costs = json_decode($item->cost_json, true) ?: [];
-        $baseColumns = ['cow', 'wood', 'ore', 'food'];
         $extra = json_decode($resourceRow->extra_json ?? '{}', true) ?: [];
-        $refined = $extra['refined'] ?? [];
-        $currencies = $extra['currencies'] ?? [];
+        $baseColumns = ['cow', 'wood', 'ore', 'food'];
+        $base = [
+            'cow' => (float) ($resourceRow->cow ?? 0),
+            'wood' => (float) ($resourceRow->wood ?? 0),
+            'ore' => (float) ($resourceRow->ore ?? 0),
+            'food' => (float) ($resourceRow->food ?? 0),
+        ];
+        foreach ((is_array($extra['base'] ?? null) ? $extra['base'] : []) as $key => $value) {
+            $base[(string) $key] = (float) $value;
+        }
+        $advanced = is_array($extra['advanced'] ?? null)
+            ? $extra['advanced']
+            : (is_array($extra['refined'] ?? null) ? $extra['refined'] : []);
+        $currencies = is_array($extra['currencies'] ?? null) ? $extra['currencies'] : [];
 
         // Validate all costs
         foreach ($costs as $resource => $cost) {
             $required = (float) $cost * $quantity;
-            if (in_array($resource, $baseColumns, true)) {
-                if ((float) $resourceRow->{$resource} < $required) {
-                    return response()->json(['message' => "Not enough {$resource}"], 422);
+            $token = $this->parseResourceToken((string) $resource);
+            if (!$token) {
+                continue;
+            }
+
+            if ($token['bucket'] === 'base') {
+                if ((float) ($base[$token['name']] ?? 0) < $required) {
+                    return response()->json(['message' => "Not enough base resource: {$token['name']}"], 422);
                 }
-            } elseif (str_starts_with($resource, 'ref_')) {
-                $key = substr($resource, 4);
-                if (($refined[$key] ?? 0) < $required) {
-                    return response()->json(['message' => "Not enough refined resource: {$key}"], 422);
+                continue;
+            }
+
+            if ($token['bucket'] === 'advanced') {
+                if ((float) ($advanced[$token['name']] ?? 0) < $required) {
+                    return response()->json(['message' => "Not enough advanced resource: {$token['name']}"], 422);
                 }
-            } elseif (str_starts_with($resource, 'cur_')) {
-                $key = substr($resource, 4);
-                if (($currencies[$key] ?? 0) < $required) {
-                    return response()->json(['message' => "Not enough currency: {$key}"], 422);
-                }
+                continue;
+            }
+
+            if ((float) ($currencies[$token['name']] ?? 0) < $required) {
+                return response()->json(['message' => "Not enough currency: {$token['name']}"], 422);
             }
         }
 
         // Apply cost deductions
-        $baseUpdate = [];
         foreach ($costs as $resource => $cost) {
             $amount = (float) $cost * $quantity;
-            if (in_array($resource, $baseColumns, true)) {
-                $baseUpdate[$resource] = (float) $resourceRow->{$resource} - $amount;
-            } elseif (str_starts_with($resource, 'ref_')) {
-                $key = substr($resource, 4);
-                $refined[$key] = ($refined[$key] ?? 0) - $amount;
-            } elseif (str_starts_with($resource, 'cur_')) {
-                $key = substr($resource, 4);
-                $currencies[$key] = ($currencies[$key] ?? 0) - $amount;
+            $token = $this->parseResourceToken((string) $resource);
+            if (!$token) {
+                continue;
             }
+
+            if ($token['bucket'] === 'base') {
+                $base[$token['name']] = (float) ($base[$token['name']] ?? 0) - $amount;
+                continue;
+            }
+
+            if ($token['bucket'] === 'advanced') {
+                $advanced[$token['name']] = (float) ($advanced[$token['name']] ?? 0) - $amount;
+                continue;
+            }
+
+            $currencies[$token['name']] = (float) ($currencies[$token['name']] ?? 0) - $amount;
         }
 
         // Apply effect gains
+        if (isset($effects['advanced']) && is_array($effects['advanced'])) {
+            foreach ($effects['advanced'] as $key => $gain) {
+                $advanced[(string) $key] = (float) ($advanced[(string) $key] ?? 0) + ((float) $gain * $quantity);
+            }
+        }
         if (isset($effects['refined']) && is_array($effects['refined'])) {
             foreach ($effects['refined'] as $key => $gain) {
-                $refined[$key] = ($refined[$key] ?? 0) + ((float) $gain * $quantity);
+                $advanced[(string) $key] = (float) ($advanced[(string) $key] ?? 0) + ((float) $gain * $quantity);
+            }
+        }
+        if (isset($effects['currencies']) && is_array($effects['currencies'])) {
+            foreach ($effects['currencies'] as $key => $gain) {
+                $currencies[(string) $key] = (float) ($currencies[(string) $key] ?? 0) + ((float) $gain * $quantity);
             }
         }
         if (isset($effects['currency']) && is_array($effects['currency'])) {
             foreach ($effects['currency'] as $key => $gain) {
-                $currencies[$key] = ($currencies[$key] ?? 0) + ((float) $gain * $quantity);
+                $currencies[(string) $key] = (float) ($currencies[(string) $key] ?? 0) + ((float) $gain * $quantity);
             }
         }
 
@@ -172,7 +206,7 @@ class ShopController extends Controller
             foreach ($effects['gain'] as $key => $gain) {
                 $normalizedKey = $this->normalizeRefinedKey((string) $key);
                 if ($normalizedKey !== null) {
-                    $refined[$normalizedKey] = ($refined[$normalizedKey] ?? 0) + ((float) $gain * $quantity);
+                    $advanced[$normalizedKey] = (float) ($advanced[$normalizedKey] ?? 0) + ((float) $gain * $quantity);
                 }
             }
         }
@@ -183,22 +217,44 @@ class ShopController extends Controller
                 continue;
             }
             $gain = (float) $effectValue * $quantity;
-            if (in_array($effectKey, $baseColumns, true)) {
-                $baseUpdate[$effectKey] = ((float) ($baseUpdate[$effectKey] ?? $resourceRow->{$effectKey})) + $gain;
-            } elseif (str_starts_with($effectKey, 'ref_')) {
-                $rKey = substr($effectKey, 4);
-                $refined[$rKey] = ($refined[$rKey] ?? 0) + $gain;
-            } elseif (str_starts_with($effectKey, 'cur_')) {
-                $cKey = substr($effectKey, 4);
-                $currencies[$cKey] = ($currencies[$cKey] ?? 0) + $gain;
+            $token = $this->parseResourceToken((string) $effectKey);
+            if (!$token) {
+                continue;
             }
+
+            if ($token['bucket'] === 'base') {
+                $base[$token['name']] = (float) ($base[$token['name']] ?? 0) + $gain;
+                continue;
+            }
+
+            if ($token['bucket'] === 'advanced') {
+                $advanced[$token['name']] = (float) ($advanced[$token['name']] ?? 0) + $gain;
+                continue;
+            }
+
+            $currencies[$token['name']] = (float) ($currencies[$token['name']] ?? 0) + $gain;
         }
 
-        $extra['refined'] = $refined;
+        $extraBase = [];
+        foreach ($base as $key => $value) {
+            if (in_array($key, $baseColumns, true)) {
+                continue;
+            }
+            $extraBase[$key] = (float) $value;
+        }
+
+        $extra['base'] = $extraBase;
+        $extra['advanced'] = $advanced;
+        $extra['refined'] = $advanced;
         $extra['currencies'] = $currencies;
-        $baseUpdate['extra_json'] = json_encode($extra);
-        $baseUpdate['updated_at'] = now();
-        DB::table('nation_resources')->where('nation_id', $nation->id)->update($baseUpdate);
+        DB::table('nation_resources')->where('nation_id', $nation->id)->update([
+            'cow' => (float) ($base['cow'] ?? 0),
+            'wood' => (float) ($base['wood'] ?? 0),
+            'ore' => (float) ($base['ore'] ?? 0),
+            'food' => (float) ($base['food'] ?? 0),
+            'extra_json' => json_encode($extra),
+            'updated_at' => now(),
+        ]);
 
         // Handle unit recruitment effect
         if (isset($effects['unit_code'])) {
@@ -317,7 +373,7 @@ class ShopController extends Controller
                 . '. Purchase effect: ' . json_encode($effects)
                 . '. Remaining balances after purchase: ' . json_encode([
                     'base' => ['cow' => (float) $updatedRow->cow, 'wood' => (float) $updatedRow->wood, 'ore' => (float) $updatedRow->ore, 'food' => (float) $updatedRow->food],
-                    'refined' => $updatedExtra['refined'] ?? [],
+                    'advanced' => $updatedExtra['advanced'] ?? ($updatedExtra['refined'] ?? []),
                     'currencies' => $updatedExtra['currencies'] ?? [],
                 ]),
             'meta_json' => json_encode([
@@ -336,10 +392,42 @@ class ShopController extends Controller
             'message' => 'Purchase successful',
             'remaining' => [
                 'base'       => ['cow' => (float)$updatedRow->cow, 'wood' => (float)$updatedRow->wood, 'ore' => (float)$updatedRow->ore, 'food' => (float)$updatedRow->food],
-                'refined'    => $updatedExtra['refined']    ?? [],
+                'advanced'   => $updatedExtra['advanced']   ?? ($updatedExtra['refined'] ?? []),
+                'refined'    => $updatedExtra['advanced']   ?? ($updatedExtra['refined'] ?? []),
                 'currencies' => $updatedExtra['currencies'] ?? [],
             ],
         ]);
+    }
+
+    private function parseResourceToken(string $resource): ?array
+    {
+        $key = trim($resource);
+        if ($key === '') {
+            return null;
+        }
+
+        if (str_contains($key, ':')) {
+            [$rawType, $rawName] = explode(':', $key, 2);
+            $type = strtolower(trim($rawType));
+            $name = trim($rawName);
+            if ($name === '') {
+                return null;
+            }
+
+            if ($type === 'base') {
+                return ['bucket' => 'base', 'name' => $name];
+            }
+            if ($type === 'advanced' || $type === 'refined') {
+                return ['bucket' => 'advanced', 'name' => $name];
+            }
+            if ($type === 'currencies' || $type === 'currency' || $type === 'curr') {
+                return ['bucket' => 'currencies', 'name' => $name];
+            }
+
+            return null;
+        }
+
+        return ['bucket' => 'base', 'name' => $key];
     }
 
     private function parseStructureCode(string $code): ?array
