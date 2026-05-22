@@ -96,7 +96,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/resource-topbar-config', [AdminController::class, 'resourceTopbarConfig']);
         Route::put('/resource-topbar-config', [AdminController::class, 'updateResourceTopbarConfig']);
         Route::post('/maps/layers/{layerType}', [MapController::class, 'uploadLayer']);
-        Route::post('/maps/editor-reference', [MapController::class, 'uploadEditorReference']);
         Route::post('/maps/reset', [MapController::class, 'resetMap']);
         Route::post('/maps/editor-state', [MapController::class, 'saveEditorState']);
         Route::post('/chats', [AdminController::class, 'createChat']);

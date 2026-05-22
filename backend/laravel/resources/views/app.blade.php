@@ -420,6 +420,16 @@
       gap:8px;
       align-items:end;
     }
+    @media (max-width: 1280px) {
+      .twocol { grid-template-columns: 1fr; }
+      .alln-grid { grid-template-columns: 1fr; }
+      .nation-editor-grid { grid-template-columns:1fr; }
+      .defaults-admin-form { grid-template-columns:minmax(180px,1fr) 120px auto; }
+      .resource-def-grid { grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); }
+      .topbar-admin-groups { grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); }
+      .doc-toolbar { grid-template-columns:1fr 1fr; }
+      .main { padding: 14px; }
+    }
     @media (max-width: 900px) {
       .defaults-admin-form { grid-template-columns:1fr; }
       .defaults-admin-row { flex-wrap:wrap; }
@@ -429,6 +439,23 @@
       .nation-income-row .amt { max-width:100%; }
       .alln-grid { grid-template-columns:1fr; }
       .vis-controls-grid { grid-template-columns:1fr; }
+      .topbar-admin-groups { grid-template-columns:1fr; }
+      .resource-def-grid { grid-template-columns:1fr; }
+      .admin-asset-row { grid-template-columns:1fr; }
+      .doc-read, .doc-editor { max-height:none; }
+      .main { padding: 12px; }
+      .card { padding: 12px; }
+      .list { max-height: 320px; }
+      .chip { font-size: 14px; }
+    }
+    @media (max-width: 640px) {
+      .main { padding: 10px; }
+      .card { padding: 10px; }
+      .doc-toolbar { grid-template-columns:1fr; }
+      .doc-toolbar-actions { justify-content:flex-start; }
+      .topbar-admin-block-head { align-items:flex-start; }
+      .vis-rule-row { flex-direction:column; align-items:flex-start; gap:6px; }
+      .nation-income-row { align-items:flex-start; }
     }
     .doc-create {
       margin-top: 12px;
@@ -490,6 +517,40 @@
     .map-bottom-center { position:absolute; left:50%; bottom:10px; transform:translateX(-50%); z-index:5; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px 10px; min-width:240px; }
     .map-bottom-right { position:absolute; right:10px; bottom:10px; z-index:5; display:flex; gap:8px; align-items:flex-end; }
     .map-bottom-left { position:absolute; left:10px; bottom:10px; z-index:5; min-width:260px; }
+    .map-controls-dock {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) minmax(220px, 320px) minmax(220px, 1fr);
+      gap: 8px;
+      align-items: start;
+    }
+    .map-controls-dock .map-bottom-left,
+    .map-controls-dock .map-bottom-center,
+    .map-controls-dock .map-bottom-right {
+      position: relative;
+      left: auto;
+      right: auto;
+      bottom: auto;
+      transform: none;
+      z-index: auto;
+      min-width: 0;
+    }
+    .map-controls-dock .map-bottom-center {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+    .map-controls-dock .map-bottom-right {
+      justify-content: flex-end;
+      align-items: stretch;
+    }
+    .map-controls-dock .map-floating {
+      position: relative;
+      z-index: auto;
+      backdrop-filter: none;
+    }
     .map-scroll-list { max-height:200px; overflow:auto; border:1px solid #c9d1db; border-radius:8px; padding:8px; background:var(--panel); }
     .map-type-item { display:block; width:100%; text-align:left; margin-bottom:6px; }
     .map-type-item.active { outline:2px solid var(--accent); }
@@ -503,11 +564,71 @@
     .map-editor-toolbar { display:flex; gap:8px; align-items:center; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px; }
     .map-editor-header { display:flex; justify-content:flex-start; gap:10px; align-items:flex-start; flex-wrap:wrap; margin-bottom:10px; }
     .map-small-label { font-size:12px; color:var(--muted); }
+    .map-status-message {
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      min-height: 18px;
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--panel) 85%, transparent);
+    }
+    .map-status-message[data-state="success"] {
+      color: #17683a;
+      border-color: #2f6a41;
+      background: #dff4e7;
+    }
+    .map-status-message[data-state="error"] {
+      color: #8a1a1a;
+      border-color: #8a1a1a;
+      background: #fde8e8;
+    }
     @media (max-width: 1100px) {
       .map-shell { grid-template-columns: 1fr; }
       .map-stage-wrap { height:62vh; min-height:420px; }
       .map-right-external { justify-content:flex-start; }
       .map-editor-header { flex-direction:column; }
+    }
+    @media (max-width: 1280px) {
+      .map-controls-dock { grid-template-columns: 1fr 280px; }
+      .map-bottom-right { grid-column: 1 / -1; justify-content: flex-start; }
+    }
+    @media (max-width: 900px) {
+      .main { padding: 12px; }
+      .card { padding: 12px; }
+      .row { flex-wrap: wrap; }
+      .map-stage-wrap { height:68vh; min-height:460px; }
+      .map-controls-dock { grid-template-columns: 1fr; }
+      .map-bottom-center { min-width: 0; width: 100%; }
+      .map-controls-dock.mobile-map-ui .map-bottom-left .map-floating {
+        width: 100%;
+        max-height: 44vh;
+        overflow: auto;
+      }
+      .map-editor-dock-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 6px;
+        align-items: center;
+      }
+      .map-editor-dock-grid input[type="range"] { width: 100%; }
+      .map-editor-dock-terrain-list .primary {
+        width: 100%;
+        margin-bottom: 6px;
+        text-align: left;
+      }
+    }
+    @media (max-width: 640px) {
+      .topbar { justify-content: flex-start; }
+      .menu button, .menu .help-select { padding: 12px; }
+      input, textarea, select, button { font-size: 16px; }
+      .map-info-box { width: min(86vw, 260px); left: 8px; top: 52px; }
+      .map-editor-toolbar { flex-wrap: wrap; }
+      .map-right-external { flex-wrap: wrap; }
+      .map-bottom-center { width: auto; }
     }
   </style>
 </head>
@@ -568,7 +689,7 @@ const api = async (url, opts = {}) => {
   }
 };
 
-let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal', alliance_color_overrides: {} };
+let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal', alliance_color_overrides: {}, political_nation_color_overrides: {} };
 let ws = null;
 let wsAuthToken = null;
 let wsAuthTokenExpiresAt = 0;
@@ -1853,6 +1974,7 @@ async function loadAnnouncements() {
 }
 
 async function loadMap() {
+  const MAP_BACKUP_FORMAT = 'azveria-map-backup-v1';
   const [layersRes, terrainRes, nationsRes, editorStateRes] = await Promise.all([
     api('/api/maps/layers'),
     api('/api/me/terrain-square-miles'),
@@ -1920,40 +2042,47 @@ async function loadMap() {
   let terrainStrokes = Array.isArray(editorState.terrain_strokes) ? editorState.terrain_strokes.slice() : [];
   let politicalStrokes = Array.isArray(editorState.political_strokes) ? editorState.political_strokes.slice() : [];
   let politicalNationMeta = Array.isArray(editorState.political_nations) ? editorState.political_nations.slice() : [];
-  let editorBackgroundPath = editorState.editor_background_path || null;
-  let editorBackgroundOpacity = clamp(toFiniteNumber(editorState.editor_background_opacity, 100), 0, 100) / 100;
+  let editorBackgroundPath = null;
+  let editorBackgroundObjectUrl = null;
+  const editorBgOpacitySessionKey = `azveria_map_editor_bg_opacity_${user?.id || 'anon'}`;
+  let editorBackgroundOpacity = clamp(toFiniteNumber(sessionStorage.getItem(editorBgOpacitySessionKey), 45), 0, 100) / 100;
   let terrainGrid = new Uint8Array(mapWidth * mapHeight);
   let ownerGrid = new Int32Array(mapWidth * mapHeight);
 
   const politicalNationMap = new Map();
-  nations.forEach(n => {
-    politicalNationMap.set(Number(n.id), {
-      id: Number(n.id),
-      name: n.name,
-      alliance_name: n.alliance_name || '',
-      visibility: (n.visibility && typeof n.visibility === 'object') ? n.visibility : { terrain: true, alliance_name: true },
-      races: [],
-      dirty: false,
+  const seedPoliticalNationMap = (meta = []) => {
+    politicalNationMap.clear();
+    nations.forEach(n => {
+      politicalNationMap.set(Number(n.id), {
+        id: Number(n.id),
+        name: n.name,
+        alliance_name: n.alliance_name || '',
+        visibility: (n.visibility && typeof n.visibility === 'object') ? n.visibility : { terrain: true, alliance_name: true },
+        races: [],
+        dirty: false,
+      });
     });
-  });
-  (politicalNationMeta || []).forEach(n => {
-    const id = Number(n.id || 0);
-    if (!id) return;
-    const existing = politicalNationMap.get(id) || {
-      id,
-      name: user.role === 'admin' ? (n.name || `Nation ${id}`) : `Nation ${id}`,
-      alliance_name: '',
-      visibility: { terrain: true, alliance_name: false },
-      races: [],
-      dirty: false,
-    };
-    if (user.role === 'admin') {
-      existing.name = n.name || existing.name;
-      existing.alliance_name = n.alliance_name || existing.alliance_name || '';
-      existing.races = Array.isArray(n.races) ? n.races : [];
-    }
-    politicalNationMap.set(id, existing);
-  });
+
+    (Array.isArray(meta) ? meta : []).forEach(n => {
+      const id = Number(n.id || 0);
+      if (!id) return;
+      const existing = politicalNationMap.get(id) || {
+        id,
+        name: user.role === 'admin' ? (n.name || `Nation ${id}`) : `Nation ${id}`,
+        alliance_name: '',
+        visibility: { terrain: true, alliance_name: false },
+        races: [],
+        dirty: false,
+      };
+      if (user.role === 'admin') {
+        existing.name = n.name || existing.name;
+        existing.alliance_name = n.alliance_name || existing.alliance_name || '';
+        existing.races = Array.isArray(n.races) ? n.races : [];
+      }
+      politicalNationMap.set(id, existing);
+    });
+  };
+  seedPoliticalNationMap(politicalNationMeta);
 
   const politicalNationsArray = () => Array.from(politicalNationMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1961,7 +2090,7 @@ async function loadMap() {
     <div class="card">
       <h2>Map</h2>
       <div class="map-right-external" id="mapAdminButtons">
-        ${user.role === 'admin' ? '<button class="primary" id="openTerrainEditorBtn">Terrain Editor</button><button class="primary" id="openPoliticalEditorBtn">Political Editor</button><button class="primary" id="recalcTerrainStatsBtn" style="background:#2f6a41;">Recalculate Terrain Stats</button><button class="primary" id="resetMapBtn" style="background:#8a1a1a;">Reset Map</button>' : ''}
+        ${user.role === 'admin' ? '<button class="primary" id="openTerrainEditorBtn">Terrain Editor</button><button class="primary" id="openPoliticalEditorBtn">Political Editor</button><button class="primary" id="downloadMapBackupBtn" style="background:#2f4f6a;">Download Map Backup</button><input id="uploadMapBackupInput" type="file" accept="application/json,.json" style="display:none;"><button class="primary" id="uploadMapBackupBtn" style="background:#5a3f7f;">Upload Map Backup</button><button class="primary" id="recalcTerrainStatsBtn" style="background:#2f6a41;">Recalculate Terrain Stats</button><button class="primary" id="resetMapBtn" style="background:#8a1a1a;">Reset Map</button>' : ''}
       </div>
       <div class="map-shell">
         <div>
@@ -1970,12 +2099,14 @@ async function loadMap() {
             <canvas id="mapCanvas" class="map-canvas"></canvas>
             <button class="primary map-floating" id="mapFullscreenBtn" style="right:10px;top:10px;">Fullscreen</button>
             <div class="map-floating map-info-box" id="mapNationInfo" style="display:none;"></div>
+          </div>
+          <div class="map-controls-dock" id="mapControlsDock">
             <div class="map-bottom-left" id="mapBottomLeftTools" style="display:none;"></div>
-            <div class="map-bottom-center">
+            <div class="map-bottom-center" id="mapBottomCenter">
               <label class="map-small-label" for="mapZoomPercent">Zoom</label>
               <input id="mapZoomPercent" type="range" min="-25" max="100" step="1" value="0">
             </div>
-            <div class="map-bottom-right">
+            <div class="map-bottom-right" id="mapBottomRight">
               <div class="map-floating" style="position:relative;right:auto;bottom:auto;display:flex;gap:8px;align-items:center;">
                 <label class="map-small-label" for="terrainOpacity">Terrain Opacity</label>
                 <input id="terrainOpacity" type="range" min="0" max="100" value="55">
@@ -1984,7 +2115,7 @@ async function loadMap() {
           </div>
           <div class="row" style="margin-top:10px;justify-content:space-between;flex-wrap:wrap;">
             <div id="mapSaveArea"></div>
-            <span class="muted" id="mapStatusMsg"></span>
+            <span class="map-status-message" id="mapStatusMsg"></span>
           </div>
         </div>
         <div>
@@ -2001,10 +2132,32 @@ async function loadMap() {
   const mapFullscreenBtn = document.getElementById('mapFullscreenBtn');
   const mapSidePanel = document.getElementById('mapSidePanel');
   const mapTopControls = document.getElementById('mapTopControls');
+  const mapControlsDock = document.getElementById('mapControlsDock');
   const mapBottomLeftTools = document.getElementById('mapBottomLeftTools');
-  const mapBottomRight = stage.querySelector('.map-bottom-right');
+  const mapBottomCenter = document.getElementById('mapBottomCenter');
+  const mapBottomRight = document.getElementById('mapBottomRight');
   const mapSaveArea = document.getElementById('mapSaveArea');
   const mapStatusMsg = document.getElementById('mapStatusMsg');
+  let mapStatusMsgClearTimer = null;
+
+  const setMapStatus = (message, { clearAfterMs = 0, state = '' } = {}) => {
+    if (mapStatusMsgClearTimer) {
+      clearTimeout(mapStatusMsgClearTimer);
+      mapStatusMsgClearTimer = null;
+    }
+    mapStatusMsg.textContent = String(message || '');
+    mapStatusMsg.dataset.state = state || '';
+    if (clearAfterMs > 0 && mapStatusMsg.textContent) {
+      const expected = mapStatusMsg.textContent;
+      mapStatusMsgClearTimer = setTimeout(() => {
+        if (mapStatusMsg.textContent === expected) {
+          mapStatusMsg.textContent = '';
+          mapStatusMsg.dataset.state = '';
+        }
+        mapStatusMsgClearTimer = null;
+      }, clearAfterMs);
+    }
+  };
 
   let mode = 'view';
   const minZoomPct = -25;
@@ -2046,6 +2199,7 @@ async function loadMap() {
   let outlineClosed = false;
   let lastOutlinePoint = null;
   let dragAction = 'none';
+  let mapSaveInProgress = false;
 
   const terrainColorControlsHtml = () => {
     const palette = getPalette();
@@ -2076,15 +2230,20 @@ async function loadMap() {
   const imageCache = new Map();
   const normalizeStoragePath = (path) => String(path || '').replace(/^\/?storage\//, '').trim();
   const loadImage = (path) => {
-    if (!path) return Promise.resolve(null);
-    if (imageCache.has(path)) return imageCache.get(path);
+    const source = String(path || '').trim();
+    if (!source) return Promise.resolve(null);
+    if (imageCache.has(source)) return imageCache.get(source);
     const p = new Promise((resolve) => {
       const img = new Image();
       img.onload = () => resolve(img);
       img.onerror = () => resolve(null);
-      img.src = path.startsWith('/storage/') ? path : `/storage/${path}`;
+      if (source.startsWith('blob:') || source.startsWith('data:') || source.startsWith('http://') || source.startsWith('https://') || source.startsWith('/')) {
+        img.src = source;
+      } else {
+        img.src = `/storage/${source.replace(/^\/+/, '')}`;
+      }
     });
-    imageCache.set(path, p);
+    imageCache.set(source, p);
     return p;
   };
 
@@ -2093,10 +2252,7 @@ async function loadMap() {
     terrain: await loadImage(layerByType.terrain || ''),
     political: await loadImage(layerByType.political || ''),
   };
-  const mainLayerPathNormalized = normalizeStoragePath(layerByType.main || '');
-  let editorBgImage = editorBackgroundPath
-    ? await loadImage(String(editorBackgroundPath).replace(/^\/storage\//, ''))
-    : null;
+  let editorBgImage = null;
 
   const getPalette = () => {
     const modeKey = settings.color_blind_mode || 'none';
@@ -2413,10 +2569,12 @@ async function loadMap() {
       const getNationRgb = (ownerId) => {
         if (nationRgbCache.has(ownerId)) return nationRgbCache.get(ownerId);
         let color = '#ffffff';
-        if (mapType === 'alliance' || mode === 'political-editor') {
+        if (mapType === 'alliance') {
           const nation = getNationById(ownerId);
           color = nation?.alliance_name ? mapAllianceColor(nation.alliance_name) : '#7d7d7d';
           if (mapType === 'alliance' && !nation?.alliance_name) color = '#7d7d7d';
+        } else if (mapType === 'political' || mode === 'political-editor') {
+          color = mapNationColor(ownerId);
         }
         const rgb = parseColorToRgb(color);
         nationRgbCache.set(ownerId, rgb);
@@ -2523,7 +2681,20 @@ async function loadMap() {
     return out;
   };
 
+  const normalizePoliticalNationColorOverrides = (raw) => {
+    if (!raw || typeof raw !== 'object') return {};
+    const out = {};
+    Object.entries(raw).forEach(([k, v]) => {
+      const key = String(k || '').trim();
+      const color = String(v || '').trim();
+      if (!key) return;
+      if (/^#[0-9A-Fa-f]{6}$/.test(color)) out[key] = color;
+    });
+    return out;
+  };
+
   let allianceColorOverrides = normalizeAllianceColorOverrides(settings.alliance_color_overrides || {});
+  let politicalNationColorOverrides = normalizePoliticalNationColorOverrides(settings.political_nation_color_overrides || {});
 
   const mapAllianceColor = (name) => {
     const s = String(name || '').trim().toLowerCase();
@@ -2533,6 +2704,15 @@ async function loadMap() {
     for (let i = 0; i < s.length; i++) hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0;
     const hue = Math.abs(hash) % 360;
     return `hsl(${hue} 68% 54%)`;
+  };
+
+  const mapNationColor = (nationId) => {
+    const key = String(Number(nationId || 0));
+    if (!key || key === '0') return '#7d7d7d';
+    if (politicalNationColorOverrides[key]) return politicalNationColorOverrides[key];
+    const seed = Number(key);
+    const hue = Math.abs((seed * 47) % 360);
+    return `hsl(${hue} 72% 52%)`;
   };
 
   const toWorld = (clientX, clientY) => {
@@ -2579,6 +2759,114 @@ async function loadMap() {
     labelCache = labels;
   };
 
+  const drawPoliticalLabels = (viewW, viewH) => {
+    if (!labelCache.length) computeLabels();
+
+    const occupies = [];
+    const intersects = (a, b) => (
+      a.left < b.right &&
+      a.right > b.left &&
+      a.top < b.bottom &&
+      a.bottom > b.top
+    );
+
+    const labels = labelCache
+      .slice()
+      .sort((a, b) => (toFiniteNumber(b.size, 0) - toFiniteNumber(a.size, 0)));
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    labels.forEach((label, i) => {
+      const anchorX = transform.originX + (label.x * transform.scale);
+      const anchorY = transform.originY + (label.y * transform.scale);
+      if (anchorX < -140 || anchorY < -120 || anchorX > viewW + 140 || anchorY > viewH + 120) {
+        return;
+      }
+
+      const sizeBoost = Math.sqrt(Math.max(1, toFiniteNumber(label.size, 1))) / 5;
+      const zoomMultiplier = zoomPct >= 0
+        ? (1 + (zoomPct * 0.006))
+        : (1 + (zoomPct * 0.003));
+      const fontPx = clamp((11 + sizeBoost) * clamp(zoomMultiplier, 0.85, 2.0), 10, 40);
+
+      ctx.font = `${Math.round(fontPx)}px Trebuchet MS`;
+      const text = String(label.name || '');
+      const textWidth = ctx.measureText(text).width;
+      const textHeight = fontPx * 1.1;
+      const pad = 5;
+      const stepX = Math.max(textWidth + 16, 28);
+      const stepY = Math.max(textHeight + 12, 20);
+
+      const candidates = [
+        { dx: 0, dy: 0 },
+        { dx: stepX * 0.55, dy: 0 },
+        { dx: -stepX * 0.55, dy: 0 },
+        { dx: 0, dy: stepY },
+        { dx: 0, dy: -stepY },
+        { dx: stepX * 0.55, dy: stepY },
+        { dx: -stepX * 0.55, dy: stepY },
+        { dx: stepX * 0.55, dy: -stepY },
+        { dx: -stepX * 0.55, dy: -stepY },
+      ];
+
+      const buildBox = (cx, cy) => ({
+        left: cx - (textWidth / 2) - pad,
+        right: cx + (textWidth / 2) + pad,
+        top: cy - (textHeight / 2) - pad,
+        bottom: cy + (textHeight / 2) + pad,
+      });
+
+      let chosen = null;
+      for (const candidate of candidates) {
+        const cx = anchorX + candidate.dx;
+        const cy = anchorY + candidate.dy;
+        const box = buildBox(cx, cy);
+        if (occupies.some(used => intersects(box, used))) continue;
+        chosen = { cx, cy, box };
+        break;
+      }
+
+      if (!chosen) {
+        for (let ring = 1; ring <= 10 && !chosen; ring++) {
+          const sidePref = (i % 2 === 0) ? [1, -1] : [-1, 1];
+          for (const side of sidePref) {
+            const cx = anchorX + (side * (stepX * (0.5 + ring * 0.45)));
+            const cy = anchorY + (((ring % 2 === 0) ? 1 : -1) * Math.ceil(ring / 2) * stepY);
+            const box = buildBox(cx, cy);
+            if (occupies.some(used => intersects(box, used))) continue;
+            chosen = { cx, cy, box };
+            break;
+          }
+        }
+      }
+
+      if (!chosen) {
+        const cx = anchorX;
+        const cy = anchorY;
+        chosen = { cx, cy, box: buildBox(cx, cy) };
+      }
+
+      occupies.push(chosen.box);
+
+      const leaderDist = Math.hypot(chosen.cx - anchorX, chosen.cy - anchorY);
+      if (leaderDist > 8) {
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        ctx.beginPath();
+        ctx.moveTo(anchorX, anchorY);
+        ctx.lineTo(chosen.cx, chosen.cy);
+        ctx.stroke();
+      }
+
+      ctx.lineWidth = Math.max(2, fontPx / 6);
+      ctx.strokeStyle = 'rgba(0,0,0,0.72)';
+      ctx.fillStyle = '#f8f8f8';
+      ctx.strokeText(text, chosen.cx, chosen.cy);
+      ctx.fillText(text, chosen.cx, chosen.cy);
+    });
+  };
+
   const resizeCanvas = () => {
     const rect = stage.getBoundingClientRect();
     canvas.width = Math.max(200, Math.floor(rect.width));
@@ -2606,11 +2894,7 @@ async function loadMap() {
     ctx.translate(transform.originX, transform.originY);
     ctx.scale(scale, scale);
 
-    if ((mode === 'terrain-editor' || mode === 'political-editor') && editorBgImage) {
-      ctx.globalAlpha = editorBackgroundOpacity;
-      ctx.drawImage(editorBgImage, 0, 0, mapWidth, mapHeight);
-      ctx.globalAlpha = 1;
-    } else if (layerImages.main && mainLayerPathNormalized !== normalizeStoragePath(editorBackgroundPath || '')) {
+    if (layerImages.main) {
       ctx.drawImage(layerImages.main, 0, 0, mapWidth, mapHeight);
     }
 
@@ -2629,21 +2913,6 @@ async function loadMap() {
 
     ctx.drawImage(waterLayerCanvas, 0, 0);
 
-    if (mapType === 'political' || mapType === 'alliance' || mode === 'political-editor') {
-      if (!labelCache.length) computeLabels();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      labelCache.forEach(label => {
-        const size = clamp(Math.floor(Math.sqrt(label.size) / 3), 10, 28);
-        ctx.font = `${size}px Trebuchet MS`;
-        ctx.lineWidth = Math.max(2, size / 6);
-        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-        ctx.fillStyle = '#f8f8f8';
-        ctx.strokeText(label.name, label.x, label.y);
-        ctx.fillText(label.name, label.x, label.y);
-      });
-    }
-
     if (mode === 'political-editor' && outlinePoints.length > 1) {
       ctx.beginPath();
       ctx.moveTo(outlinePoints[0].x, outlinePoints[0].y);
@@ -2660,7 +2929,17 @@ async function loadMap() {
       ctx.setLineDash([]);
     }
 
+    if ((mode === 'terrain-editor' || mode === 'political-editor') && editorBgImage) {
+      ctx.globalAlpha = editorBackgroundOpacity;
+      ctx.drawImage(editorBgImage, 0, 0, mapWidth, mapHeight);
+      ctx.globalAlpha = 1;
+    }
+
     ctx.restore();
+
+    if (mapType === 'political' || mapType === 'alliance' || mode === 'political-editor') {
+      drawPoliticalLabels(viewW, viewH);
+    }
   };
 
   const setNationInfo = (nationId) => {
@@ -2675,6 +2954,9 @@ async function loadMap() {
     const canViewAlliance = (n?.visibility?.alliance_name !== false);
     const canViewTerrain = (n?.visibility?.terrain !== false);
     const races = user.role === 'admin' ? ((n?.races || []).join(', ') || '-') : '-';
+    const nationColor = (mapType === 'alliance')
+      ? ((n?.alliance_name ? mapAllianceColor(n.alliance_name) : '#7d7d7d'))
+      : mapNationColor(selectedNationId);
     mapNationInfo.style.display = 'block';
     mapNationInfo.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
@@ -2683,6 +2965,7 @@ async function loadMap() {
       </div>
       <div class="map-small-label" style="margin-top:4px;">Alliance: ${canViewAlliance ? esc(n?.alliance_name || '-') : 'Hidden by visibility rules'}</div>
       <div class="map-small-label">Races: ${esc(races)}</div>
+      <div class="map-small-label">Color: <span aria-label="Nation color swatch" style="display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,0.4);vertical-align:middle;background:${nationColor};"></span></div>
       <div class="map-small-label">Owned Terrain (pixels): ${canViewTerrain ? fmtNum(pixels) : 'Hidden by visibility rules'}</div>
     `;
     document.getElementById('closeNationInfoBtn').onclick = () => setNationInfo(0);
@@ -2736,6 +3019,7 @@ async function loadMap() {
       <div class="map-editor-toolbar">
         <label class="map-small-label">Reference Image</label>
         <input id="editorBgUpload" type="file" accept="image/*" style="max-width:180px;">
+        <button class="primary" id="editorBgClearBtn" type="button" style="padding:4px 8px;">Clear</button>
         <label class="map-small-label" for="editorBgOpacity">Reference Opacity</label>
         <input id="editorBgOpacity" type="range" min="0" max="100" value="${Math.round(editorBackgroundOpacity * 100)}" style="width:120px;">
         <span class="map-small-label" id="editorBgOpacityLabel">${Math.round(editorBackgroundOpacity * 100)}%</span>
@@ -2767,22 +3051,36 @@ async function loadMap() {
 
     document.getElementById('editorBgUpload').onchange = async (e) => {
       if (!e.target.files || !e.target.files.length) return;
-      const fd = new FormData();
-      fd.append('image_file', e.target.files[0]);
-      const response = await fetch('/api/admin/maps/editor-reference', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: fd,
-      });
-      if (!response.ok) {
+      const file = e.target.files[0];
+      if (editorBackgroundObjectUrl) {
+        URL.revokeObjectURL(editorBackgroundObjectUrl);
+        editorBackgroundObjectUrl = null;
+      }
+      editorBackgroundObjectUrl = URL.createObjectURL(file);
+      editorBackgroundPath = editorBackgroundObjectUrl;
+      editorBgImage = await loadImage(editorBackgroundPath);
+      if (!editorBgImage) {
+        URL.revokeObjectURL(editorBackgroundObjectUrl);
+        editorBackgroundObjectUrl = null;
+        editorBackgroundPath = null;
         mapStatusMsg.textContent = 'Reference upload failed.';
         return;
       }
-      const payload = await response.json();
-      editorBackgroundPath = payload.image_path || null;
-      editorBgImage = editorBackgroundPath ? await loadImage(editorBackgroundPath) : null;
       render();
-      mapStatusMsg.textContent = 'Reference image uploaded.';
+      mapStatusMsg.textContent = 'Reference image loaded for this session only.';
+    };
+
+    document.getElementById('editorBgClearBtn').onclick = () => {
+      if (editorBackgroundObjectUrl) {
+        URL.revokeObjectURL(editorBackgroundObjectUrl);
+        editorBackgroundObjectUrl = null;
+      }
+      editorBackgroundPath = null;
+      editorBgImage = null;
+      const upload = document.getElementById('editorBgUpload');
+      if (upload) upload.value = '';
+      render();
+      mapStatusMsg.textContent = 'Reference image cleared.';
     };
 
     const bgOpacityInput = document.getElementById('editorBgOpacity');
@@ -2790,13 +3088,91 @@ async function loadMap() {
     bgOpacityInput.oninput = (e) => {
       const pct = clamp(toFiniteNumber(e.target.value, 100), 0, 100);
       editorBackgroundOpacity = pct / 100;
+      sessionStorage.setItem(editorBgOpacitySessionKey, String(Math.round(pct)));
       bgOpacityLabel.textContent = `${pct}%`;
       render();
     };
   };
 
   const renderBottomTools = () => {
+    const isMobileTools = window.matchMedia('(max-width: 900px)').matches;
+    const inEditorMode = (mode === 'terrain-editor' || mode === 'political-editor');
+    if (mapControlsDock) {
+      mapControlsDock.classList.toggle('mobile-map-ui', isMobileTools && inEditorMode);
+    }
+
     mapBottomLeftTools.style.display = (mode === 'terrain-editor' || mode === 'political-editor') ? 'block' : 'none';
+    if (mapBottomCenter) {
+      mapBottomCenter.style.display = (isMobileTools && inEditorMode) ? 'none' : 'block';
+    }
+    mapBottomRight.style.display = (isMobileTools && inEditorMode) ? 'none' : 'flex';
+
+    if (isMobileTools && inEditorMode) {
+      mapBottomRight.innerHTML = '';
+      mapBottomLeftTools.innerHTML = `
+        <div class="map-floating" style="position:relative;left:auto;bottom:auto;">
+          <div class="map-editor-dock-grid">
+            <label class="map-small-label">Tool</label>
+            <select id="mapToolSelect"><option value="move">Move</option><option value="brush">Brush</option><option value="fill">Bucket</option><option value="outline">Outline</option></select>
+            <label class="map-small-label">Size</label>
+            <input id="mapBrushSize" type="range" min="1" max="200" value="${brushSize}">
+            <span class="map-small-label" id="mapBrushSizeLabel">${brushSize}px</span>
+            <label class="map-small-label" for="mapZoomPercentMobile">Zoom</label>
+            <input id="mapZoomPercentMobile" type="range" min="-25" max="100" step="1" value="${Math.round(zoomTargetPct)}">
+            <label class="map-small-label" for="terrainOpacityMobile">Terrain Opacity</label>
+            <input id="terrainOpacityMobile" type="range" min="0" max="100" value="${Math.round(terrainOpacity * 100)}">
+          </div>
+          ${mode === 'terrain-editor' ? `
+            <details open style="margin-top:8px;">
+              <summary class="map-small-label">Terrain Types</summary>
+              <div class="map-editor-dock-terrain-list" style="margin-top:6px;">
+                ${TERRAIN_KEYS.map(k => `<button class="primary mapTerrainSelectBR" data-key="${k}" style="${selectedTerrainType === k ? 'outline:2px solid var(--accent);' : ''}">${labelTerrainKey(k)}</button>`).join('')}
+              </div>
+            </details>
+          ` : ''}
+          <div style="margin-top:8px;">
+            <button class="primary mapSaveTrigger" type="button" style="width:100%;">Save</button>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('mapToolSelect').value = selectedTool;
+      document.getElementById('mapToolSelect').onchange = (e) => {
+        selectedTool = e.target.value;
+        if (selectedTool === 'outline') {
+          outlinePoints = [];
+          outlineClosed = false;
+        }
+        canvas.style.cursor = selectedTool === 'move' ? 'grab' : 'crosshair';
+        renderSidebar();
+        render();
+      };
+      document.getElementById('mapBrushSize').oninput = (e) => {
+        brushSize = clamp(toFiniteNumber(e.target.value, brushSize), 1, 200);
+        document.getElementById('mapBrushSizeLabel').textContent = `${brushSize}px`;
+      };
+      document.getElementById('mapZoomPercentMobile').oninput = (e) => {
+        zoomTargetPct = clamp(toFiniteNumber(e.target.value, 0), minZoomPct, maxZoomPct);
+        const desktopZoom = document.getElementById('mapZoomPercent');
+        if (desktopZoom) desktopZoom.value = String(Math.round(zoomTargetPct));
+        animateZoomToTarget();
+      };
+      document.getElementById('terrainOpacityMobile').oninput = (e) => {
+        terrainOpacity = clamp(toFiniteNumber(e.target.value, 55), 0, 100) / 100;
+        render();
+      };
+      mapBottomLeftTools.querySelectorAll('.mapTerrainSelectBR').forEach(btn => {
+        btn.onclick = () => {
+          selectedTerrainType = btn.dataset.key;
+          renderBottomTools();
+        };
+      });
+      bindMapSaveTriggers();
+
+      canvas.style.cursor = selectedTool === 'move' ? 'grab' : 'crosshair';
+      return;
+    }
+
     mapBottomRight.innerHTML = `
       <div class="map-floating" style="position:relative;right:auto;bottom:auto;display:flex;gap:8px;align-items:center;">
         <label class="map-small-label" for="terrainOpacity">Terrain Opacity</label>
@@ -2819,6 +3195,7 @@ async function loadMap() {
         <label class="map-small-label">Size</label>
         <input id="mapBrushSize" type="range" min="1" max="200" value="${brushSize}">
         <span class="map-small-label" id="mapBrushSizeLabel">${brushSize}px</span>
+        <button class="primary mapSaveTrigger" type="button">Save</button>
       </div>
     `;
     document.getElementById('mapToolSelect').value = selectedTool;
@@ -2865,6 +3242,8 @@ async function loadMap() {
         render();
       };
     }
+
+    bindMapSaveTriggers();
 
     canvas.style.cursor = selectedTool === 'move' ? 'grab' : 'crosshair';
   };
@@ -2969,6 +3348,7 @@ async function loadMap() {
       };
       const nationSaveRes = await api('/api/admin/nations/' + nation.id, {
         method: 'PUT',
+        timeout: 90000,
         body: JSON.stringify({
           name: nation.name,
           alliance_name: nation.alliance_name,
@@ -2986,6 +3366,143 @@ async function loadMap() {
       updatedCount: nationPayload.length,
     };
   };
+
+  const buildEditorStatePayload = () => {
+    const nationPayload = politicalNationsArray().map(n => ({
+      id: n.id,
+      name: n.name,
+      alliance_name: n.alliance_name || '',
+      races: n.races || [],
+      pixels: nationPixelCount(n.id),
+    }));
+
+    return {
+      width: mapWidth,
+      height: mapHeight,
+      terrain_color_overrides: colorOverrides,
+      terrain_strokes: terrainStrokes,
+      political_strokes: politicalStrokes,
+      political_nations: nationPayload,
+    };
+  };
+
+  const persistCurrentMapState = async ({ successMessage = 'Map saved.' } = {}) => {
+    if (mapSaveInProgress) {
+      setMapStatus('Map save is already in progress...');
+      return false;
+    }
+    mapSaveInProgress = true;
+    try {
+      const payload = buildEditorStatePayload();
+      const saveStateRes = await api('/api/admin/maps/editor-state', {
+        method: 'POST',
+        timeout: 180000,
+        body: JSON.stringify(payload),
+      });
+      if (!saveStateRes || !saveStateRes.ok) {
+        setMapStatus('Failed to save map editor state.', { state: 'error' });
+        return false;
+      }
+
+      const syncResult = await syncNationTerrainStats();
+      if (!syncResult.ok) {
+        setMapStatus(`Map saved, but ${syncResult.failedNationUpdates} nation terrain updates failed.`, { clearAfterMs: 5000, state: 'error' });
+        return false;
+      }
+
+      unsavedChanges = false;
+      setMapStatus(successMessage, { clearAfterMs: 3000, state: 'success' });
+      return true;
+    } catch (error) {
+      const message = (error && error.message) ? error.message : 'Map save failed due to a network or server error.';
+      setMapStatus(message, { state: 'error' });
+      return false;
+    } finally {
+      mapSaveInProgress = false;
+    }
+  };
+
+  const bindMapSaveTriggers = () => {
+    document.querySelectorAll('.mapSaveTrigger').forEach(btn => {
+      btn.onclick = async (event) => {
+        if (event) event.preventDefault();
+        if (mapSaveInProgress) return;
+        const buttons = Array.from(document.querySelectorAll('.mapSaveTrigger'));
+        buttons.forEach(b => { b.disabled = true; });
+        setMapStatus('Saving map... large maps can take up to a couple of minutes.');
+        try {
+          await persistCurrentMapState({ successMessage: 'Map saved.' });
+        } finally {
+          buttons.forEach(b => { b.disabled = false; });
+        }
+      };
+    });
+  };
+
+  const applyEditorStatePayload = (payload) => {
+    const imported = (payload && typeof payload === 'object') ? payload : {};
+    mapWidth = clamp(toFiniteNumber(imported.width, 1200), 100, 5000);
+    mapHeight = clamp(toFiniteNumber(imported.height, 700), 100, 5000);
+    terrainStrokes = Array.isArray(imported.terrain_strokes) ? imported.terrain_strokes.slice() : [{ tool: 'fill', terrain: 'water', x: 0, y: 0 }];
+    politicalStrokes = Array.isArray(imported.political_strokes) ? imported.political_strokes.slice() : [];
+    politicalNationMeta = Array.isArray(imported.political_nations) ? imported.political_nations.slice() : [];
+    colorOverrides = (imported.terrain_color_overrides && typeof imported.terrain_color_overrides === 'object')
+      ? { ...imported.terrain_color_overrides }
+      : {};
+
+    seedPoliticalNationMap(politicalNationMeta);
+    terrainGrid = new Uint8Array(mapWidth * mapHeight);
+    ownerGrid = new Int32Array(mapWidth * mapHeight);
+    selectedNationId = 0;
+    politicalEditNationId = 0;
+    territoryEditing = false;
+    selectedTool = mode === 'terrain-editor' ? 'brush' : selectedTool;
+    brushSize = mode === 'terrain-editor' ? terrainDefaultBrushSize : brushSize;
+    outlinePoints = [];
+    outlineClosed = false;
+    lastOutlinePoint = null;
+    labelCache = [];
+    terrainLayerDirty = true;
+    waterLayerDirty = true;
+    politicalLayerDirty = true;
+    politicalNeedsFullRebuild = false;
+    politicalNeedsPostPaintBorderUpdate = false;
+    unsavedChanges = true;
+
+    resizeLayerCanvases();
+    rebuildTerrainFromStrokes();
+    rebuildPoliticalFromStrokes();
+    computeLabels();
+    renderTopEditorControls();
+    renderBottomTools();
+    renderSidebar();
+    resizeCanvas();
+    render();
+  };
+
+  const extractEditorStateFromBackup = (raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+    if (raw.editor_state && typeof raw.editor_state === 'object') {
+      if (raw.format && raw.format !== MAP_BACKUP_FORMAT) return null;
+      return raw.editor_state;
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(raw, 'width')
+      || Object.prototype.hasOwnProperty.call(raw, 'height')
+      || Object.prototype.hasOwnProperty.call(raw, 'terrain_strokes')
+      || Object.prototype.hasOwnProperty.call(raw, 'political_strokes')
+    ) {
+      return raw;
+    }
+    return null;
+  };
+
+  const buildMapBackupObject = () => ({
+    format: MAP_BACKUP_FORMAT,
+    exported_at: new Date().toISOString(),
+    exported_by_user_id: Number(user?.id || 0) || null,
+    editor_state: buildEditorStatePayload(),
+  });
 
   const renderSidebar = () => {
     if (mode === 'terrain-editor') {
@@ -3199,6 +3716,28 @@ async function loadMap() {
             </div>
           </div>
         ` : ''}
+        ${mapType === 'political' ? `
+          <div class="setting-group" style="margin-top:8px;">
+            <h3 style="margin-top:0;">Political Nation Colors (Your View)</h3>
+            <div class="map-small-label">These colors are saved per player.</div>
+            <div class="map-scroll-list" style="max-height:180px;margin-top:6px;">
+              ${nations.map(n => {
+                const key = String(Number(n.id || 0));
+                const value = politicalNationColorOverrides[key] || mapNationColor(key);
+                return `
+                  <div class="terrain-color-row">
+                    <label style="font-size:12px;">${esc(n.name || `Nation ${key}`)}</label>
+                    <input type="color" class="politicalNationColorInput" data-key="${esc(key)}" value="${value}">
+                  </div>
+                `;
+              }).join('') || '<div class="muted">No nations found.</div>'}
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <button class="primary" id="savePoliticalNationColorsBtn">Save Political Colors</button>
+              <button class="primary" id="resetPoliticalNationColorsBtn">Reset</button>
+            </div>
+          </div>
+        ` : ''}
       `;
       mapSidePanel.querySelectorAll('.mapTypeBtn').forEach(btn => {
         btn.onclick = () => {
@@ -3256,6 +3795,48 @@ async function loadMap() {
           };
         }
       }
+
+      if (mapType === 'political') {
+        mapSidePanel.querySelectorAll('.politicalNationColorInput').forEach(input => {
+          input.addEventListener('input', () => {
+            const key = String(input.dataset.key || '').trim();
+            if (!key) return;
+            if (/^#[0-9A-Fa-f]{6}$/.test(input.value)) {
+              politicalNationColorOverrides[key] = input.value;
+              politicalLayerDirty = true;
+              render();
+            }
+          });
+        });
+
+        const savePoliticalNationColorsBtn = document.getElementById('savePoliticalNationColorsBtn');
+        if (savePoliticalNationColorsBtn) {
+          savePoliticalNationColorsBtn.onclick = async () => {
+            const payload = normalizePoliticalNationColorOverrides(politicalNationColorOverrides);
+            const saveRes = await api('/api/me/settings', {
+              method: 'PATCH',
+              body: JSON.stringify({ political_nation_color_overrides: payload }),
+            });
+            if (!saveRes || !saveRes.ok) {
+              mapStatusMsg.textContent = 'Failed to save political nation colors.';
+              return;
+            }
+            settings.political_nation_color_overrides = payload;
+            mapStatusMsg.textContent = 'Political nation colors saved for your account.';
+          };
+        }
+
+        const resetPoliticalNationColorsBtn = document.getElementById('resetPoliticalNationColorsBtn');
+        if (resetPoliticalNationColorsBtn) {
+          resetPoliticalNationColorsBtn.onclick = () => {
+            politicalNationColorOverrides = {};
+            settings.political_nation_color_overrides = {};
+            politicalLayerDirty = true;
+            renderSidebar();
+            render();
+          };
+        }
+      }
       const renderTerrainStats = (sqMiles, options = {}) => {
         if (options.restricted) {
           document.getElementById('mapTerrainStats').innerHTML = '<div class="muted">Terrain is hidden by visibility rules for this nation.</div>';
@@ -3294,44 +3875,9 @@ async function loadMap() {
     }
 
     mapSaveArea.innerHTML = (mode === 'terrain-editor' || mode === 'political-editor')
-      ? '<button class="primary" id="saveMapEditorBtn">Save</button>'
+      ? '<button class="primary mapSaveTrigger" id="saveMapEditorBtn" type="button">Save</button>'
       : '';
-    const saveBtn = document.getElementById('saveMapEditorBtn');
-    if (saveBtn) {
-      saveBtn.onclick = async () => {
-        const nationPayload = politicalNationsArray().map(n => ({
-          id: n.id,
-          name: n.name,
-          alliance_name: n.alliance_name || '',
-          races: n.races || [],
-          pixels: nationPixelCount(n.id),
-        }));
-        const payload = {
-          width: mapWidth,
-          height: mapHeight,
-          terrain_color_overrides: colorOverrides,
-          terrain_strokes: terrainStrokes,
-          political_strokes: politicalStrokes,
-          political_nations: nationPayload,
-          editor_background_path: editorBackgroundPath,
-          editor_background_opacity: editorBackgroundOpacity,
-        };
-        const saveStateRes = await api('/api/admin/maps/editor-state', { method: 'POST', body: JSON.stringify(payload) });
-        if (!saveStateRes || !saveStateRes.ok) {
-          mapStatusMsg.textContent = 'Failed to save map editor state.';
-          return;
-        }
-
-        const syncResult = await syncNationTerrainStats();
-        if (!syncResult.ok) {
-          mapStatusMsg.textContent = `Map saved, but ${syncResult.failedNationUpdates} nation terrain updates failed.`;
-          return;
-        }
-
-        unsavedChanges = false;
-        mapStatusMsg.textContent = 'Map saved.';
-      };
-    }
+    bindMapSaveTriggers();
   };
 
   // Directly updates terrainLayerCanvas + waterLayerCanvas for a single brush circle,
@@ -3424,9 +3970,11 @@ async function loadMap() {
         img.data[p] = 0; img.data[p + 1] = 0; img.data[p + 2] = 0; img.data[p + 3] = 0;
       } else {
         let color = '#ffffff';
-        if (mapType === 'alliance' || mode === 'political-editor') {
+        if (mapType === 'alliance') {
           const nation = getNationById(owner);
           color = nation?.alliance_name ? mapAllianceColor(nation.alliance_name) : '#7d7d7d';
+        } else if (mapType === 'political' || mode === 'political-editor') {
+          color = mapNationColor(owner);
         }
         const rgb = cachedRgb(color);
         img.data[p] = rgb.r; img.data[p + 1] = rgb.g; img.data[p + 2] = rgb.b; img.data[p + 3] = 210;
@@ -3544,6 +4092,8 @@ async function loadMap() {
 
   document.getElementById('mapZoomPercent').oninput = (e) => {
     zoomTargetPct = clamp(toFiniteNumber(e.target.value, 0), minZoomPct, maxZoomPct);
+    const mobileZoom = document.getElementById('mapZoomPercentMobile');
+    if (mobileZoom) mobileZoom.value = String(Math.round(zoomTargetPct));
     animateZoomToTarget();
   };
 
@@ -3552,6 +4102,8 @@ async function loadMap() {
     const rect = canvas.getBoundingClientRect();
     zoomTargetPct = clamp(zoomTargetPct + (e.deltaY < 0 ? 3 : -3), minZoomPct, maxZoomPct);
     document.getElementById('mapZoomPercent').value = String(Math.round(zoomTargetPct));
+    const mobileZoom = document.getElementById('mapZoomPercentMobile');
+    if (mobileZoom) mobileZoom.value = String(Math.round(zoomTargetPct));
     animateZoomToTarget({ sx: e.clientX - rect.left, sy: e.clientY - rect.top });
   }, { passive: false });
 
@@ -3674,6 +4226,59 @@ async function loadMap() {
   if (user.role === 'admin') {
     document.getElementById('openTerrainEditorBtn').onclick = () => setMode('terrain-editor');
     document.getElementById('openPoliticalEditorBtn').onclick = () => setMode('political-editor');
+    const downloadMapBackupBtn = document.getElementById('downloadMapBackupBtn');
+    if (downloadMapBackupBtn) {
+      downloadMapBackupBtn.onclick = () => {
+        try {
+          const backup = buildMapBackupObject();
+          const stamp = String(backup.exported_at || new Date().toISOString()).replace(/[:.]/g, '-');
+          const fileName = `azveria-map-backup-${stamp}.json`;
+          const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(url);
+          mapStatusMsg.textContent = 'Map backup downloaded.';
+        } catch {
+          mapStatusMsg.textContent = 'Failed to download map backup.';
+        }
+      };
+    }
+
+    const uploadMapBackupInput = document.getElementById('uploadMapBackupInput');
+    const uploadMapBackupBtn = document.getElementById('uploadMapBackupBtn');
+    if (uploadMapBackupBtn && uploadMapBackupInput) {
+      uploadMapBackupBtn.onclick = () => uploadMapBackupInput.click();
+      uploadMapBackupInput.onchange = async (event) => {
+        const file = event?.target?.files?.[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          const parsed = JSON.parse(text);
+          const importedState = extractEditorStateFromBackup(parsed);
+          if (!importedState) {
+            mapStatusMsg.textContent = 'Invalid backup file format.';
+            uploadMapBackupInput.value = '';
+            return;
+          }
+
+          applyEditorStatePayload(importedState);
+          setMode('terrain-editor');
+          const saved = await persistCurrentMapState({ successMessage: 'Map backup imported and saved.' });
+          if (!saved) {
+            mapStatusMsg.textContent = 'Backup loaded locally, but saving to server failed.';
+          }
+        } catch {
+          mapStatusMsg.textContent = 'Failed to import map backup.';
+        }
+        uploadMapBackupInput.value = '';
+      };
+    }
+
     document.getElementById('recalcTerrainStatsBtn').onclick = async () => {
       const ok = window.confirm('Recalculate terrain stats for all nations from the current map pixels?');
       if (!ok) return;
@@ -3715,6 +4320,7 @@ async function loadMap() {
   resizeCanvas();
   render();
   window.addEventListener('resize', () => {
+    renderBottomTools();
     resizeCanvas();
     render();
   });
@@ -5672,24 +6278,75 @@ async function loadGameInformationRules() {
       controls.innerHTML = `
         <div class="doc-vis-panel">
           <label class="doc-vis-label">Visibility Selection</label>
-          <select id="docVisMulti" class="doc-vis-select" multiple size="10">
-            <option value="__all" ${isAllSelected ? 'selected' : ''}>All Players</option>
-            <option value="__admin" ${isAdminSelected ? 'selected' : ''}>Admin Players</option>
-            <option value="" disabled>--------------------</option>
-            ${players.map(p => `<option value="${p.id}" ${isCustomSelected && selectedPlayerIds.includes(Number(p.id)) ? 'selected' : ''}>${escapeHtml(p.name || ('User #' + p.id))}</option>`).join('')}
-          </select>
-          <div class="doc-vis-help">Pick one mode: All Players, Admin Players, or one/more specific users.</div>
+          <div id="docVisDesktopWrap" style="display:none;">
+            <select id="docVisMulti" class="doc-vis-select" multiple size="10">
+              <option value="__all" ${isAllSelected ? 'selected' : ''}>All Players</option>
+              <option value="__admin" ${isAdminSelected ? 'selected' : ''}>Admin Players</option>
+              <option value="" disabled>--------------------</option>
+              ${players.map(p => `<option value="${p.id}" ${isCustomSelected && selectedPlayerIds.includes(Number(p.id)) ? 'selected' : ''}>${escapeHtml(p.name || ('User #' + p.id))}</option>`).join('')}
+            </select>
+            <div class="doc-vis-help">Pick one mode: All Players, Admin Players, or one/more specific users.</div>
+          </div>
+          <div id="docVisMobileWrap" style="display:none;">
+            <div class="doc-vis-help" style="margin-top:0;margin-bottom:8px;">Pick one mode: All Players, Admin Players, or one/more specific users.</div>
+            <label style="display:flex;align-items:center;gap:8px;padding:6px 0;"><input type="checkbox" class="docVisMobileChoice" value="__all" ${isAllSelected ? 'checked' : ''}> All Players</label>
+            <label style="display:flex;align-items:center;gap:8px;padding:6px 0;"><input type="checkbox" class="docVisMobileChoice" value="__admin" ${isAdminSelected ? 'checked' : ''}> Admin Players</label>
+            <div class="doc-vis-help" style="margin-top:6px;">Specific users</div>
+            <div class="list" style="max-height:220px;">
+              ${players.map(p => `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;"><input type="checkbox" class="docVisMobileChoice" value="${p.id}" ${isCustomSelected && selectedPlayerIds.includes(Number(p.id)) ? 'checked' : ''}> ${escapeHtml(p.name || ('User #' + p.id))}</label>`).join('') || '<span class="muted">No players available.</span>'}
+            </div>
+          </div>
         </div>
       `;
 
       const multi = document.getElementById('docVisMulti');
+      const desktopWrap = document.getElementById('docVisDesktopWrap');
+      const mobileWrap = document.getElementById('docVisMobileWrap');
+      const mobileChoices = () => Array.from(document.querySelectorAll('.docVisMobileChoice'));
+      const usingMobilePicker = window.matchMedia('(max-width: 900px)').matches || window.matchMedia('(pointer: coarse)').matches;
+
+      if (desktopWrap) desktopWrap.style.display = usingMobilePicker ? 'none' : 'block';
+      if (mobileWrap) mobileWrap.style.display = usingMobilePicker ? 'block' : 'none';
+
+      const getSelectedValues = () => {
+        if (usingMobilePicker) {
+          return mobileChoices().filter(el => el.checked).map(el => String(el.value || ''));
+        }
+        return multi ? Array.from(multi.selectedOptions).map(o => o.value) : [];
+      };
+
       const enforceExclusiveMode = () => {
-        if (!multi) return;
-        const selected = Array.from(multi.selectedOptions).map(o => o.value);
+        const selected = getSelectedValues();
         const hasAll = selected.includes('__all');
         const hasAdmin = selected.includes('__admin');
         const hasUsers = selected.some(v => v !== '__all' && v !== '__admin' && v !== '');
 
+        if (usingMobilePicker) {
+          const boxes = mobileChoices();
+          if (hasAll) {
+            boxes.forEach(box => {
+              if (box.value !== '__all') box.checked = false;
+            });
+            return;
+          }
+          if (hasAdmin) {
+            boxes.forEach(box => {
+              if (box.value !== '__admin') box.checked = false;
+            });
+            return;
+          }
+          if (hasUsers) {
+            boxes.forEach(box => {
+              if (box.value === '__all' || box.value === '__admin') box.checked = false;
+            });
+            return;
+          }
+          const adminBox = boxes.find(box => box.value === '__admin');
+          if (adminBox) adminBox.checked = true;
+          return;
+        }
+
+        if (!multi) return;
         if (hasAll) {
           Array.from(multi.options).forEach(opt => {
             if (opt.value !== '__all') opt.selected = false;
@@ -5716,7 +6373,8 @@ async function loadGameInformationRules() {
         if (adminOption) adminOption.selected = true;
       };
 
-      multi.addEventListener('change', enforceExclusiveMode);
+      if (multi) multi.addEventListener('change', enforceExclusiveMode);
+      mobileChoices().forEach(box => box.addEventListener('change', enforceExclusiveMode));
       enforceExclusiveMode();
 
       saveBtn.disabled = false;
@@ -5724,7 +6382,7 @@ async function loadGameInformationRules() {
         saveBtn.disabled = true;
         msg.textContent = '';
 
-        const selectedValues = Array.from(document.querySelectorAll('#docVisMulti option:checked')).map(o => o.value);
+        const selectedValues = getSelectedValues();
         const allSelected = selectedValues.includes('__all');
         const adminSelected = selectedValues.includes('__admin');
         const playerIds = selectedValues

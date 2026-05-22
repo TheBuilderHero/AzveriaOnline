@@ -250,6 +250,9 @@ class MeController extends Controller
             $payload['alliance_color_overrides'] = is_array($extra['alliance_color_overrides'] ?? null)
                 ? $extra['alliance_color_overrides']
                 : [];
+            $payload['political_nation_color_overrides'] = is_array($extra['political_nation_color_overrides'] ?? null)
+                ? $extra['political_nation_color_overrides']
+                : [];
             return response()->json($payload);
         }
 
@@ -258,7 +261,13 @@ class MeController extends Controller
             'theme' => 'light',
             'color_blind_mode' => 'none',
             'dog_bark_enabled' => 0,
-            'extra_json' => json_encode(['font_mode' => 'normal', 'show_unread_chat_badge' => true, 'apply_year_change_effects' => false, 'alliance_color_overrides' => []]),
+            'extra_json' => json_encode([
+                'font_mode' => 'normal',
+                'show_unread_chat_badge' => true,
+                'apply_year_change_effects' => false,
+                'alliance_color_overrides' => [],
+                'political_nation_color_overrides' => [],
+            ]),
             'updated_at' => now(),
         ]);
         $created = DB::table('user_settings')->where('user_id', $request->user()->id)->first();
@@ -267,6 +276,7 @@ class MeController extends Controller
         $payload['show_unread_chat_badge'] = true;
         $payload['apply_year_change_effects'] = false;
         $payload['alliance_color_overrides'] = [];
+        $payload['political_nation_color_overrides'] = [];
         return response()->json($payload);
     }
 
@@ -286,6 +296,9 @@ class MeController extends Controller
         $extra['alliance_color_overrides'] = array_key_exists('alliance_color_overrides', $data)
             ? ($data['alliance_color_overrides'] ?? [])
             : (($extra['alliance_color_overrides'] ?? null) ?: []);
+        $extra['political_nation_color_overrides'] = array_key_exists('political_nation_color_overrides', $data)
+            ? ($data['political_nation_color_overrides'] ?? [])
+            : (($extra['political_nation_color_overrides'] ?? null) ?: []);
 
         DB::table('user_settings')->where('user_id', $request->user()->id)->update([
             'theme' => $data['theme'] ?? $current['theme'],

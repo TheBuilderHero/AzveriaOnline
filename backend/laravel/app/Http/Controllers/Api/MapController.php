@@ -69,8 +69,6 @@ class MapController extends Controller
             'political_strokes.*.x' => ['nullable', 'numeric'],
             'political_strokes.*.y' => ['nullable', 'numeric'],
             'political_strokes.*.size' => ['nullable', 'numeric', 'min:1', 'max:200'],
-            'editor_background_path' => ['nullable', 'string', 'max:2048'],
-            'editor_background_opacity' => ['nullable', 'numeric', 'min:0', 'max:1'],
         ]);
 
         $payload = array_merge($this->defaultEditorState(), $data, [
@@ -126,29 +124,6 @@ class MapController extends Controller
         return response()->json(['message' => 'Map layer updated', 'image_path' => $imagePath]);
     }
 
-    public function uploadEditorReference(UploadMapLayerRequest $request)
-    {
-        $data = $request->validated();
-
-        $imagePath = $data['image_path'] ?? null;
-        if (!$imagePath && $request->hasFile('image_file')) {
-            try {
-                $imagePath = $request->file('image_file')->store('maps/editor-reference', 'public');
-            } catch (\Throwable $e) {
-                return response()->json([
-                    'message' => 'Reference upload failed while storing the image file.',
-                    'detail' => $e->getMessage(),
-                ], 422);
-            }
-        }
-
-        if (!$imagePath) {
-            return response()->json(['message' => 'Reference upload failed: no file or image path was provided.'], 422);
-        }
-
-        return response()->json(['message' => 'Reference image updated', 'image_path' => $imagePath]);
-    }
-
     public function resetMap(Request $request)
     {
         try {
@@ -200,8 +175,6 @@ class MapController extends Controller
             ],
             'political_strokes' => [],
             'political_nations' => [],
-            'editor_background_path' => null,
-            'editor_background_opacity' => 1,
         ];
     }
 }

@@ -21,6 +21,8 @@ class UpdateSettingsRequest extends FormRequest
             'show_unread_chat_badge' => ['nullable', 'boolean'],
             'alliance_color_overrides' => ['nullable', 'array'],
             'alliance_color_overrides.*' => ['nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+            'political_nation_color_overrides' => ['nullable', 'array'],
+            'political_nation_color_overrides.*' => ['nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
         ];
     }
 }
