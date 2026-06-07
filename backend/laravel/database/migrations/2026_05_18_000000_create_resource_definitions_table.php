@@ -14,6 +14,7 @@ return new class extends Migration
             $table->string('display_name');
             $table->enum('type', ['base', 'advanced']);
             $table->string('group'); // e.g., Currencies, Common, Uncommon, etc.
+            $table->unsignedInteger('group_order')->default(0);
             $table->unsignedInteger('order')->default(0);
             $table->json('meta')->nullable();
             $table->timestamps();

@@ -1255,10 +1255,18 @@ async function loadSection(name) {
     };
     let html = '';
     html += `<div class="row" style="margin-bottom:10px;"><button class="primary" id="addResourceBtn">+ Add Resource</button></div>`;
+    const sortGroupEntries = (groups) => {
+      return Object.entries(groups || {}).sort((a, b) => {
+        const aOrder = Number(Array.isArray(a[1]) && a[1][0] ? a[1][0].group_order : 0) || 0;
+        const bOrder = Number(Array.isArray(b[1]) && b[1][0] ? b[1][0].group_order : 0) || 0;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return String(a[0] || '').localeCompare(String(b[0] || ''));
+      });
+    };
     ['base','advanced'].forEach(type => {
       const groups = defs[type] || {};
       html += `<details open style="margin-bottom:10px;"><summary style="font-size:16px;font-weight:600;">${type.charAt(0).toUpperCase()+type.slice(1)} Resources</summary>`;
-      Object.entries(groups).forEach(([group, arr]) => {
+      sortGroupEntries(groups).forEach(([group, arr]) => {
         html += `<details open style="margin:6px 0 0 12px;"><summary style="font-size:15px;">Group: ${escapeHtml(group)}</summary>`;
         html += arr.length === 0 ? '<div class="muted">No resources in this group.</div>' : arr.map(def => `
           <div class="resource-def-card">
@@ -1268,6 +1276,7 @@ async function loadSection(name) {
                 <label>Display <input name="display_name" value="${escapeHtml(def.display_name)}" required></label>
                 <label>Type <select name="type"><option value="base"${def.type==='base'?' selected':''}>Base</option><option value="advanced"${def.type==='advanced'?' selected':''}>Advanced</option></select></label>
                 <label>Group <input name="group" value="${escapeHtml(def.group)}" required></label>
+                <label>Group Order <input name="group_order" type="number" min="0" value="${Number(def.group_order)||0}"></label>
                 <label>Order <input name="order" type="number" value="${Number(def.order)||0}"></label>
                 <label>Meta <input name="meta" value="${escapeHtml(JSON.stringify(def.meta||{}))}"></label>
               </div>
@@ -1405,6 +1414,7 @@ async function loadSection(name) {
               <label>Display <input name="display_name" required></label>
               <label>Type <select name="type"><option value="base">Base</option><option value="advanced">Advanced</option></select></label>
               <label>Group <input name="group" required></label>
+              <label>Group Order <input name="group_order" type="number" min="0" value="0"></label>
               <label>Order <input name="order" type="number" value="0"></label>
               <label>Meta <input name="meta" value="{}"></label>
             </div>
@@ -1424,7 +1434,13 @@ async function loadSection(name) {
   function bindNewAccountResourceDefaults(defs, defaults) {
     const optionGroups = (type) => {
       const groups = defs[type] || {};
-      return Object.entries(groups).map(([group, arr]) => {
+      const orderedGroups = Object.entries(groups).sort((a, b) => {
+        const aOrder = Number(Array.isArray(a[1]) && a[1][0] ? a[1][0].group_order : 0) || 0;
+        const bOrder = Number(Array.isArray(b[1]) && b[1][0] ? b[1][0].group_order : 0) || 0;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return String(a[0] || '').localeCompare(String(b[0] || ''));
+      });
+      return orderedGroups.map(([group, arr]) => {
         if (!arr.length) return '';
         const label = type === 'advanced' ? `Advanced Resources - ${group}` : `Base Resources - ${group}`;
         const options = arr.map(def => `<option value="${type}|${def.name}">${escapeHtml(def.display_name)} (${escapeHtml(group)})</option>`).join('');
@@ -1752,6 +1768,7 @@ async function loadSection(name) {
             display_name: fd.get('display_name'),
             type: fd.get('type'),
             group: fd.get('group'),
+            group_order: Number(fd.get('group_order')||0),
             order: Number(fd.get('order')||0),
             meta: JSON.parse(fd.get('meta')||'{}'),
           };

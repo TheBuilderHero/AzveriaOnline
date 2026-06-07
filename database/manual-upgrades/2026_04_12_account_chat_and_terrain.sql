@@ -208,6 +208,29 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+SET @has_resource_definitions_table := (
+  SELECT COUNT(*)
+  FROM information_schema.TABLES
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'resource_definitions'
+);
+
+SET @has_resource_group_order := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'resource_definitions'
+    AND COLUMN_NAME = 'group_order'
+);
+SET @sql := IF(
+  @has_resource_definitions_table > 0 AND @has_resource_group_order = 0,
+  'ALTER TABLE resource_definitions ADD COLUMN group_order INT UNSIGNED NOT NULL DEFAULT 0 AFTER `group`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 UPDATE nation_terrain_stats
 SET square_miles_json = JSON_SET(
     COALESCE(square_miles_json, JSON_OBJECT()),
