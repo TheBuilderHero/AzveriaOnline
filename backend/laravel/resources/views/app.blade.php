@@ -169,7 +169,7 @@
       min-height: 280px;
       max-height: 62vh;
       overflow: auto;
-      white-space: pre-wrap;
+      white-space: break-spaces;
       font-size: 14px;
     }
     .doc-editor {
@@ -182,6 +182,51 @@
       color: var(--text);
       border: 1px solid var(--border);
     }
+      .combat-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+        gap: 12px;
+        align-items: start;
+      }
+      .combat-commanders {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px;
+        background: linear-gradient(180deg, var(--panel), var(--bg));
+        margin-bottom: 10px;
+      }
+      .combat-unit-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .combat-unit-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--panel);
+        padding: 8px;
+      }
+      .combat-unit-card summary {
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: center;
+        font-weight: 600;
+      }
+      .combat-orders {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px;
+        background: var(--panel);
+      }
+      .combat-order-item {
+        border: 1px solid #d7dee7;
+        border-radius: 8px;
+        padding: 8px;
+        margin-top: 8px;
+        background: var(--bg);
+      }
     .admin-picker {
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -433,6 +478,8 @@
     @media (max-width: 900px) {
       .defaults-admin-form { grid-template-columns:1fr; }
       .defaults-admin-row { flex-wrap:wrap; }
+        .combat-layout { grid-template-columns: 1fr; }
+        .combat-unit-grid { grid-template-columns: 1fr; }
       .defaults-admin-row .resource-amount { max-width:100%; }
       .nation-editor-grid { grid-template-columns:1fr; }
       .nation-income-row { flex-wrap:wrap; }
@@ -698,8 +745,8 @@ const view = document.getElementById('view');
 const nav = document.getElementById('nav');
 const resourcesBar = document.getElementById('resourcesBar');
 
-const playerMenu = ['Player', 'Announcements', 'Game Information and Rules', 'Map', 'Combat', 'Chat', 'Other Nations', 'Shop', 'Settings'];
-const adminMenu = ['Announcements', 'All Nations', 'Notifications', 'Game Information and Rules', 'Resource Management', 'New Accounts', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
+const playerMenu = ['Player', 'Announcements', 'Information', 'Map', 'Combat', 'Chat', 'Other Nations', 'Shop', 'Settings'];
+const adminMenu = ['Announcements', 'All Nations', 'Notifications', 'Information', 'Resource Management', 'New Accounts', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
 
 const goofyAudio = new Audio('https://actions.google.com/sounds/v1/cartoon/boing.ogg');
 goofyAudio.preload = 'auto';
@@ -1133,7 +1180,7 @@ async function loadSection(name) {
     if (name === 'Settings') return await loadSettings();
     if (name === 'All Nations') return await loadAllNations();
     if (name === 'Notifications') return await loadNotifications();
-    if (name === 'Game Information and Rules') return await loadGameInformationRules();
+    if (name === 'Information') return await loadGameInformationRules();
     if (name === 'Resource Management') return await loadResourceManagement();
     if (name === 'About') return await loadAboutPage();
   // Admin Resource Management UI
@@ -1908,12 +1955,282 @@ async function loadPlayer() {
 }
 
 async function loadCombat() {
-  view.innerHTML = `
-    <div class="card">
-      <h2>Combat</h2>
-      <p class="muted">Combat tools and battle resolution are coming soon.</p>
-    </div>
-  `;
+  const isAdmin = user.role === 'admin';
+  let adminPlayers = [];
+  let selectedPlayerId = '';
+
+  if (isAdmin) {
+    const usersRes = await api('/api/admin/users?role=player');
+    adminPlayers = usersRes && usersRes.ok ? await usersRes.json() : [];
+    const withNation = adminPlayers.filter(p => Number(p.nation_id || 0) > 0);
+    if (withNation.length > 0) {
+      selectedPlayerId = String(withNation[0].id);
+    }
+  }
+
+  const renderStatsRows = (stats) => {
+    const entries = Object.entries(stats || {});
+    if (entries.length === 0) return '<div class="muted">No stats.</div>';
+    return entries.map(([k, v]) => `<div class="res-kv"><span>${escapeHtml(String(k))}</span><span>${escapeHtml(String(v))}</span></div>`).join('');
+  };
+
+  const renderUnitCards = (units, options) => {
+    if (!Array.isArray(units) || units.length === 0) {
+      return '<div class="muted">No units.</div>';
+    }
+
+    return units.map((u) => {
+      const displayName = String(u.custom_name || u.display_name || 'Unit');
+      const baseName = String(u.display_name || 'Unit');
+      const rating = Number(u.rating || 0);
+      const nameEditor = options.allowNameEdit ? `
+        <div class="row" style="margin-top:8px;">
+          <label style="min-width:90px;">Unit Name</label>
+          <input class="combatUnitNameInput" data-unit-id="${u.id}" value="${escapeHtml(String(u.custom_name || ''))}" placeholder="Set custom unit name">
+          <button class="primary combatUnitNameSave" data-unit-id="${u.id}" style="background:#314f72;">Save Name</button>
+        </div>
+      ` : '';
+
+      const statsEditor = options.allowStatEdit ? `
+        <label style="font-size:12px;margin-top:8px;display:block;">Stats Override JSON (Admin)</label>
+        <textarea class="combatStatEditInput" data-unit-id="${u.id}" rows="5">${escapeHtml(JSON.stringify(u.stats_override || {}, null, 2))}</textarea>
+        <div class="row"><button class="primary combatStatEditSave" data-unit-id="${u.id}" style="background:#2f6a41;">Save Unit Stats</button></div>
+      ` : '';
+
+      return `
+        <details class="combat-unit-card">
+          <summary>
+            <span>${escapeHtml(displayName)}</span>
+            <span>Rating: ${fmtNum(rating)}</span>
+          </summary>
+          <div style="margin-top:8px;">
+            <div class="muted">Base: ${escapeHtml(baseName)}</div>
+            <div class="muted">Qty: ${fmtNum(u.qty || 0)} | Status: ${escapeHtml(String(u.status || 'owned'))} | Class: ${escapeHtml(String(u.class_name || '-'))}</div>
+            <div style="margin-top:8px;"><strong>Effective Stats</strong></div>
+            <div class="res-panel">${renderStatsRows(u.effective_stats)}</div>
+            ${nameEditor}
+            ${statsEditor}
+          </div>
+        </details>
+      `;
+    }).join('');
+  };
+
+  const renderOrders = (orders) => {
+    if (!Array.isArray(orders) || orders.length === 0) {
+      return '<div class="muted">No combat orders submitted.</div>';
+    }
+
+    const normalizeOrderStatus = (value) => {
+      const v = String(value || '').trim().toLowerCase();
+      if (v === 'approved' || v === 'denied') return v;
+      return 'pending';
+    };
+
+    return orders.map((o) => `
+      <div class="combat-order-item">
+        <div style="font-weight:700;">${escapeHtml(String(o.title || 'Combat Order'))}</div>
+        <div class="muted" style="font-size:12px;">${escapeHtml(String(o.created_at || ''))}</div>
+        <div class="muted" style="font-size:12px;">Status: <strong>${escapeHtml(normalizeOrderStatus(o.order_status))}</strong></div>
+        <div style="white-space:break-spaces;margin-top:6px;">${escapeHtml(String(o.body || ''))}</div>
+        ${o.review_note ? `<div style="white-space:break-spaces;margin-top:6px;"><strong>Review Note:</strong> ${escapeHtml(String(o.review_note || ''))}</div>` : ''}
+        ${isAdmin ? `
+          <div class="row" style="margin-top:8px;align-items:flex-start;">
+            <select class="combatOrderStatusSelect" data-order-id="${o.id}">
+              <option value="pending" ${normalizeOrderStatus(o.order_status) === 'pending' ? 'selected' : ''}>pending</option>
+              <option value="approved" ${normalizeOrderStatus(o.order_status) === 'approved' ? 'selected' : ''}>approved</option>
+              <option value="denied" ${normalizeOrderStatus(o.order_status) === 'denied' ? 'selected' : ''}>denied</option>
+            </select>
+            <input class="combatOrderReviewNote" data-order-id="${o.id}" value="${escapeHtml(String(o.review_note || ''))}" placeholder="Optional review note">
+            <button class="primary combatOrderStatusSave" data-order-id="${o.id}" style="background:#314f72;">Update</button>
+          </div>
+        ` : ''}
+      </div>
+    `).join('');
+  };
+
+  const loadData = async () => {
+    if (isAdmin && !selectedPlayerId) {
+      return { snapshot: null, orders: [] };
+    }
+
+    const snapshotUrl = isAdmin
+      ? `/api/admin/combat/snapshot?user_id=${encodeURIComponent(selectedPlayerId)}`
+      : '/api/me/combat/snapshot';
+    const ordersUrl = isAdmin
+      ? `/api/admin/combat/orders?user_id=${encodeURIComponent(selectedPlayerId)}`
+      : '/api/me/combat/orders';
+
+    const [snapshotRes, ordersRes] = await Promise.all([api(snapshotUrl), api(ordersUrl)]);
+    const snapshot = snapshotRes && snapshotRes.ok ? await snapshotRes.json() : null;
+    const orders = ordersRes && ordersRes.ok ? await ordersRes.json() : [];
+    return { snapshot, orders };
+  };
+
+  const render = async () => {
+    view.innerHTML = `<div class="card"><h2>Combat</h2><div class="muted">Loading combat data...</div></div>`;
+    const { snapshot, orders } = await loadData();
+
+    const commanders = snapshot?.commanders || [];
+    const units = snapshot?.units || [];
+    const nationName = String(snapshot?.nation?.name || '-');
+
+    view.innerHTML = `
+      <div class="card">
+        <h2>Combat</h2>
+        <div class="combat-layout">
+          <div>
+            <div class="combat-commanders">
+              <h3 style="margin-top:0;">Commanders</h3>
+              ${renderUnitCards(commanders, { allowNameEdit: !isAdmin, allowStatEdit: isAdmin })}
+            </div>
+            <div>
+              <h3 style="margin-top:0;">Units - ${escapeHtml(nationName)}</h3>
+              <div class="combat-unit-grid">
+                ${renderUnitCards(units, { allowNameEdit: !isAdmin, allowStatEdit: isAdmin })}
+              </div>
+            </div>
+          </div>
+          <div class="combat-orders">
+            <h3 style="margin-top:0;">Orders</h3>
+            ${isAdmin ? `
+              <div class="row" style="margin-bottom:8px;">
+                <label style="min-width:85px;">Player</label>
+                <select id="combatAdminPlayerSelect">
+                  <option value="">- Select Player -</option>
+                  ${adminPlayers.map(p => `<option value="${p.id}" ${String(p.id) === String(selectedPlayerId) ? 'selected' : ''}>${escapeHtml(String(p.name || ('User #' + p.id)))}${p.nation_name ? ' (' + escapeHtml(String(p.nation_name)) + ')' : ''}</option>`).join('')}
+                </select>
+              </div>
+            ` : `
+              <label style="font-size:12px;display:block;">Order Title (optional)</label>
+              <input id="combatOrderTitle" type="text" placeholder="Example: Border Patrol Deployment">
+              <label style="font-size:12px;display:block;margin-top:8px;">Order Text</label>
+              <textarea id="combatOrderBody" rows="6" placeholder="Write your combat orders for admin review..."></textarea>
+              <div class="row" style="margin-top:8px;"><button class="primary" id="submitCombatOrderBtn">Submit Order</button><span class="muted" id="combatOrderMsg"></span></div>
+            `}
+            <div style="margin-top:8px;" id="combatOrdersList">${renderOrders(orders)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (isAdmin) {
+      const select = document.getElementById('combatAdminPlayerSelect');
+      if (select) {
+        select.onchange = async () => {
+          selectedPlayerId = select.value || '';
+          await render();
+        };
+      }
+    }
+
+    document.querySelectorAll('.combatUnitNameSave').forEach((btn) => {
+      btn.onclick = async () => {
+        const unitId = btn.dataset.unitId;
+        const input = document.querySelector(`.combatUnitNameInput[data-unit-id="${unitId}"]`);
+        if (!input) return;
+        btn.disabled = true;
+        const save = await api('/api/me/units/' + encodeURIComponent(unitId) + '/name', {
+          method: 'PATCH',
+          body: JSON.stringify({ custom_name: input.value || '' }),
+        });
+        btn.disabled = false;
+        if (!save || !save.ok) {
+          alert('Unit name save failed.');
+          return;
+        }
+        barkIfEnabled();
+        await render();
+      };
+    });
+
+    document.querySelectorAll('.combatStatEditSave').forEach((btn) => {
+      btn.onclick = async () => {
+        const unitId = btn.dataset.unitId;
+        const input = document.querySelector(`.combatStatEditInput[data-unit-id="${unitId}"]`);
+        if (!input) return;
+        let parsed;
+        try {
+          parsed = JSON.parse(input.value || '{}');
+        } catch {
+          alert('Stats override JSON is invalid.');
+          return;
+        }
+        btn.disabled = true;
+        const save = await api('/api/admin/combat/units/' + encodeURIComponent(unitId) + '/stats', {
+          method: 'PUT',
+          body: JSON.stringify({ stats_override_json: parsed }),
+        });
+        btn.disabled = false;
+        if (!save || !save.ok) {
+          alert('Unit stats save failed.');
+          return;
+        }
+        barkIfEnabled();
+        await render();
+      };
+    });
+
+    document.querySelectorAll('.combatOrderStatusSave').forEach((btn) => {
+      btn.onclick = async () => {
+        const orderId = btn.dataset.orderId;
+        const statusEl = document.querySelector(`.combatOrderStatusSelect[data-order-id="${orderId}"]`);
+        const noteEl = document.querySelector(`.combatOrderReviewNote[data-order-id="${orderId}"]`);
+        if (!statusEl) return;
+
+        btn.disabled = true;
+        const res = await api('/api/admin/combat/orders/' + encodeURIComponent(orderId) + '/status', {
+          method: 'PUT',
+          body: JSON.stringify({
+            order_status: statusEl.value || 'pending',
+            review_note: noteEl ? (noteEl.value || '') : '',
+          }),
+        });
+        btn.disabled = false;
+
+        if (!res || !res.ok) {
+          alert(await readErrorMessage(res, 'Failed to update order status.'));
+          return;
+        }
+
+        barkIfEnabled();
+        await render();
+      };
+    });
+
+    const submitBtn = document.getElementById('submitCombatOrderBtn');
+    if (submitBtn) {
+      submitBtn.onclick = async () => {
+        const title = document.getElementById('combatOrderTitle').value || '';
+        const body = document.getElementById('combatOrderBody').value || '';
+        const msg = document.getElementById('combatOrderMsg');
+        if (!body.trim()) {
+          msg.textContent = 'Order text is required.';
+          return;
+        }
+
+        submitBtn.disabled = true;
+        const res = await api('/api/me/combat/orders', {
+          method: 'POST',
+          body: JSON.stringify({ title, body }),
+        });
+        submitBtn.disabled = false;
+
+        if (!res || !res.ok) {
+          msg.textContent = await readErrorMessage(res, 'Failed to submit order.');
+          return;
+        }
+
+        document.getElementById('combatOrderTitle').value = '';
+        document.getElementById('combatOrderBody').value = '';
+        msg.textContent = 'Order submitted.';
+        barkIfEnabled();
+        await render();
+      };
+    }
+  };
+
+  await render();
 }
 
 async function loadAboutPage() {
@@ -6423,7 +6740,7 @@ async function loadGameInformationRules() {
 
   view.innerHTML = `
     <div class="card">
-      <h2>Game Information and Rules</h2>
+      <h2>Information</h2>
       <div class="doc-toolbar">
         <div>
           <label style="font-size:12px;">Document</label>
@@ -6511,7 +6828,8 @@ async function loadGameInformationRules() {
   }
 
   const renderDocReadView = (content) => {
-    readView.innerHTML = escapeHtml(content || '').replace(/\n/g, '<br>');
+    // Render as plain text so spacing and line breaks match saved content exactly.
+    readView.textContent = String(content || '');
   };
 
   const refreshSelectOptions = (selectedCode = '') => {
@@ -6583,7 +6901,7 @@ async function loadGameInformationRules() {
     text.value = '';
     text.style.display = 'none';
     readView.style.display = 'none';
-    readView.innerHTML = '';
+    readView.textContent = '';
     hint.style.display = 'none';
     msg.textContent = '';
     if (titleInput) {

@@ -41,6 +41,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me/settings', [MeController::class, 'settings']);
     Route::patch('/me/settings', [MeController::class, 'updateSettings']);
     Route::get('/me/units', [MeController::class, 'units']);
+    Route::patch('/me/units/{unitId}/name', [MeController::class, 'updateUnitName']);
+    Route::get('/me/combat/snapshot', [MeController::class, 'combatSnapshot']);
+    Route::get('/me/combat/orders', [MeController::class, 'combatOrders']);
+    Route::post('/me/combat/orders', [MeController::class, 'storeCombatOrder']);
     Route::get('/me/buildings', [MeController::class, 'buildings']);
     Route::get('/me/terrain-square-miles', [MeController::class, 'terrainSquareMiles']);
     Route::get('/players', [MeController::class, 'players']);
@@ -75,6 +79,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('role:admin')->prefix('/admin')->group(function () {
         Route::get('/users', [AdminController::class, 'users']);
         Route::get('/nations', [AdminController::class, 'nations']);
+        Route::get('/combat/snapshot', [AdminController::class, 'combatSnapshot']);
+        Route::get('/combat/orders', [AdminController::class, 'combatOrders']);
+        Route::put('/combat/orders/{notificationId}/status', [AdminController::class, 'updateCombatOrderStatus']);
+        Route::put('/combat/units/{nationUnitId}/stats', [AdminController::class, 'updateCombatUnitStats']);
         Route::post('/users', [AdminController::class, 'createManagedAccount']);
         Route::delete('/users/{userId}', [AdminController::class, 'deleteManagedAccount']);
         Route::post('/nations', [AdminController::class, 'createPlaceholderNation']);

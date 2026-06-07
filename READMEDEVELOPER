@@ -29,6 +29,13 @@ docker compose up -d --build
 
 This repository is already structured so app, nginx, and MySQL images do not depend on Windows-only bind mounts when using an SSH Docker context.
 
+Important: `docker compose down` and `docker compose up -d --build` do not run Laravel migrations automatically in this project. After rebuild/start, run migrations explicitly:
+
+```powershell
+docker compose exec app php artisan migrate --force
+docker compose exec app php artisan migrate:status
+```
+
 ### Run Laravel Migrations On Remote (After Stack Is Already Running)
 
 Use this when the containers are already up on the remote context and you only need to apply new Laravel migrations.
@@ -93,8 +100,9 @@ Recommended old-database refresh process:
 1. Switch to the correct Docker context.
 2. Run the manual upgrade SQL.
 3. Rebuild the app stack.
-4. Clear Laravel caches.
-5. Smoke-test login, Chat, Shop, Map, and Other Nations.
+4. Run Laravel migrations explicitly.
+5. Clear Laravel caches.
+6. Smoke-test login, Chat, Shop, Map, and Other Nations.
 
 Example full refresh from the repository root:
 
@@ -102,6 +110,8 @@ Example full refresh from the repository root:
 docker context use remote
 docker compose exec -T mysql mysql -u root -p$env:MYSQL_ROOT_PASSWORD azveria < database/manual-upgrades/2026_04_12_account_chat_and_terrain.sql
 docker compose up -d --build
+docker compose exec app php artisan migrate --force
+docker compose exec app php artisan migrate:status
 docker compose exec app php artisan config:clear
 docker compose exec app php artisan cache:clear
 ```

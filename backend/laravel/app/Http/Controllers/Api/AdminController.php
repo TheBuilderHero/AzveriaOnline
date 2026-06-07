@@ -915,6 +915,106 @@ class AdminController extends Controller
         return response()->json($query->get());
     }
 
+    public function combatSnapshot(Request $request)
+    {
+        $data = $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,id'],
+        ]);
+
+        $nation = DB::table('nations')
+            ->where('owner_user_id', (int) $data['user_id'])
+            ->first();
+
+        if (!$nation) {
+            return response()->json(['message' => 'Player has no nation assigned'], 404);
+        }
+
+        return response()->json($this->buildCombatSnapshotForNation((int) $nation->id));
+    }
+
+    public function combatOrders(Request $request)
+    {
+        $data = $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,id'],
+        ]);
+
+        $rows = DB::table('admin_notifications')
+            ->where('type', 'combat_order')
+            ->whereRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(meta_json, "$.actor_user_id")) AS UNSIGNED) = ?', [(int) $data['user_id']])
+            ->orderByDesc('created_at')
+            ->limit(300)
+            ->get();
+
+        return response()->json($rows);
+    }
+
+    public function updateCombatOrderStatus(Request $request, int $notificationId)
+    {
+        $data = $request->validate([
+            'order_status' => ['required', 'in:pending,approved,denied'],
+            'review_note' => ['sometimes', 'nullable', 'string', 'max:5000'],
+        ]);
+
+        $row = DB::table('admin_notifications')
+            ->where('id', $notificationId)
+            ->where('type', 'combat_order')
+            ->first();
+
+        if (!$row) {
+            return response()->json(['message' => 'Combat order not found'], 404);
+        }
+
+        DB::table('admin_notifications')->where('id', $notificationId)->update([
+            'order_status' => (string) $data['order_status'],
+            'review_note' => array_key_exists('review_note', $data) ? (string) ($data['review_note'] ?? '') : null,
+            'reviewed_by_user_id' => (int) $request->user()->id,
+            'reviewed_at' => now(),
+        ]);
+
+        return response()->json(['message' => 'Combat order status updated']);
+    }
+
+    public function updateCombatUnitStats(Request $request, int $nationUnitId)
+    {
+        $data = $request->validate([
+            'stats_override_json' => ['required', 'array'],
+        ]);
+
+        $unit = DB::table('nation_units')->where('id', $nationUnitId)->first();
+        if (!$unit) {
+            return response()->json(['message' => 'Nation unit not found'], 404);
+        }
+
+        $normalized = [];
+        foreach ($data['stats_override_json'] as $key => $value) {
+            $statKey = trim((string) $key);
+            if ($statKey === '' || mb_strlen($statKey) > 40) {
+                continue;
+            }
+            if (is_scalar($value) || $value === null) {
+                $normalized[$statKey] = $value;
+            }
+        }
+
+        DB::table('nation_units')->where('id', $nationUnitId)->update([
+            'stats_override_json' => json_encode($normalized),
+            'updated_at' => now(),
+        ]);
+
+        $nation = DB::table('nations')->where('id', (int) $unit->nation_id)->first();
+        $this->createNotification(
+            'combat_unit_update',
+            'Combat Unit Stats Updated',
+            'Admin updated unit stats for nation "' . (string) ($nation->name ?? ('#' . $unit->nation_id)) . '" (unit #' . $nationUnitId . ').',
+            [
+                'nation_id' => (int) $unit->nation_id,
+                'nation_unit_id' => $nationUnitId,
+            ]
+        );
+
+        return response()->json(['message' => 'Unit stats updated']);
+    }
+
     public function resourceTopbarConfig()
     {
         $available = $this->availableTopbarResources();
@@ -1951,6 +2051,115 @@ class AdminController extends Controller
         }
 
         return $out;
+    }
+
+    private function buildCombatSnapshotForNation(int $nationId): array
+    {
+        $nation = DB::table('nations')
+            ->where('id', $nationId)
+            ->select('id', 'name', 'leader_name', 'alliance_name')
+            ->first();
+
+        $rows = DB::table('nation_units as nu')
+            ->leftJoin('unit_catalog as uc', 'nu.unit_catalog_id', '=', 'uc.id')
+            ->where('nu.nation_id', $nationId)
+            ->select(
+                'nu.id',
+                'nu.nation_id',
+                'nu.unit_catalog_id',
+                'nu.custom_name',
+                'nu.qty',
+                'nu.status',
+                'nu.training_ready_at',
+                'nu.stats_override_json',
+                'uc.code',
+                'uc.display_name',
+                'uc.class_name',
+                'uc.is_commander',
+                'uc.base_stats_json'
+            )
+            ->orderByDesc('nu.status')
+            ->orderBy('uc.display_name')
+            ->get();
+
+        $commanders = [];
+        $units = [];
+
+        foreach ($rows as $row) {
+            $baseStats = json_decode((string) ($row->base_stats_json ?? '{}'), true);
+            $baseStats = is_array($baseStats) ? $baseStats : [];
+
+            $overrideStats = json_decode((string) ($row->stats_override_json ?? '{}'), true);
+            $overrideStats = is_array($overrideStats) ? $overrideStats : [];
+
+            $effectiveStats = array_merge($baseStats, $overrideStats);
+            $rating = $this->calculateCombatRating($effectiveStats);
+
+            $unit = [
+                'id' => (int) $row->id,
+                'nation_id' => (int) $row->nation_id,
+                'unit_catalog_id' => $row->unit_catalog_id !== null ? (int) $row->unit_catalog_id : null,
+                'code' => (string) ($row->code ?? ''),
+                'display_name' => (string) ($row->display_name ?? 'Unit'),
+                'custom_name' => $row->custom_name,
+                'class_name' => (string) ($row->class_name ?? ''),
+                'is_commander' => (bool) ($row->is_commander ?? false),
+                'qty' => (int) ($row->qty ?? 0),
+                'status' => (string) ($row->status ?? 'owned'),
+                'training_ready_at' => $row->training_ready_at,
+                'base_stats' => $baseStats,
+                'stats_override' => $overrideStats,
+                'effective_stats' => $effectiveStats,
+                'rating' => $rating,
+            ];
+
+            if ($this->isCommanderUnit($unit)) {
+                $commanders[] = $unit;
+            } else {
+                $units[] = $unit;
+            }
+        }
+
+        return [
+            'nation' => $nation,
+            'commanders' => $commanders,
+            'units' => $units,
+        ];
+    }
+
+    private function isCommanderUnit(array $unit): bool
+    {
+        if (!empty($unit['is_commander'])) {
+            return true;
+        }
+
+        $className = strtolower(trim((string) ($unit['class_name'] ?? '')));
+        $displayName = strtolower(trim((string) ($unit['display_name'] ?? '')));
+        $customName = strtolower(trim((string) ($unit['custom_name'] ?? '')));
+
+        return str_contains($className, 'commander')
+            || str_contains($displayName, 'commander')
+            || str_contains($customName, 'commander');
+    }
+
+    private function calculateCombatRating(array $stats): float
+    {
+        foreach (['rating', 'RATING', 'Rating'] as $key) {
+            if (array_key_exists($key, $stats) && is_numeric($stats[$key])) {
+                return round((float) $stats[$key], 2);
+            }
+        }
+
+        $atk = is_numeric($stats['ATK'] ?? null) ? (float) $stats['ATK'] : 0.0;
+        $def = is_numeric($stats['DEF'] ?? null) ? (float) $stats['DEF'] : 0.0;
+        $dmg = is_numeric($stats['DMG'] ?? null) ? (float) $stats['DMG'] : 0.0;
+        $hp = is_numeric($stats['HP'] ?? null) ? (float) $stats['HP'] : 0.0;
+        $mvt = is_numeric($stats['MVT'] ?? null) ? (float) $stats['MVT'] : 0.0;
+        $rng = is_numeric($stats['RNG'] ?? null) ? (float) $stats['RNG'] : 0.0;
+        $act = is_numeric($stats['ACT'] ?? null) ? (float) $stats['ACT'] : 0.0;
+
+        $score = ($atk * 2.0) + ($def * 1.5) + ($dmg * 3.0) + ($hp * 2.0) + ($mvt * 1.0) + ($rng * 1.0) + ($act * 1.0);
+        return round($score / 10.0, 2);
     }
 
     private function createNotification(string $type, string $title, string $body, array $meta = []): void

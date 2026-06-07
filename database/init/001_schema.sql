@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS unit_catalog (
   code VARCHAR(64) NOT NULL UNIQUE,
   display_name VARCHAR(160) NOT NULL,
   class_name VARCHAR(64) NOT NULL,
+  is_commander TINYINT(1) NOT NULL DEFAULT 0,
   base_stats_json JSON NOT NULL,
   upkeep_json JSON NULL,
   unlocked_by_structure VARCHAR(64) NULL,
@@ -194,11 +195,15 @@ CREATE TABLE IF NOT EXISTS nation_assets (
 CREATE TABLE IF NOT EXISTS admin_notifications (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   type VARCHAR(64) NOT NULL,
+  order_status VARCHAR(32) NULL,
   title VARCHAR(255) NOT NULL,
   body TEXT NOT NULL,
   meta_json JSON NULL,
   is_read TINYINT(1) NOT NULL DEFAULT 0,
   read_at TIMESTAMP NULL,
+  reviewed_by_user_id BIGINT UNSIGNED NULL,
+  reviewed_at TIMESTAMP NULL,
+  review_note TEXT NULL,
   created_at TIMESTAMP NULL
 );
 

@@ -46,6 +46,7 @@ return new class extends Migration
             $table->string('code')->unique();
             $table->string('display_name');
             $table->string('class_name');
+            $table->boolean('is_commander')->default(false);
             $table->json('base_stats_json');
             $table->json('upkeep_json')->nullable();
             $table->string('unlocked_by_structure')->nullable();

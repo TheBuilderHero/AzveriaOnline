@@ -331,6 +331,95 @@ class MeController extends Controller
         return response()->json($query->get());
     }
 
+    public function updateUnitName(Request $request, int $unitId)
+    {
+        $nation = $this->findNation((int) $request->user()->id);
+        if (!$nation) {
+            return response()->json(['message' => 'No nation assigned'], 404);
+        }
+
+        $data = $request->validate([
+            'custom_name' => ['sometimes', 'nullable', 'string', 'max:120'],
+        ]);
+
+        $unit = DB::table('nation_units')
+            ->where('id', $unitId)
+            ->where('nation_id', (int) $nation->id)
+            ->first();
+
+        if (!$unit) {
+            return response()->json(['message' => 'Unit not found'], 404);
+        }
+
+        DB::table('nation_units')->where('id', $unitId)->update([
+            'custom_name' => array_key_exists('custom_name', $data)
+                ? trim((string) ($data['custom_name'] ?? ''))
+                : $unit->custom_name,
+            'updated_at' => now(),
+        ]);
+
+        return response()->json(['message' => 'Unit name saved']);
+    }
+
+    public function combatSnapshot(Request $request)
+    {
+        $nation = $this->findNation((int) $request->user()->id);
+        if (!$nation) {
+            return response()->json(['message' => 'No nation assigned'], 404);
+        }
+
+        return response()->json($this->buildCombatSnapshotForNation((int) $nation->id));
+    }
+
+    public function combatOrders(Request $request)
+    {
+        $actorUserId = (int) $request->user()->id;
+
+        $rows = DB::table('admin_notifications')
+            ->where('type', 'combat_order')
+            ->whereRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(meta_json, "$.actor_user_id")) AS UNSIGNED) = ?', [$actorUserId])
+            ->orderByDesc('created_at')
+            ->limit(200)
+            ->get();
+
+        return response()->json($rows);
+    }
+
+    public function storeCombatOrder(Request $request)
+    {
+        $nation = $this->findNation((int) $request->user()->id);
+        if (!$nation) {
+            return response()->json(['message' => 'No nation assigned'], 404);
+        }
+
+        $data = $request->validate([
+            'title' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'body' => ['required', 'string', 'max:10000'],
+        ]);
+
+        $body = (string) $data['body'];
+        $title = trim((string) ($data['title'] ?? ''));
+        if ($title === '') {
+            $title = 'Combat Order: ' . (string) ($nation->name ?? ('Nation #' . $nation->id));
+        }
+
+        DB::table('admin_notifications')->insert([
+            'type' => 'combat_order',
+            'order_status' => 'pending',
+            'title' => $title,
+            'body' => $body,
+            'meta_json' => json_encode([
+                'actor_user_id' => (int) $request->user()->id,
+                'actor_name' => (string) ($request->user()->name ?? ''),
+                'nation_id' => (int) $nation->id,
+            ]),
+            'is_read' => 0,
+            'created_at' => now(),
+        ]);
+
+        return response()->json(['message' => 'Order submitted']);
+    }
+
     public function buildings(Request $request)
     {
         $nation = $this->findNation($request->user()->id);
@@ -538,6 +627,115 @@ class MeController extends Controller
     private function findNation(int $userId): ?object
     {
         return DB::table('nations')->where('owner_user_id', $userId)->first();
+    }
+
+    private function buildCombatSnapshotForNation(int $nationId): array
+    {
+        $nation = DB::table('nations')
+            ->where('id', $nationId)
+            ->select('id', 'name', 'leader_name', 'alliance_name')
+            ->first();
+
+        $rows = DB::table('nation_units as nu')
+            ->leftJoin('unit_catalog as uc', 'nu.unit_catalog_id', '=', 'uc.id')
+            ->where('nu.nation_id', $nationId)
+            ->select(
+                'nu.id',
+                'nu.nation_id',
+                'nu.unit_catalog_id',
+                'nu.custom_name',
+                'nu.qty',
+                'nu.status',
+                'nu.training_ready_at',
+                'nu.stats_override_json',
+                'uc.code',
+                'uc.display_name',
+                'uc.class_name',
+                'uc.is_commander',
+                'uc.base_stats_json'
+            )
+            ->orderByDesc('nu.status')
+            ->orderBy('uc.display_name')
+            ->get();
+
+        $commanders = [];
+        $units = [];
+
+        foreach ($rows as $row) {
+            $baseStats = json_decode((string) ($row->base_stats_json ?? '{}'), true);
+            $baseStats = is_array($baseStats) ? $baseStats : [];
+
+            $overrideStats = json_decode((string) ($row->stats_override_json ?? '{}'), true);
+            $overrideStats = is_array($overrideStats) ? $overrideStats : [];
+
+            $effectiveStats = array_merge($baseStats, $overrideStats);
+            $rating = $this->calculateCombatRating($effectiveStats);
+
+            $unit = [
+                'id' => (int) $row->id,
+                'nation_id' => (int) $row->nation_id,
+                'unit_catalog_id' => $row->unit_catalog_id !== null ? (int) $row->unit_catalog_id : null,
+                'code' => (string) ($row->code ?? ''),
+                'display_name' => (string) ($row->display_name ?? 'Unit'),
+                'custom_name' => $row->custom_name,
+                'class_name' => (string) ($row->class_name ?? ''),
+                'is_commander' => (bool) ($row->is_commander ?? false),
+                'qty' => (int) ($row->qty ?? 0),
+                'status' => (string) ($row->status ?? 'owned'),
+                'training_ready_at' => $row->training_ready_at,
+                'base_stats' => $baseStats,
+                'stats_override' => $overrideStats,
+                'effective_stats' => $effectiveStats,
+                'rating' => $rating,
+            ];
+
+            if ($this->isCommanderUnit($unit)) {
+                $commanders[] = $unit;
+            } else {
+                $units[] = $unit;
+            }
+        }
+
+        return [
+            'nation' => $nation,
+            'commanders' => $commanders,
+            'units' => $units,
+        ];
+    }
+
+    private function isCommanderUnit(array $unit): bool
+    {
+        if (!empty($unit['is_commander'])) {
+            return true;
+        }
+
+        $className = strtolower(trim((string) ($unit['class_name'] ?? '')));
+        $displayName = strtolower(trim((string) ($unit['display_name'] ?? '')));
+        $customName = strtolower(trim((string) ($unit['custom_name'] ?? '')));
+
+        return str_contains($className, 'commander')
+            || str_contains($displayName, 'commander')
+            || str_contains($customName, 'commander');
+    }
+
+    private function calculateCombatRating(array $stats): float
+    {
+        foreach (['rating', 'RATING', 'Rating'] as $key) {
+            if (array_key_exists($key, $stats) && is_numeric($stats[$key])) {
+                return round((float) $stats[$key], 2);
+            }
+        }
+
+        $atk = is_numeric($stats['ATK'] ?? null) ? (float) $stats['ATK'] : 0.0;
+        $def = is_numeric($stats['DEF'] ?? null) ? (float) $stats['DEF'] : 0.0;
+        $dmg = is_numeric($stats['DMG'] ?? null) ? (float) $stats['DMG'] : 0.0;
+        $hp = is_numeric($stats['HP'] ?? null) ? (float) $stats['HP'] : 0.0;
+        $mvt = is_numeric($stats['MVT'] ?? null) ? (float) $stats['MVT'] : 0.0;
+        $rng = is_numeric($stats['RNG'] ?? null) ? (float) $stats['RNG'] : 0.0;
+        $act = is_numeric($stats['ACT'] ?? null) ? (float) $stats['ACT'] : 0.0;
+
+        $score = ($atk * 2.0) + ($def * 1.5) + ($dmg * 3.0) + ($hp * 2.0) + ($mvt * 1.0) + ($rng * 1.0) + ($act * 1.0);
+        return round($score / 10.0, 2);
     }
 
     private function accumulateProjection(array &$bucket, string $key, float $value): void
