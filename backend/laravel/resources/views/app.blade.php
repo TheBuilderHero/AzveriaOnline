@@ -3059,6 +3059,38 @@ async function loadMap() {
   };
 
   const computeLabels = () => {
+    const findNearestOwnerPixel = (owner, targetX, targetY, maxRadius = 220) => {
+      const cx = clamp(Math.round(targetX), 0, mapWidth - 1);
+      const cy = clamp(Math.round(targetY), 0, mapHeight - 1);
+
+      const centerIndex = idx(cx, cy);
+      if (ownerGrid[centerIndex] === owner) {
+        return { x: cx, y: cy };
+      }
+
+      for (let r = 1; r <= maxRadius; r++) {
+        const minX = Math.max(0, cx - r);
+        const maxX = Math.min(mapWidth - 1, cx + r);
+        const minY = Math.max(0, cy - r);
+        const maxY = Math.min(mapHeight - 1, cy + r);
+
+        for (let x = minX; x <= maxX; x++) {
+          const topI = idx(x, minY);
+          if (ownerGrid[topI] === owner) return { x, y: minY };
+          const bottomI = idx(x, maxY);
+          if (ownerGrid[bottomI] === owner) return { x, y: maxY };
+        }
+        for (let y = minY + 1; y < maxY; y++) {
+          const leftI = idx(minX, y);
+          if (ownerGrid[leftI] === owner) return { x: minX, y };
+          const rightI = idx(maxX, y);
+          if (ownerGrid[rightI] === owner) return { x: maxX, y };
+        }
+      }
+
+      return null;
+    };
+
     const visited = new Uint8Array(ownerGrid.length);
     const labels = [];
     for (let i = 0; i < ownerGrid.length; i++) {
@@ -3088,7 +3120,23 @@ async function loadMap() {
       const meta = getNationById(owner);
       const full = meta?.name || `Nation ${owner}`;
       const name = count < full.length * 70 ? firstLetterName(full) : full;
-      labels.push({ owner, x: sumX / count, y: sumY / count, size: count, name });
+
+      const centroidX = sumX / count;
+      const centroidY = sumY / count;
+      const ownerAnchor = findNearestOwnerPixel(owner, centroidX, centroidY) || {
+        x: centroidX,
+        y: centroidY,
+      };
+
+      labels.push({
+        owner,
+        x: centroidX,
+        y: centroidY,
+        anchorX: ownerAnchor.x,
+        anchorY: ownerAnchor.y,
+        size: count,
+        name,
+      });
     }
     labelCache = labels;
   };
@@ -3112,8 +3160,10 @@ async function loadMap() {
     ctx.textBaseline = 'middle';
 
     labels.forEach((label, i) => {
-      const anchorX = transform.originX + (label.x * transform.scale);
-      const anchorY = transform.originY + (label.y * transform.scale);
+      const wx = toFiniteNumber(label.anchorX, label.x);
+      const wy = toFiniteNumber(label.anchorY, label.y);
+      const anchorX = transform.originX + (wx * transform.scale);
+      const anchorY = transform.originY + (wy * transform.scale);
       if (anchorX < -140 || anchorY < -120 || anchorX > viewW + 140 || anchorY > viewH + 120) {
         return;
       }
@@ -3151,10 +3201,18 @@ async function loadMap() {
         bottom: cy + (textHeight / 2) + pad,
       });
 
+      const candidateIsOnOwnerLand = (cx, cy) => {
+        const worldX = Math.floor((cx - transform.originX) / transform.scale);
+        const worldY = Math.floor((cy - transform.originY) / transform.scale);
+        if (!inBounds(worldX, worldY)) return false;
+        return ownerGrid[idx(worldX, worldY)] === label.owner;
+      };
+
       let chosen = null;
       for (const candidate of candidates) {
         const cx = anchorX + candidate.dx;
         const cy = anchorY + candidate.dy;
+        if (!candidateIsOnOwnerLand(cx, cy)) continue;
         const box = buildBox(cx, cy);
         if (occupies.some(used => intersects(box, used))) continue;
         chosen = { cx, cy, box };
@@ -3162,11 +3220,12 @@ async function loadMap() {
       }
 
       if (!chosen) {
-        for (let ring = 1; ring <= 10 && !chosen; ring++) {
+        for (let ring = 1; ring <= 4 && !chosen; ring++) {
           const sidePref = (i % 2 === 0) ? [1, -1] : [-1, 1];
           for (const side of sidePref) {
             const cx = anchorX + (side * (stepX * (0.5 + ring * 0.45)));
             const cy = anchorY + (((ring % 2 === 0) ? 1 : -1) * Math.ceil(ring / 2) * stepY);
+            if (!candidateIsOnOwnerLand(cx, cy)) continue;
             const box = buildBox(cx, cy);
             if (occupies.some(used => intersects(box, used))) continue;
             chosen = { cx, cy, box };
@@ -3184,7 +3243,7 @@ async function loadMap() {
       occupies.push(chosen.box);
 
       const leaderDist = Math.hypot(chosen.cx - anchorX, chosen.cy - anchorY);
-      if (leaderDist > 8) {
+      if (leaderDist > 8 && leaderDist <= 90) {
         ctx.lineWidth = 1.5;
         ctx.strokeStyle = 'rgba(0,0,0,0.45)';
         ctx.beginPath();
