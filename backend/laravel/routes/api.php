@@ -99,6 +99,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/time-tracker', [AdminController::class, 'timeTracker']);
         Route::patch('/time-tracker', [AdminController::class, 'updateTimeTracker']);
         Route::post('/time-tracker/next-year', [AdminController::class, 'advanceYear']);
+        Route::post('/time-tracker/pause', [AdminController::class, 'pauseTimeTracker']);
+        Route::post('/time-tracker/resume', [AdminController::class, 'resumeTimeTracker']);
+        Route::get('/time-tracker/pause-history', [AdminController::class, 'timeTrackerPauseHistory']);
         Route::get('/notifications', [AdminController::class, 'notifications']);
         Route::delete('/notifications/{notificationId}', [AdminController::class, 'deleteNotification']);
         Route::get('/resource-topbar-config', [AdminController::class, 'resourceTopbarConfig']);

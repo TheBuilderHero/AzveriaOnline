@@ -128,6 +128,51 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+SET @has_is_paused := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'game_time'
+    AND COLUMN_NAME = 'is_paused'
+);
+SET @sql := IF(
+  @has_is_paused = 0,
+  'ALTER TABLE game_time ADD COLUMN is_paused TINYINT(1) NOT NULL DEFAULT 0 AFTER auto_increment_enabled',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_paused_at := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'game_time'
+    AND COLUMN_NAME = 'paused_at'
+);
+SET @sql := IF(
+  @has_paused_at = 0,
+  'ALTER TABLE game_time ADD COLUMN paused_at TIMESTAMP NULL AFTER is_paused',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+CREATE TABLE IF NOT EXISTS game_time_pause_history (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  paused_at TIMESTAMP NOT NULL,
+  resumed_at TIMESTAMP NULL,
+  paused_by_user_id BIGINT UNSIGNED NULL,
+  resumed_by_user_id BIGINT UNSIGNED NULL,
+  pause_note TEXT NULL,
+  created_at TIMESTAMP NULL,
+  updated_at TIMESTAMP NULL,
+  CONSTRAINT fk_game_time_pause_history_paused_by FOREIGN KEY (paused_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_game_time_pause_history_resumed_by FOREIGN KEY (resumed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
 SET @has_is_commander := (
   SELECT COUNT(*)
   FROM information_schema.COLUMNS

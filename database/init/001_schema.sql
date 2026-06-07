@@ -215,8 +215,23 @@ CREATE TABLE IF NOT EXISTS game_time (
   processed_years INT UNSIGNED NOT NULL DEFAULT 0,
   elapsed_hours_in_year DECIMAL(10,2) NOT NULL DEFAULT 0,
   auto_increment_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  is_paused TINYINT(1) NOT NULL DEFAULT 0,
+  paused_at TIMESTAMP NULL,
   year_label_offset INT NOT NULL DEFAULT 0,
   updated_at TIMESTAMP NULL
+);
+
+CREATE TABLE IF NOT EXISTS game_time_pause_history (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  paused_at TIMESTAMP NOT NULL,
+  resumed_at TIMESTAMP NULL,
+  paused_by_user_id BIGINT UNSIGNED NULL,
+  resumed_by_user_id BIGINT UNSIGNED NULL,
+  pause_note TEXT NULL,
+  created_at TIMESTAMP NULL,
+  updated_at TIMESTAMP NULL,
+  CONSTRAINT fk_game_time_pause_history_paused_by FOREIGN KEY (paused_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_game_time_pause_history_resumed_by FOREIGN KEY (resumed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_settings (
@@ -264,8 +279,8 @@ INSERT INTO map_layers (layer_type, image_path, updated_at) VALUES
   ('political', 'maps/political-map.png', NOW())
 ON DUPLICATE KEY UPDATE image_path = VALUES(image_path), updated_at = VALUES(updated_at);
 
-INSERT INTO game_time (id, started_at, year_started_at, seconds_per_year, processed_years, elapsed_hours_in_year, auto_increment_enabled, year_label_offset, updated_at) VALUES
-  (1, NOW(), NOW(), 172800, 0, 0, 1, 0, NOW())
+INSERT INTO game_time (id, started_at, year_started_at, seconds_per_year, processed_years, elapsed_hours_in_year, auto_increment_enabled, is_paused, paused_at, year_label_offset, updated_at) VALUES
+  (1, NOW(), NOW(), 172800, 0, 0, 1, 0, NULL, 0, NOW())
 ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at);
 
 INSERT INTO game_documents (code, title, content_text, updated_at) VALUES

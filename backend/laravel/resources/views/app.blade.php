@@ -7105,8 +7105,23 @@ async function loadGameInformationRules() {
 }
 
 async function loadTimeTracker() {
-  const res = await api('/api/admin/time-tracker');
+  const [res, historyRes] = await Promise.all([
+    api('/api/admin/time-tracker'),
+    api('/api/admin/time-tracker/pause-history'),
+  ]);
   const d = await res.json();
+  const pauseHistory = historyRes && historyRes.ok ? await historyRes.json() : [];
+
+  const historyRows = Array.isArray(pauseHistory) && pauseHistory.length
+    ? pauseHistory.map((row) => {
+      const pausedBy = row.paused_by_name || (row.paused_by_user_id ? `User #${row.paused_by_user_id}` : '-');
+      const resumedBy = row.resumed_by_name || (row.resumed_by_user_id ? `User #${row.resumed_by_user_id}` : '-');
+      const status = row.resumed_at ? 'Resumed' : 'Paused';
+      return `<div class="res-kv"><span>${status}: ${row.paused_at || '-'}</span><span>${row.resumed_at || 'Active Pause'}</span></div>
+        <div class="map-small-label" style="margin:-4px 0 6px 0;">By: ${escapeHtml(String(pausedBy))}${row.resumed_at ? ` | Resumed By: ${escapeHtml(String(resumedBy))}` : ''}${row.pause_note ? ` | Note: ${escapeHtml(String(row.pause_note))}` : ''}</div>`;
+    }).join('')
+    : '<div class="muted">No pause history yet.</div>';
+
   view.innerHTML = `
     <div class="card">
       <h2>Time Tracker</h2>
@@ -7114,10 +7129,20 @@ async function loadTimeTracker() {
         <div><strong>Started:</strong> ${d.started_at}</div>
         <div><strong>Current Game Year:</strong> ${d.current_game_year}</div>
         <div><strong>Elapsed Hours This Year:</strong> ${d.elapsed_hours_in_year} / ${Number(d.hours_per_year || 0).toFixed(2)} hours</div>
+        <div><strong>Status:</strong> ${d.is_paused ? 'Paused' : 'In Progress'}</div>
+        <div><strong>Paused At:</strong> ${d.paused_at || '-'}</div>
         <div><strong>Seconds Per In-Game Year:</strong> ${d.seconds_per_year}</div>
         <div><strong>Processed Years:</strong> ${d.processed_years}</div>
         <div><strong>Processed This Load:</strong> ${d.processed_now}</div>
         <div class="muted" style="margin-top:8px;">Auto increment uses real time. Manual mode lets admins advance years explicitly.</div>
+        <details style="margin-top:8px;">
+          <summary>Pause History</summary>
+          <div style="margin-top:6px;">${historyRows}</div>
+        </details>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <label style="min-width:220px;">Pause Note (optional)</label>
+        <input id="ttPauseNote" type="text" placeholder="Example: Weekend freeze during event setup">
       </div>
       <div class="row">
         <label style="min-width:220px;">Auto Increment Time</label>
@@ -7140,6 +7165,8 @@ async function loadTimeTracker() {
       </div>
       <div class="row">
         <button class="primary" id="ttSave">Save Time Settings</button>
+        <button class="primary" id="ttPause" style="background:#8a5a1a;" ${d.is_paused ? 'disabled' : ''}>Pause Tracker</button>
+        <button class="primary" id="ttResume" style="background:#2f6a41;" ${d.is_paused ? '' : 'disabled'}>Resume Tracker</button>
         <button class="primary" id="ttNextYear" style="background:#314f72;">Next Year</button>
         <button class="primary" id="ttSkipYear" style="background:#676767;">Skip Year (No Effects)</button>
         <span class="muted" id="ttMsg"></span>
@@ -7171,6 +7198,21 @@ async function loadTimeTracker() {
     if (!window.confirm('Advance to the next year and apply income/maintenance once?')) return;
     const r = await api('/api/admin/time-tracker/next-year', { method: 'POST', body: JSON.stringify({ apply_effects: true }) });
     document.getElementById('ttMsg').textContent = r.ok ? 'Year advanced' : 'Failed';
+    if (r.ok) loadTimeTracker();
+    barkIfEnabled();
+  };
+
+  document.getElementById('ttPause').onclick = async () => {
+    const pauseNote = document.getElementById('ttPauseNote').value || '';
+    const r = await api('/api/admin/time-tracker/pause', { method: 'POST', body: JSON.stringify({ pause_note: pauseNote }) });
+    document.getElementById('ttMsg').textContent = r.ok ? 'Tracker paused' : await readErrorMessage(r, 'Pause failed');
+    if (r.ok) loadTimeTracker();
+    barkIfEnabled();
+  };
+
+  document.getElementById('ttResume').onclick = async () => {
+    const r = await api('/api/admin/time-tracker/resume', { method: 'POST' });
+    document.getElementById('ttMsg').textContent = r.ok ? 'Tracker resumed' : await readErrorMessage(r, 'Resume failed');
     if (r.ok) loadTimeTracker();
     barkIfEnabled();
   };

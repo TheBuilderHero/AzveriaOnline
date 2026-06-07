@@ -1686,6 +1686,8 @@ class AdminController extends Controller
             'hours_per_year' => $hoursPerYear,
             'elapsed_hours_in_year' => round($elapsedHours, 2),
             'auto_increment_enabled' => (bool) $state->auto_increment_enabled,
+            'is_paused' => (bool) ($state->is_paused ?? 0),
+            'paused_at' => $state->paused_at,
             'year_label_offset' => (int) ($state->year_label_offset ?? 0),
             'processed_years' => (int) $state->processed_years,
             'current_game_year' => $currentGameYear,
@@ -1749,6 +1751,8 @@ class AdminController extends Controller
             'seconds_per_year' => $secondsPerYear,
             'elapsed_hours_in_year' => $elapsedHours,
             'auto_increment_enabled' => $autoIncrementEnabled,
+            'is_paused' => (int) ($state->is_paused ?? 0),
+            'paused_at' => $state->paused_at,
             'year_started_at' => $yearStartedAt,
             'year_label_offset' => $yearOffset,
             'updated_at' => now(),
@@ -1779,6 +1783,90 @@ class AdminController extends Controller
         return response()->json(['message' => 'Year advanced', 'apply_effects' => $applyEffects]);
     }
 
+    public function pauseTimeTracker(Request $request)
+    {
+        $data = $request->validate([
+            'pause_note' => ['sometimes', 'nullable', 'string', 'max:5000'],
+        ]);
+
+        $this->syncTimeProgress();
+        $state = $this->getGameTimeState();
+        if ((bool) ($state->is_paused ?? false)) {
+            return response()->json(['message' => 'Time tracker is already paused']);
+        }
+
+        $now = now();
+        DB::table('game_time')->where('id', 1)->update([
+            'is_paused' => 1,
+            'paused_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        DB::table('game_time_pause_history')->insert([
+            'paused_at' => $now,
+            'resumed_at' => null,
+            'paused_by_user_id' => (int) $request->user()->id,
+            'resumed_by_user_id' => null,
+            'pause_note' => array_key_exists('pause_note', $data) ? (string) ($data['pause_note'] ?? '') : null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return $this->timeTracker();
+    }
+
+    public function resumeTimeTracker(Request $request)
+    {
+        $state = $this->getGameTimeState();
+        if (!(bool) ($state->is_paused ?? false)) {
+            return response()->json(['message' => 'Time tracker is not paused']);
+        }
+
+        $now = now();
+        DB::table('game_time')->where('id', 1)->update([
+            'is_paused' => 0,
+            'paused_at' => null,
+            'year_started_at' => $now->subSeconds((int) round((float) ($state->elapsed_hours_in_year ?? 0) * 3600)),
+            'updated_at' => now(),
+        ]);
+
+        $openPause = DB::table('game_time_pause_history')
+            ->whereNull('resumed_at')
+            ->orderByDesc('id')
+            ->first();
+        if ($openPause) {
+            DB::table('game_time_pause_history')->where('id', $openPause->id)->update([
+                'resumed_at' => now(),
+                'resumed_by_user_id' => (int) $request->user()->id,
+                'updated_at' => now(),
+            ]);
+        }
+
+        return $this->timeTracker();
+    }
+
+    public function timeTrackerPauseHistory()
+    {
+        $rows = DB::table('game_time_pause_history as h')
+            ->leftJoin('users as up', 'up.id', '=', 'h.paused_by_user_id')
+            ->leftJoin('users as ur', 'ur.id', '=', 'h.resumed_by_user_id')
+            ->select(
+                'h.id',
+                'h.paused_at',
+                'h.resumed_at',
+                'h.pause_note',
+                'h.paused_by_user_id',
+                'h.resumed_by_user_id',
+                'up.name as paused_by_name',
+                'ur.name as resumed_by_name'
+            )
+            ->orderByDesc('h.paused_at')
+            ->limit(200)
+            ->get();
+
+        return response()->json($rows);
+    }
+
     private function getGameTimeState(): object
     {
         $state = DB::table('game_time')->where('id', 1)->first();
@@ -1794,6 +1882,8 @@ class AdminController extends Controller
             'processed_years' => 0,
             'elapsed_hours_in_year' => 0,
             'auto_increment_enabled' => 1,
+            'is_paused' => 0,
+            'paused_at' => null,
             'year_label_offset' => 0,
             'updated_at' => now(),
         ]);
@@ -1804,6 +1894,9 @@ class AdminController extends Controller
     private function syncTimeProgress(): int
     {
         $state = $this->getGameTimeState();
+        if ((bool) ($state->is_paused ?? false)) {
+            return 0;
+        }
         if (!(int) $state->auto_increment_enabled) {
             return 0;
         }
