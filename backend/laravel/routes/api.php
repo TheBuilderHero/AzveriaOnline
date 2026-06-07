@@ -83,6 +83,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/combat/orders', [AdminController::class, 'combatOrders']);
         Route::put('/combat/orders/{notificationId}/status', [AdminController::class, 'updateCombatOrderStatus']);
         Route::put('/combat/units/{nationUnitId}/stats', [AdminController::class, 'updateCombatUnitStats']);
+        Route::get('/combat/rating-config', [AdminController::class, 'combatRatingConfig']);
+        Route::put('/combat/rating-config', [AdminController::class, 'updateCombatRatingConfig']);
         Route::post('/users', [AdminController::class, 'createManagedAccount']);
         Route::delete('/users/{userId}', [AdminController::class, 'deleteManagedAccount']);
         Route::post('/nations', [AdminController::class, 'createPlaceholderNation']);

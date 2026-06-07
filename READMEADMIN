@@ -31,6 +31,186 @@ This document defines admin-only behavior in the Azveria Online web app.
 - Add/remove members in group chats.
 - Direct message any player.
 
+### Combat (Battle Tab)
+- View a full combat snapshot for any player nation.
+- Select target player from the admin player dropdown in the Orders panel.
+- See commanders and all units with:
+	- Base unit name
+	- Separate row/card for each owned unit instance (no grouped shared stats)
+	- Editable custom name
+	- Editable class/status/race/terrain
+	- Effective statline (ATK, DEF, DMG, HP, MVT, RNG, ACT)
+	- Unit rating
+	- Admin note per unit instance
+	- Army rating breakdown math
+- View and moderate submitted combat orders from players.
+
+#### Quick Reference
+| Goal | Where | Action | Result |
+|---|---|---|---|
+| Review a player's battle setup | Combat -> Orders panel | Select player from dropdown | Commanders, units, ratings, and orders load for that player |
+| Edit unit combat identity | Unit card -> edit fields | Update name/class/status/race/terrain, then Save Unit | Unit override metadata updates immediately |
+| Edit core stats | Unit card -> stat fields | Change ATK/DEF/DMG/HP/MVT/RNG/ACT, then Save Unit | Effective stats and computed rating refresh |
+| Add per-unit admin notes | Unit card -> Admin Note | Enter notes and Save Unit | Note is saved to that specific unit instance only |
+| Force a specific unit rating | Unit card -> Rating | Enter explicit rating, then Save Unit | Final rating uses override instead of formula |
+| Return to formula-driven rating | Unit card -> Rating | Clear Rating field, then Save Unit | Final rating reverts to formula output |
+| Rebalance globally | Combat -> Rating Formula | Adjust coefficients/divisor and Save Formula | All non-overridden unit ratings recalculate |
+| Verify rating math | Unit card -> Army Rating Breakdown | Expand breakdown details | See inputs, weights, components, score, divisor, and final rating source |
+| Moderate battle orders | Orders list | Set pending/approved/denied and add note | Player order status and review note are persisted |
+| Control intel sharing | All Nations -> Nation Visibility Matrix | Toggle Army Rating visibility per viewer/subject | Army rating shown or hidden in Other Nations |
+
+#### Combat Snapshot Panels
+- **Commanders panel**:
+	- Contains all units flagged as commander from unit catalog metadata.
+	- Shows total army rating for the selected nation at the top.
+- **Units panel**:
+	- Shows the same data model as commanders, for non-commander units.
+	- Cards are expandable to inspect stats and breakdown details.
+- **Orders panel**:
+	- Admin player selector
+	- Combat order queue with review controls
+- **Rating Formula section**:
+	- Dedicated admin formula editor (separate from Orders)
+	- Help bubble with field-by-field meanings and formula flow
+
+#### Direct Admin Unit Editing
+Admin can edit unit data inline and save per unit with **Save Unit**.
+
+Editable fields:
+- `Unit Name` (custom name)
+- `Class`
+- `Status`
+- `Race`
+- `Terrain`
+- `ATK`, `DEF`, `DMG`, `HP`, `MVT`, `RNG`, `ACT`
+- `Rating` (optional explicit override)
+- `Admin Note` (private per-unit-instance note)
+
+Behavior details:
+- Each owned unit is listed as its own instance card in Combat.
+- Saving one instance updates only that instance (for example HP battle damage), not all copies.
+- If `Rating` is blank, rating is computed from the formula.
+- If `Rating` is set, that value overrides formula output for final unit rating.
+- Effective class/status/race/terrain are treated as combat metadata and saved as unit overrides.
+
+#### Army Rating Formula (Admin-Configurable)
+The combat tab includes a **Rating Formula (Admin)** panel with editable coefficients:
+- `ATK`, `DEF`, `DMG`, `HP`, `MVT`, `RNG`, `ACT`
+- `Divisor`
+
+Formula:
+
+```
+score =
+	(ATK * atk_weight) +
+	(DEF * def_weight) +
+	(DMG * dmg_weight) +
+	(HP  * hp_weight)  +
+	(MVT * mvt_weight) +
+	(RNG * rng_weight) +
+	(ACT * act_weight)
+
+formula_rating = score / divisor
+final_rating = override_rating (if present) else formula_rating
+```
+
+Default weights:
+- `ATK: 2.0`
+- `DEF: 1.5`
+- `DMG: 3.0`
+- `HP: 2.0`
+- `MVT: 1.0`
+- `RNG: 1.0`
+- `ACT: 1.0`
+- `divisor: 10.0`
+
+#### Army Rating Breakdown
+Each unit card includes an **Army Rating Breakdown** section showing:
+- Raw stat inputs
+- Coefficients (weights)
+- Per-stat contribution
+- Aggregate score
+- Divisor
+- Formula rating
+- Final rating (and whether override was applied)
+
+Example breakdown:
+- Inputs: `ATK=12`, `DEF=8`, `DMG=10`, `HP=15`, `MVT=5`, `RNG=3`, `ACT=2`
+- Weights: defaults above
+- Score:
+	- `12*2.0 = 24`
+	- `8*1.5 = 12`
+	- `10*3.0 = 30`
+	- `15*2.0 = 30`
+	- `5*1.0 = 5`
+	- `3*1.0 = 3`
+	- `2*1.0 = 2`
+	- Total score = `106`
+- Formula rating = `106 / 10 = 10.6`
+
+#### Total Army Rating
+Total army rating is shown:
+- At the top of Combat for selected nation
+- On the Player dashboard
+- In Other Nations (when allowed by visibility)
+
+Current aggregation behavior:
+- `total_army_rating = sum(unit_rating * unit_qty)` across commander + unit rows.
+
+#### Combat Order Moderation
+Player-submitted combat orders appear in admin Orders panel.
+Each order supports:
+- `pending` / `approved` / `denied` status
+- Optional review note
+
+Review updates are persisted and visible back to players.
+
+#### Visibility Matrix: Army Rating Option
+In **All Nations -> Nation Visibility Matrix**, admins can now toggle:
+- `Army Rating`
+
+If disabled for a viewer->subject pair:
+- Subject nation's army rating is hidden in Other Nations.
+
+#### Practical Workflow Example
+1. Open Combat tab as admin.
+2. Choose a player from the selector.
+3. Inspect total army rating and commander/unit cards.
+4. Expand a unit.
+5. Edit class/status/race/terrain and stat fields.
+6. (Optional) set explicit rating override.
+7. Click **Save Unit**.
+8. Expand Army Rating Breakdown to verify math.
+9. Adjust formula weights in right panel if game balance requires.
+10. Save formula and re-check unit/army ratings.
+11. Review player combat orders and set status + note.
+
+#### Data Storage Notes
+- Unit combat overrides are stored on `nation_units.stats_override_json`.
+- Per-user player settings remain in `user_settings`.
+- Combat rating formula config is global and stored in app storage JSON.
+
+#### API Surface (Combat/Battle)
+Admin:
+- `GET /api/admin/combat/snapshot?user_id={id}`
+- `GET /api/admin/combat/orders?user_id={id}`
+- `PUT /api/admin/combat/orders/{notificationId}/status`
+- `PUT /api/admin/combat/units/{nationUnitId}/stats`
+- `GET /api/admin/combat/rating-config`
+- `PUT /api/admin/combat/rating-config`
+
+Player:
+- `GET /api/me/combat/snapshot`
+- `GET /api/me/combat/orders`
+- `POST /api/me/combat/orders`
+- `PATCH /api/me/units/{unitId}/name`
+
+#### Guardrails and Recommended Admin Practices
+- Prefer formula tuning over frequent hard rating overrides.
+- Use rating overrides for exceptional lore/hero units only.
+- Keep class/status/race/terrain values consistent with your campaign taxonomy.
+- Review army rating visibility defaults before major wars to avoid information leaks.
+
 ### Shop
 - Manage categories:
 	- Refinement

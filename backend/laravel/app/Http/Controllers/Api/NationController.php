@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Nation;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 
 class NationController extends Controller
 {
@@ -104,13 +105,15 @@ class NationController extends Controller
         $units = DB::table('nation_units as nu')
             ->leftJoin('unit_catalog as uc', 'nu.unit_catalog_id', '=', 'uc.id')
             ->where('nu.nation_id', $nationId)
-            ->select('nu.*', 'uc.display_name', 'uc.class_name')
+            ->select('nu.*', 'uc.display_name', 'uc.class_name', 'uc.base_stats_json')
             ->get();
         $buildings = DB::table('nation_buildings as nb')
             ->join('building_catalog as bc', 'nb.building_catalog_id', '=', 'bc.id')
             ->where('nb.nation_id', $nationId)
             ->select('nb.*', 'bc.display_name', 'bc.code')
             ->get();
+
+        $armyRating = $this->computeArmyRatingFromUnits($units);
 
         $viewer = $request->user();
         $visibility = $this->defaultVisibilityRules();
@@ -155,6 +158,9 @@ class NationController extends Controller
                 if (!$visibility['terrain']) {
                     $terrain = null;
                 }
+                if (!$visibility['army_rating']) {
+                    $armyRating = null;
+                }
                 if (!$visibility['units']) {
                     $units = collect();
                 }
@@ -168,6 +174,7 @@ class NationController extends Controller
             'nation' => $nation,
             'resources' => $resources,
             'terrain' => $terrain,
+            'army_rating' => $armyRating,
             'units' => $units,
             'buildings' => $buildings,
             'visibility' => $visibility,
@@ -185,9 +192,90 @@ class NationController extends Controller
             'resources_refined' => true,
             'resources_currencies' => true,
             'terrain' => true,
+            'army_rating' => true,
             'units' => true,
             'buildings' => true,
         ];
+    }
+
+    private function computeArmyRatingFromUnits($units): float
+    {
+        $cfg = $this->loadCombatRatingConfigRaw();
+        $sum = 0.0;
+        foreach (($units ?? []) as $unit) {
+            $baseStats = json_decode((string) ($unit->base_stats_json ?? '{}'), true);
+            $baseStats = is_array($baseStats) ? $baseStats : [];
+            $overrideStats = json_decode((string) ($unit->stats_override_json ?? '{}'), true);
+            $overrideStats = is_array($overrideStats) ? $overrideStats : [];
+            $effective = array_merge($baseStats, $overrideStats);
+            $rating = $this->calculateCombatRating($effective, $cfg);
+            $qty = max(1, (int) ($unit->qty ?? 1));
+            $sum += $rating * $qty;
+        }
+
+        return round($sum, 2);
+    }
+
+    private function calculateCombatRating(array $stats, array $cfg): float
+    {
+        foreach (['rating', 'RATING', 'Rating'] as $key) {
+            if (array_key_exists($key, $stats) && is_numeric($stats[$key])) {
+                return round((float) $stats[$key], 2);
+            }
+        }
+
+        $atk = is_numeric($stats['ATK'] ?? null) ? (float) $stats['ATK'] : 0.0;
+        $def = is_numeric($stats['DEF'] ?? null) ? (float) $stats['DEF'] : 0.0;
+        $dmg = is_numeric($stats['DMG'] ?? null) ? (float) $stats['DMG'] : 0.0;
+        $hp = is_numeric($stats['HP'] ?? null) ? (float) $stats['HP'] : 0.0;
+        $mvt = is_numeric($stats['MVT'] ?? null) ? (float) $stats['MVT'] : 0.0;
+        $rng = is_numeric($stats['RNG'] ?? null) ? (float) $stats['RNG'] : 0.0;
+        $act = is_numeric($stats['ACT'] ?? null) ? (float) $stats['ACT'] : 0.0;
+
+        $score =
+            ($atk * (float) $cfg['atk']) +
+            ($def * (float) $cfg['def']) +
+            ($dmg * (float) $cfg['dmg']) +
+            ($hp * (float) $cfg['hp']) +
+            ($mvt * (float) $cfg['mvt']) +
+            ($rng * (float) $cfg['rng']) +
+            ($act * (float) $cfg['act']);
+        $divisor = max(0.01, (float) ($cfg['divisor'] ?? 10.0));
+        return round($score / $divisor, 2);
+    }
+
+    private function loadCombatRatingConfigRaw(): array
+    {
+        $defaults = [
+            'atk' => 2.0,
+            'def' => 1.5,
+            'dmg' => 3.0,
+            'hp' => 2.0,
+            'mvt' => 1.0,
+            'rng' => 1.0,
+            'act' => 1.0,
+            'divisor' => 10.0,
+        ];
+
+        $path = storage_path('app/combat_rating_config.json');
+        if (!File::exists($path)) {
+            return $defaults;
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        if (!is_array($decoded)) {
+            return $defaults;
+        }
+
+        $out = $defaults;
+        foreach (array_keys($defaults) as $key) {
+            if (is_numeric($decoded[$key] ?? null)) {
+                $out[$key] = (float) $decoded[$key];
+            }
+        }
+        $out['divisor'] = max(0.01, (float) $out['divisor']);
+
+        return $out;
     }
 
     private function rulesForPair(int $viewerUserId, int $subjectUserId): array

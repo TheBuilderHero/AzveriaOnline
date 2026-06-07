@@ -692,39 +692,77 @@ class MeController extends Controller
 
         $commanders = [];
         $units = [];
+        $totalArmyRating = 0.0;
 
         foreach ($rows as $row) {
             $baseStats = json_decode((string) ($row->base_stats_json ?? '{}'), true);
             $baseStats = is_array($baseStats) ? $baseStats : [];
 
-            $overrideStats = json_decode((string) ($row->stats_override_json ?? '{}'), true);
-            $overrideStats = is_array($overrideStats) ? $overrideStats : [];
+            $rawOverrideStats = json_decode((string) ($row->stats_override_json ?? '{}'), true);
+            $rawOverrideStats = is_array($rawOverrideStats) ? $rawOverrideStats : [];
 
-            $effectiveStats = array_merge($baseStats, $overrideStats);
-            $rating = $this->calculateCombatRating($effectiveStats);
+            $instanceMap = [];
+            if (is_array($rawOverrideStats['_instances'] ?? null)) {
+                foreach ($rawOverrideStats['_instances'] as $idx => $payload) {
+                    $instanceIdx = (int) $idx;
+                    if ($instanceIdx <= 0 || !is_array($payload)) {
+                        continue;
+                    }
+                    $instanceMap[$instanceIdx] = $payload;
+                }
+            }
 
-            $unit = [
-                'id' => (int) $row->id,
-                'nation_id' => (int) $row->nation_id,
-                'unit_catalog_id' => $row->unit_catalog_id !== null ? (int) $row->unit_catalog_id : null,
-                'code' => (string) ($row->code ?? ''),
-                'display_name' => (string) ($row->display_name ?? 'Unit'),
-                'custom_name' => $row->custom_name,
-                'class_name' => (string) ($row->class_name ?? ''),
-                'is_commander' => (bool) ($row->is_commander ?? false),
-                'qty' => (int) ($row->qty ?? 0),
-                'status' => (string) ($row->status ?? 'owned'),
-                'training_ready_at' => $row->training_ready_at,
-                'base_stats' => $baseStats,
-                'stats_override' => $overrideStats,
-                'effective_stats' => $effectiveStats,
-                'rating' => $rating,
-            ];
+            $sharedOverride = $rawOverrideStats;
+            unset($sharedOverride['_instances']);
 
-            if ($this->isCommanderUnit($unit)) {
-                $commanders[] = $unit;
-            } else {
-                $units[] = $unit;
+            $qty = max(1, (int) ($row->qty ?? 1));
+            for ($instanceIndex = 1; $instanceIndex <= $qty; $instanceIndex++) {
+                $instanceOverride = is_array($instanceMap[$instanceIndex] ?? null)
+                    ? $instanceMap[$instanceIndex]
+                    : [];
+                $effectiveOverride = array_merge($sharedOverride, $instanceOverride);
+
+                $effectiveStats = array_merge($baseStats, $effectiveOverride);
+                $ratingBreakdown = $this->buildCombatRatingBreakdown($effectiveStats);
+                $rating = (float) ($ratingBreakdown['rating'] ?? 0);
+                $effectiveClassName = trim((string) ($effectiveOverride['class_name'] ?? $row->class_name ?? ''));
+                $effectiveStatus = trim((string) ($effectiveOverride['status'] ?? $row->status ?? 'owned'));
+                $effectiveRace = trim((string) ($effectiveOverride['race'] ?? ''));
+                $effectiveTerrain = trim((string) ($effectiveOverride['terrain'] ?? ''));
+
+                $unit = [
+                    'id' => (int) $row->id,
+                    'instance_index' => $instanceIndex,
+                    'instance_label' => 'Unit #' . $instanceIndex,
+                    'source_qty' => $qty,
+                    'nation_id' => (int) $row->nation_id,
+                    'unit_catalog_id' => $row->unit_catalog_id !== null ? (int) $row->unit_catalog_id : null,
+                    'code' => (string) ($row->code ?? ''),
+                    'display_name' => (string) ($row->display_name ?? 'Unit'),
+                    'custom_name' => $row->custom_name,
+                    'class_name' => (string) ($row->class_name ?? ''),
+                    'effective_class_name' => $effectiveClassName,
+                    'is_commander' => (bool) ($row->is_commander ?? false),
+                    'qty' => 1,
+                    'status' => (string) ($row->status ?? 'owned'),
+                    'effective_status' => $effectiveStatus,
+                    'race' => $effectiveRace,
+                    'terrain' => $effectiveTerrain,
+                    'training_ready_at' => $row->training_ready_at,
+                    'base_stats' => $baseStats,
+                    'stats_override' => $effectiveOverride,
+                    'effective_stats' => $effectiveStats,
+                    'rating' => $rating,
+                    'rating_breakdown' => $ratingBreakdown,
+                ];
+
+                $totalArmyRating += $rating;
+
+                if ($this->isCommanderUnit($unit)) {
+                    $commanders[] = $unit;
+                } else {
+                    $units[] = $unit;
+                }
             }
         }
 
@@ -732,6 +770,7 @@ class MeController extends Controller
             'nation' => $nation,
             'commanders' => $commanders,
             'units' => $units,
+            'total_army_rating' => round($totalArmyRating, 2),
         ];
     }
 
@@ -752,11 +791,12 @@ class MeController extends Controller
 
     private function calculateCombatRating(array $stats): float
     {
-        foreach (['rating', 'RATING', 'Rating'] as $key) {
-            if (array_key_exists($key, $stats) && is_numeric($stats[$key])) {
-                return round((float) $stats[$key], 2);
-            }
-        }
+        return (float) ($this->buildCombatRatingBreakdown($stats)['rating'] ?? 0);
+    }
+
+    private function buildCombatRatingBreakdown(array $stats): array
+    {
+        $cfg = $this->loadCombatRatingConfigRaw();
 
         $atk = is_numeric($stats['ATK'] ?? null) ? (float) $stats['ATK'] : 0.0;
         $def = is_numeric($stats['DEF'] ?? null) ? (float) $stats['DEF'] : 0.0;
@@ -766,8 +806,87 @@ class MeController extends Controller
         $rng = is_numeric($stats['RNG'] ?? null) ? (float) $stats['RNG'] : 0.0;
         $act = is_numeric($stats['ACT'] ?? null) ? (float) $stats['ACT'] : 0.0;
 
-        $score = ($atk * 2.0) + ($def * 1.5) + ($dmg * 3.0) + ($hp * 2.0) + ($mvt * 1.0) + ($rng * 1.0) + ($act * 1.0);
-        return round($score / 10.0, 2);
+        $components = [
+            'ATK' => $atk * (float) $cfg['atk'],
+            'DEF' => $def * (float) $cfg['def'],
+            'DMG' => $dmg * (float) $cfg['dmg'],
+            'HP' => $hp * (float) $cfg['hp'],
+            'MVT' => $mvt * (float) $cfg['mvt'],
+            'RNG' => $rng * (float) $cfg['rng'],
+            'ACT' => $act * (float) $cfg['act'],
+        ];
+        $score = array_sum($components);
+        $divisor = max(0.01, (float) ($cfg['divisor'] ?? 10.0));
+        $formulaRating = round($score / $divisor, 2);
+
+        $overrideRating = null;
+        foreach (['rating', 'RATING', 'Rating'] as $key) {
+            if (array_key_exists($key, $stats) && is_numeric($stats[$key])) {
+                $overrideRating = round((float) $stats[$key], 2);
+                break;
+            }
+        }
+
+        return [
+            'source' => $overrideRating !== null ? 'override' : 'formula',
+            'inputs' => [
+                'ATK' => $atk,
+                'DEF' => $def,
+                'DMG' => $dmg,
+                'HP' => $hp,
+                'MVT' => $mvt,
+                'RNG' => $rng,
+                'ACT' => $act,
+            ],
+            'weights' => [
+                'ATK' => (float) $cfg['atk'],
+                'DEF' => (float) $cfg['def'],
+                'DMG' => (float) $cfg['dmg'],
+                'HP' => (float) $cfg['hp'],
+                'MVT' => (float) $cfg['mvt'],
+                'RNG' => (float) $cfg['rng'],
+                'ACT' => (float) $cfg['act'],
+            ],
+            'components' => array_map(static fn ($v) => round((float) $v, 2), $components),
+            'score' => round($score, 2),
+            'divisor' => $divisor,
+            'formula_rating' => $formulaRating,
+            'rating' => $overrideRating ?? $formulaRating,
+        ];
+    }
+
+    private function loadCombatRatingConfigRaw(): array
+    {
+        $defaults = [
+            'atk' => 2.0,
+            'def' => 1.5,
+            'dmg' => 3.0,
+            'hp' => 2.0,
+            'mvt' => 1.0,
+            'rng' => 1.0,
+            'act' => 1.0,
+            'divisor' => 10.0,
+        ];
+
+        $path = storage_path('app/combat_rating_config.json');
+        if (!File::exists($path)) {
+            return $defaults;
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        if (!is_array($decoded)) {
+            return $defaults;
+        }
+
+        $out = $defaults;
+        foreach (array_keys($defaults) as $key) {
+            if (is_numeric($decoded[$key] ?? null)) {
+                $out[$key] = (float) $decoded[$key];
+            }
+        }
+        $out['divisor'] = max(0.01, (float) $out['divisor']);
+
+        return $out;
     }
 
     private function accumulateProjection(array &$bucket, string $key, float $value): void

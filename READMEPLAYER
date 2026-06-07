@@ -127,3 +127,107 @@ Admin can configure defaults applied at account registration:
 
 These defaults are stored and reused for all new player registrations.
 
+## 13) Combat (Battle Tab)
+
+The Combat tab is where you prepare unit information and submit battle orders for admin review.
+
+What you can see:
+- Your commanders list
+- Your units list
+- Each owned unit listed as its own instance card (not merged into one shared stat row)
+- Total Army Rating for your nation
+- Per-unit rating and stat details
+- Army Rating Breakdown panel on each unit
+- Your submitted orders and admin review notes/status
+
+What you can do:
+- Rename your units (custom names)
+- Submit new combat orders
+- Track order status: `pending`, `approved`, `denied`
+
+What admins can additionally do:
+- Edit unit class/status/race/terrain and stat overrides
+- Add private admin notes to each unit instance
+- Set explicit rating overrides
+- Adjust global rating formula weights/divisor
+- Approve/deny orders with review notes
+
+## 14) Army Rating Formula Explained (Player View)
+
+Your unit rating is based on either:
+- A formula calculation using unit stats, or
+- An admin override value (if one is set for that unit)
+
+You can see this in each unit's **Army Rating Breakdown** panel.
+
+### Formula Structure
+
+The formula combines stats with weights:
+
+```
+score =
+	(ATK * atk_weight) +
+	(DEF * def_weight) +
+	(DMG * dmg_weight) +
+	(HP  * hp_weight)  +
+	(MVT * mvt_weight) +
+	(RNG * rng_weight) +
+	(ACT * act_weight)
+
+formula_rating = score / divisor
+final_rating = override_rating (if present) else formula_rating
+```
+
+### What Each Field Means
+- `ATK`: Attack influence in rating
+- `DEF`: Defense influence in rating
+- `DMG`: Damage output influence in rating
+- `HP`: Durability influence in rating
+- `MVT`: Movement influence in rating
+- `RNG`: Range influence in rating
+- `ACT`: Action-economy influence in rating
+- `Divisor`: Scaling factor applied after score sum
+
+Interpretation tips:
+- Higher weight = that stat matters more.
+- Lower divisor = generally higher formula ratings.
+- Higher divisor = generally lower formula ratings.
+
+### Breakdown Panel Reading Guide
+In **Army Rating Breakdown**, you will see:
+- Inputs: stat values used for calculation
+- Weights: current formula coefficients
+- Components: per-stat contribution (`input * weight`)
+- Score: sum of all components
+- Divisor: scaling number
+- Formula Rating: calculated rating before override check
+- Final Rating: rating actually used (formula or override)
+
+If final rating says override is applied, that unit is using an explicit rating value rather than formula output.
+
+### Worked Example
+
+If a unit has:
+- `ATK=12`, `DEF=8`, `DMG=10`, `HP=15`, `MVT=5`, `RNG=3`, `ACT=2`
+
+And weights/divisor are:
+- `ATK=2.0`, `DEF=1.5`, `DMG=3.0`, `HP=2.0`, `MVT=1.0`, `RNG=1.0`, `ACT=1.0`, `divisor=10`
+
+Then:
+- Score = `12*2.0 + 8*1.5 + 10*3.0 + 15*2.0 + 5*1.0 + 3*1.0 + 2*1.0`
+- Score = `106`
+- Formula rating = `106 / 10 = 10.6`
+
+If no override exists, final rating is `10.6`.
+If override exists (example `12.0`), final rating becomes `12.0`.
+
+## 15) Combat Help Bubble
+
+The Combat tab includes a help bubble labeled:
+- **How Army Rating Is Calculated**
+
+Open it anytime to see:
+- What each formula field means
+- The exact calculation flow
+- Practical balancing interpretation guidance
+

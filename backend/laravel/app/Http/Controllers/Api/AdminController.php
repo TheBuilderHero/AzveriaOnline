@@ -397,6 +397,7 @@ class AdminController extends Controller
             ['key' => 'resources_advanced', 'label' => 'Advanced Resources'],
             ['key' => 'resources_currencies', 'label' => 'Currencies'],
             ['key' => 'terrain', 'label' => 'Terrain'],
+            ['key' => 'army_rating', 'label' => 'Army Rating'],
             ['key' => 'units', 'label' => 'Units'],
             ['key' => 'buildings', 'label' => 'Buildings'],
         ]);
@@ -948,6 +949,44 @@ class AdminController extends Controller
         return response()->json($rows);
     }
 
+    public function combatRatingConfig()
+    {
+        return response()->json($this->loadCombatRatingConfigRaw());
+    }
+
+    public function updateCombatRatingConfig(Request $request)
+    {
+        $data = $request->validate([
+            'atk' => ['required', 'numeric', 'min:0', 'max:100'],
+            'def' => ['required', 'numeric', 'min:0', 'max:100'],
+            'dmg' => ['required', 'numeric', 'min:0', 'max:100'],
+            'hp' => ['required', 'numeric', 'min:0', 'max:100'],
+            'mvt' => ['required', 'numeric', 'min:0', 'max:100'],
+            'rng' => ['required', 'numeric', 'min:0', 'max:100'],
+            'act' => ['required', 'numeric', 'min:0', 'max:100'],
+            'divisor' => ['required', 'numeric', 'min:0.01', 'max:1000'],
+        ]);
+
+        $payload = [
+            'atk' => (float) $data['atk'],
+            'def' => (float) $data['def'],
+            'dmg' => (float) $data['dmg'],
+            'hp' => (float) $data['hp'],
+            'mvt' => (float) $data['mvt'],
+            'rng' => (float) $data['rng'],
+            'act' => (float) $data['act'],
+            'divisor' => (float) $data['divisor'],
+            'updated_at' => now()->toIso8601String(),
+            'updated_by_user_id' => (int) $request->user()->id,
+        ];
+
+        if (!$this->saveCombatRatingConfigRaw($payload)) {
+            return response()->json(['message' => 'Combat rating config storage is unavailable.'], 500);
+        }
+
+        return response()->json(['message' => 'Combat rating config saved.']);
+    }
+
     public function updateCombatOrderStatus(Request $request, int $notificationId)
     {
         $data = $request->validate([
@@ -977,7 +1016,15 @@ class AdminController extends Controller
     public function updateCombatUnitStats(Request $request, int $nationUnitId)
     {
         $data = $request->validate([
-            'stats_override_json' => ['required', 'array'],
+            'stats_override_json' => ['sometimes', 'array'],
+            'custom_name' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'instance_index' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'class_name' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'status' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'race' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'terrain' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'admin_note' => ['sometimes', 'nullable', 'string', 'max:5000'],
+            'rating' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1000000'],
         ]);
 
         $unit = DB::table('nation_units')->where('id', $nationUnitId)->first();
@@ -985,18 +1032,107 @@ class AdminController extends Controller
             return response()->json(['message' => 'Nation unit not found'], 404);
         }
 
-        $normalized = [];
-        foreach ($data['stats_override_json'] as $key => $value) {
+        $existingOverrides = json_decode((string) ($unit->stats_override_json ?? '{}'), true);
+        $normalized = is_array($existingOverrides) ? $existingOverrides : [];
+        $instanceIndex = (int) ($data['instance_index'] ?? 0);
+        $useInstance = $instanceIndex > 0;
+
+        $instances = [];
+        if (is_array($normalized['_instances'] ?? null)) {
+            $instances = $normalized['_instances'];
+        }
+
+        $instanceKey = (string) $instanceIndex;
+        $instanceOverride = [];
+        if ($useInstance && is_array($instances[$instanceKey] ?? null)) {
+            $instanceOverride = $instances[$instanceKey];
+        }
+
+        foreach (($data['stats_override_json'] ?? []) as $key => $value) {
             $statKey = trim((string) $key);
             if ($statKey === '' || mb_strlen($statKey) > 40) {
                 continue;
             }
             if (is_scalar($value) || $value === null) {
-                $normalized[$statKey] = $value;
+                if ($useInstance) {
+                    $instanceOverride[$statKey] = $value;
+                } else {
+                    $normalized[$statKey] = $value;
+                }
+            }
+        }
+
+        foreach (['class_name', 'status', 'race', 'terrain'] as $metaField) {
+            if (!array_key_exists($metaField, $data)) {
+                continue;
+            }
+            $value = trim((string) ($data[$metaField] ?? ''));
+            if ($value === '') {
+                if ($useInstance) {
+                    unset($instanceOverride[$metaField]);
+                } else {
+                    unset($normalized[$metaField]);
+                }
+            } else {
+                if ($useInstance) {
+                    $instanceOverride[$metaField] = $value;
+                } else {
+                    $normalized[$metaField] = $value;
+                }
+            }
+        }
+
+        if (array_key_exists('rating', $data)) {
+            if ($data['rating'] === null || $data['rating'] === '') {
+                if ($useInstance) {
+                    unset($instanceOverride['rating']);
+                } else {
+                    unset($normalized['rating']);
+                }
+            } else {
+                if ($useInstance) {
+                    $instanceOverride['rating'] = round((float) $data['rating'], 2);
+                } else {
+                    $normalized['rating'] = round((float) $data['rating'], 2);
+                }
+            }
+        }
+
+        if (array_key_exists('admin_note', $data)) {
+            $value = trim((string) ($data['admin_note'] ?? ''));
+            if ($value === '') {
+                if ($useInstance) {
+                    unset($instanceOverride['admin_note']);
+                } else {
+                    unset($normalized['admin_note']);
+                }
+            } else {
+                if ($useInstance) {
+                    $instanceOverride['admin_note'] = $value;
+                } else {
+                    $normalized['admin_note'] = $value;
+                }
+            }
+        }
+
+        if ($useInstance) {
+            if (empty($instanceOverride)) {
+                unset($instances[$instanceKey]);
+            } else {
+                $instances[$instanceKey] = $instanceOverride;
+            }
+
+            if (empty($instances)) {
+                unset($normalized['_instances']);
+            } else {
+                $normalized['_instances'] = $instances;
             }
         }
 
         DB::table('nation_units')->where('id', $nationUnitId)->update([
+            'custom_name' => array_key_exists('custom_name', $data)
+                ? trim((string) ($data['custom_name'] ?? ''))
+                : $unit->custom_name,
             'stats_override_json' => json_encode($normalized),
             'updated_at' => now(),
         ]);
@@ -1005,10 +1141,11 @@ class AdminController extends Controller
         $this->createNotification(
             'combat_unit_update',
             'Combat Unit Stats Updated',
-            'Admin updated unit stats for nation "' . (string) ($nation->name ?? ('#' . $unit->nation_id)) . '" (unit #' . $nationUnitId . ').',
+            'Admin updated unit stats for nation "' . (string) ($nation->name ?? ('#' . $unit->nation_id)) . '" (unit #' . $nationUnitId . ($useInstance ? ', instance #' . $instanceIndex : '') . ').',
             [
                 'nation_id' => (int) $unit->nation_id,
                 'nation_unit_id' => $nationUnitId,
+                'instance_index' => $useInstance ? $instanceIndex : null,
             ]
         );
 
@@ -2241,39 +2378,79 @@ class AdminController extends Controller
 
         $commanders = [];
         $units = [];
+        $totalArmyRating = 0.0;
 
         foreach ($rows as $row) {
             $baseStats = json_decode((string) ($row->base_stats_json ?? '{}'), true);
             $baseStats = is_array($baseStats) ? $baseStats : [];
 
-            $overrideStats = json_decode((string) ($row->stats_override_json ?? '{}'), true);
-            $overrideStats = is_array($overrideStats) ? $overrideStats : [];
+            $rawOverrideStats = json_decode((string) ($row->stats_override_json ?? '{}'), true);
+            $rawOverrideStats = is_array($rawOverrideStats) ? $rawOverrideStats : [];
 
-            $effectiveStats = array_merge($baseStats, $overrideStats);
-            $rating = $this->calculateCombatRating($effectiveStats);
+            $instanceMap = [];
+            if (is_array($rawOverrideStats['_instances'] ?? null)) {
+                foreach ($rawOverrideStats['_instances'] as $idx => $payload) {
+                    $instanceIdx = (int) $idx;
+                    if ($instanceIdx <= 0 || !is_array($payload)) {
+                        continue;
+                    }
+                    $instanceMap[$instanceIdx] = $payload;
+                }
+            }
 
-            $unit = [
-                'id' => (int) $row->id,
-                'nation_id' => (int) $row->nation_id,
-                'unit_catalog_id' => $row->unit_catalog_id !== null ? (int) $row->unit_catalog_id : null,
-                'code' => (string) ($row->code ?? ''),
-                'display_name' => (string) ($row->display_name ?? 'Unit'),
-                'custom_name' => $row->custom_name,
-                'class_name' => (string) ($row->class_name ?? ''),
-                'is_commander' => (bool) ($row->is_commander ?? false),
-                'qty' => (int) ($row->qty ?? 0),
-                'status' => (string) ($row->status ?? 'owned'),
-                'training_ready_at' => $row->training_ready_at,
-                'base_stats' => $baseStats,
-                'stats_override' => $overrideStats,
-                'effective_stats' => $effectiveStats,
-                'rating' => $rating,
-            ];
+            $sharedOverride = $rawOverrideStats;
+            unset($sharedOverride['_instances']);
 
-            if ($this->isCommanderUnit($unit)) {
-                $commanders[] = $unit;
-            } else {
-                $units[] = $unit;
+            $qty = max(1, (int) ($row->qty ?? 1));
+            for ($instanceIndex = 1; $instanceIndex <= $qty; $instanceIndex++) {
+                $instanceOverride = is_array($instanceMap[$instanceIndex] ?? null)
+                    ? $instanceMap[$instanceIndex]
+                    : [];
+                $effectiveOverride = array_merge($sharedOverride, $instanceOverride);
+
+                $effectiveStats = array_merge($baseStats, $effectiveOverride);
+                $ratingBreakdown = $this->buildCombatRatingBreakdown($effectiveStats);
+                $rating = (float) ($ratingBreakdown['rating'] ?? 0);
+                $effectiveClassName = trim((string) ($effectiveOverride['class_name'] ?? $row->class_name ?? ''));
+                $effectiveStatus = trim((string) ($effectiveOverride['status'] ?? $row->status ?? 'owned'));
+                $effectiveRace = trim((string) ($effectiveOverride['race'] ?? ''));
+                $effectiveTerrain = trim((string) ($effectiveOverride['terrain'] ?? ''));
+                $adminNote = trim((string) ($effectiveOverride['admin_note'] ?? ''));
+
+                $unit = [
+                    'id' => (int) $row->id,
+                    'instance_index' => $instanceIndex,
+                    'instance_label' => 'Unit #' . $instanceIndex,
+                    'source_qty' => $qty,
+                    'nation_id' => (int) $row->nation_id,
+                    'unit_catalog_id' => $row->unit_catalog_id !== null ? (int) $row->unit_catalog_id : null,
+                    'code' => (string) ($row->code ?? ''),
+                    'display_name' => (string) ($row->display_name ?? 'Unit'),
+                    'custom_name' => $row->custom_name,
+                    'class_name' => (string) ($row->class_name ?? ''),
+                    'effective_class_name' => $effectiveClassName,
+                    'is_commander' => (bool) ($row->is_commander ?? false),
+                    'qty' => 1,
+                    'status' => (string) ($row->status ?? 'owned'),
+                    'effective_status' => $effectiveStatus,
+                    'race' => $effectiveRace,
+                    'terrain' => $effectiveTerrain,
+                    'admin_note' => $adminNote,
+                    'training_ready_at' => $row->training_ready_at,
+                    'base_stats' => $baseStats,
+                    'stats_override' => $effectiveOverride,
+                    'effective_stats' => $effectiveStats,
+                    'rating' => $rating,
+                    'rating_breakdown' => $ratingBreakdown,
+                ];
+
+                $totalArmyRating += $rating;
+
+                if ($this->isCommanderUnit($unit)) {
+                    $commanders[] = $unit;
+                } else {
+                    $units[] = $unit;
+                }
             }
         }
 
@@ -2281,6 +2458,7 @@ class AdminController extends Controller
             'nation' => $nation,
             'commanders' => $commanders,
             'units' => $units,
+            'total_army_rating' => round($totalArmyRating, 2),
         ];
     }
 
@@ -2301,11 +2479,12 @@ class AdminController extends Controller
 
     private function calculateCombatRating(array $stats): float
     {
-        foreach (['rating', 'RATING', 'Rating'] as $key) {
-            if (array_key_exists($key, $stats) && is_numeric($stats[$key])) {
-                return round((float) $stats[$key], 2);
-            }
-        }
+        return (float) ($this->buildCombatRatingBreakdown($stats)['rating'] ?? 0);
+    }
+
+    private function buildCombatRatingBreakdown(array $stats): array
+    {
+        $cfg = $this->loadCombatRatingConfigRaw();
 
         $atk = is_numeric($stats['ATK'] ?? null) ? (float) $stats['ATK'] : 0.0;
         $def = is_numeric($stats['DEF'] ?? null) ? (float) $stats['DEF'] : 0.0;
@@ -2315,8 +2494,104 @@ class AdminController extends Controller
         $rng = is_numeric($stats['RNG'] ?? null) ? (float) $stats['RNG'] : 0.0;
         $act = is_numeric($stats['ACT'] ?? null) ? (float) $stats['ACT'] : 0.0;
 
-        $score = ($atk * 2.0) + ($def * 1.5) + ($dmg * 3.0) + ($hp * 2.0) + ($mvt * 1.0) + ($rng * 1.0) + ($act * 1.0);
-        return round($score / 10.0, 2);
+        $components = [
+            'ATK' => $atk * (float) $cfg['atk'],
+            'DEF' => $def * (float) $cfg['def'],
+            'DMG' => $dmg * (float) $cfg['dmg'],
+            'HP' => $hp * (float) $cfg['hp'],
+            'MVT' => $mvt * (float) $cfg['mvt'],
+            'RNG' => $rng * (float) $cfg['rng'],
+            'ACT' => $act * (float) $cfg['act'],
+        ];
+        $score = array_sum($components);
+        $divisor = max(0.01, (float) ($cfg['divisor'] ?? 10.0));
+        $formulaRating = round($score / $divisor, 2);
+
+        $overrideRating = null;
+        foreach (['rating', 'RATING', 'Rating'] as $key) {
+            if (array_key_exists($key, $stats) && is_numeric($stats[$key])) {
+                $overrideRating = round((float) $stats[$key], 2);
+                break;
+            }
+        }
+
+        return [
+            'source' => $overrideRating !== null ? 'override' : 'formula',
+            'inputs' => [
+                'ATK' => $atk,
+                'DEF' => $def,
+                'DMG' => $dmg,
+                'HP' => $hp,
+                'MVT' => $mvt,
+                'RNG' => $rng,
+                'ACT' => $act,
+            ],
+            'weights' => [
+                'ATK' => (float) $cfg['atk'],
+                'DEF' => (float) $cfg['def'],
+                'DMG' => (float) $cfg['dmg'],
+                'HP' => (float) $cfg['hp'],
+                'MVT' => (float) $cfg['mvt'],
+                'RNG' => (float) $cfg['rng'],
+                'ACT' => (float) $cfg['act'],
+            ],
+            'components' => array_map(static fn ($v) => round((float) $v, 2), $components),
+            'score' => round($score, 2),
+            'divisor' => $divisor,
+            'formula_rating' => $formulaRating,
+            'rating' => $overrideRating ?? $formulaRating,
+        ];
+    }
+
+    private function combatRatingConfigPath(): string
+    {
+        return storage_path('app/combat_rating_config.json');
+    }
+
+    private function loadCombatRatingConfigRaw(): array
+    {
+        $defaults = [
+            'atk' => 2.0,
+            'def' => 1.5,
+            'dmg' => 3.0,
+            'hp' => 2.0,
+            'mvt' => 1.0,
+            'rng' => 1.0,
+            'act' => 1.0,
+            'divisor' => 10.0,
+        ];
+
+        $path = $this->combatRatingConfigPath();
+        if (!File::exists($path)) {
+            return $defaults;
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        if (!is_array($decoded)) {
+            return $defaults;
+        }
+
+        $out = $defaults;
+        foreach (array_keys($defaults) as $key) {
+            if (is_numeric($decoded[$key] ?? null)) {
+                $out[$key] = (float) $decoded[$key];
+            }
+        }
+        $out['divisor'] = max(0.01, (float) $out['divisor']);
+
+        return $out;
+    }
+
+    private function saveCombatRatingConfigRaw(array $payload): bool
+    {
+        try {
+            $path = $this->combatRatingConfigPath();
+            File::ensureDirectoryExists(dirname($path));
+            File::put($path, json_encode($payload, JSON_PRETTY_PRINT));
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     private function createNotification(string $type, string $title, string $body, array $meta = []): void

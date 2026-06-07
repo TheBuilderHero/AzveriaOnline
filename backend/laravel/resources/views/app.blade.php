@@ -1831,10 +1831,11 @@ async function loadSection(name) {
 
 async function loadPlayer() {
   // Fetch dashboard, terrain, and resource definitions
-  const [dashRes, sqMilesRes, resDefRes] = await Promise.all([
+  const [dashRes, sqMilesRes, resDefRes, combatSnapshotRes] = await Promise.all([
     api('/api/me/dashboard'),
     api('/api/me/terrain-square-miles'),
     api('/api/resources'),
+    api('/api/me/combat/snapshot'),
   ]);
   const data = await dashRes.json();
   const sqMiles = await sqMilesRes.json();
@@ -1842,6 +1843,8 @@ async function loadPlayer() {
   window.resourceDefs = resourceDefs;
   setDynamicResourceLabels(resourceDefs);
   const normalizedSqMiles = normalizeTerrainSquareMiles(sqMiles);
+  const combatSnapshot = combatSnapshotRes && combatSnapshotRes.ok ? await parseJsonResponse(combatSnapshotRes, {}) : {};
+  const totalArmyRating = Number(combatSnapshot?.total_army_rating || 0);
   const terrainRows = Object.entries(normalizedSqMiles).length
     ? Object.entries(normalizedSqMiles).map(([k, v]) => `<span>${labelTerrainKey(k)}: <strong>${fmtNum(v)} sq mi</strong></span>`).join(' &nbsp;|&nbsp; ')
     : 'No terrain data';
@@ -1944,6 +1947,7 @@ async function loadPlayer() {
           <div class="row"><button class="primary" id="saveAbout">Save About</button><span id="aboutMsg" class="muted"></span></div>
         </div>
         <div>
+          <p><strong>Total Army Rating:</strong> ${fmtNum(totalArmyRating)}</p>
           <h3>Units</h3>
           <div class="list">${ownedUnits.map(u => `<div><button class="primary playerUnitDetail" data-json='${JSON.stringify(u).replace(/'/g, '&#39;')}' title="Click for details" style="width:100%;margin-bottom:6px;background:#314f72;">${u.display_name || u.custom_name || 'Unit'} x${u.qty}</button></div>`).join('') || '<div class="muted">None</div>'}
           <hr>${trainingUnits.map(u => `<div><button class="primary playerUnitDetail" data-json='${JSON.stringify(u).replace(/'/g, '&#39;')}' title="Click for details" style="width:100%;margin-bottom:6px;background:#4f5f72;">${u.display_name || u.custom_name || 'Unit'} x${u.qty} (training)</button></div>`).join('') || '<div class="muted">No training units</div>'}
@@ -1997,10 +2001,73 @@ async function loadCombat() {
     }
   }
 
+  const STAT_KEYS = ['ATK', 'DEF', 'DMG', 'HP', 'MVT', 'RNG', 'ACT'];
+
   const renderStatsRows = (stats) => {
     const entries = Object.entries(stats || {});
     if (entries.length === 0) return '<div class="muted">No stats.</div>';
     return entries.map(([k, v]) => `<div class="res-kv"><span>${escapeHtml(String(k))}</span><span>${escapeHtml(String(v))}</span></div>`).join('');
+  };
+
+  const renderRatingBreakdown = (breakdown) => {
+    if (!breakdown || typeof breakdown !== 'object') {
+      return '<div class="muted">No rating breakdown.</div>';
+    }
+    const inputs = breakdown.inputs || {};
+    const weights = breakdown.weights || {};
+    const components = breakdown.components || {};
+    return `
+      <div class="res-kv"><span>ATK</span><span>${fmtNum(inputs.ATK || 0)} x ${fmtNum(weights.ATK || 0)} = ${fmtNum(components.ATK || 0)}</span></div>
+      <div class="res-kv"><span>DEF</span><span>${fmtNum(inputs.DEF || 0)} x ${fmtNum(weights.DEF || 0)} = ${fmtNum(components.DEF || 0)}</span></div>
+      <div class="res-kv"><span>DMG</span><span>${fmtNum(inputs.DMG || 0)} x ${fmtNum(weights.DMG || 0)} = ${fmtNum(components.DMG || 0)}</span></div>
+      <div class="res-kv"><span>HP</span><span>${fmtNum(inputs.HP || 0)} x ${fmtNum(weights.HP || 0)} = ${fmtNum(components.HP || 0)}</span></div>
+      <div class="res-kv"><span>MVT</span><span>${fmtNum(inputs.MVT || 0)} x ${fmtNum(weights.MVT || 0)} = ${fmtNum(components.MVT || 0)}</span></div>
+      <div class="res-kv"><span>RNG</span><span>${fmtNum(inputs.RNG || 0)} x ${fmtNum(weights.RNG || 0)} = ${fmtNum(components.RNG || 0)}</span></div>
+      <div class="res-kv"><span>ACT</span><span>${fmtNum(inputs.ACT || 0)} x ${fmtNum(weights.ACT || 0)} = ${fmtNum(components.ACT || 0)}</span></div>
+      <div class="res-kv"><span>Score</span><span>${fmtNum(breakdown.score || 0)}</span></div>
+      <div class="res-kv"><span>Divisor</span><span>${fmtNum(breakdown.divisor || 10)}</span></div>
+      <div class="res-kv"><span>Formula Rating</span><span>${fmtNum(breakdown.formula_rating || 0)}</span></div>
+      <div class="res-kv"><span>Final Rating</span><span>${fmtNum(breakdown.rating || 0)}${breakdown.source === 'override' ? ' (override)' : ''}</span></div>
+    `;
+  };
+
+  const renderRatingHelpBubble = (cfg, options = {}) => {
+    const config = cfg || {};
+    const isAdminView = Boolean(options.isAdmin);
+    const atk = Number(config.atk ?? 2);
+    const def = Number(config.def ?? 1.5);
+    const dmg = Number(config.dmg ?? 3);
+    const hp = Number(config.hp ?? 2);
+    const mvt = Number(config.mvt ?? 1);
+    const rng = Number(config.rng ?? 1);
+    const act = Number(config.act ?? 1);
+    const divisor = Number(config.divisor ?? 10);
+
+    return `
+      <details style="margin-top:8px;">
+        <summary title="Help" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
+          <span style="display:inline-flex;width:18px;height:18px;border-radius:999px;align-items:center;justify-content:center;background:#35577e;color:#fff;font-weight:700;font-size:12px;">?</span>
+          <span><strong>${isAdminView ? 'How Rating Formula Fields Work' : 'How Army Rating Is Calculated'}</strong></span>
+        </summary>
+        <div class="res-panel" style="margin-top:6px;">
+          <div class="muted" style="margin-bottom:6px;">
+            Each stat field is a <strong>weight</strong>. Higher weight means that stat contributes more to final unit rating.
+          </div>
+          <div class="res-kv"><span>ATK</span><span>Attack importance (${fmtNum(atk)})</span></div>
+          <div class="res-kv"><span>DEF</span><span>Defense importance (${fmtNum(def)})</span></div>
+          <div class="res-kv"><span>DMG</span><span>Damage output importance (${fmtNum(dmg)})</span></div>
+          <div class="res-kv"><span>HP</span><span>Durability importance (${fmtNum(hp)})</span></div>
+          <div class="res-kv"><span>MVT</span><span>Movement value importance (${fmtNum(mvt)})</span></div>
+          <div class="res-kv"><span>RNG</span><span>Range value importance (${fmtNum(rng)})</span></div>
+          <div class="res-kv"><span>ACT</span><span>Action economy importance (${fmtNum(act)})</span></div>
+          <div class="res-kv"><span>Divisor</span><span>Scales rating down/up after score sum (${fmtNum(divisor)})</span></div>
+          <div style="margin-top:8px;font-size:12px;white-space:pre-wrap;">Score = (ATK x ${fmtNum(atk)}) + (DEF x ${fmtNum(def)}) + (DMG x ${fmtNum(dmg)}) + (HP x ${fmtNum(hp)}) + (MVT x ${fmtNum(mvt)}) + (RNG x ${fmtNum(rng)}) + (ACT x ${fmtNum(act)})\nFormula Rating = Score / ${fmtNum(divisor)}\nFinal Rating = override rating (if set) or formula rating</div>
+          <div class="muted" style="margin-top:8px;">
+            Tip: increase a weight to make that stat matter more globally; lower the divisor to increase all formula-based ratings.
+          </div>
+        </div>
+      </details>
+    `;
   };
 
   const renderUnitCards = (units, options) => {
@@ -2011,32 +2078,69 @@ async function loadCombat() {
     return units.map((u) => {
       const displayName = String(u.custom_name || u.display_name || 'Unit');
       const baseName = String(u.display_name || 'Unit');
+      const instanceIndex = Number(u.instance_index || 1);
+      const sourceQty = Number(u.source_qty || 1);
       const rating = Number(u.rating || 0);
+      const effectiveClass = String(u.effective_class_name || u.class_name || '');
+      const effectiveStatus = String(u.effective_status || u.status || 'owned');
+      const effectiveRace = String(u.race || '');
+      const effectiveTerrain = String(u.terrain || '');
+      const adminNote = String(u.admin_note || '');
       const nameEditor = options.allowNameEdit ? `
         <div class="row" style="margin-top:8px;">
           <label style="min-width:90px;">Unit Name</label>
-          <input class="combatUnitNameInput" data-unit-id="${u.id}" value="${escapeHtml(String(u.custom_name || ''))}" placeholder="Set custom unit name">
-          <button class="primary combatUnitNameSave" data-unit-id="${u.id}" style="background:#314f72;">Save Name</button>
+          <input class="combatUnitNameInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" value="${escapeHtml(String(u.custom_name || ''))}" placeholder="Set custom unit name">
+          ${options.allowStatEdit
+            ? `<button class="primary combatUnitEditSave" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" style="background:#2f6a41;">Save Unit</button>`
+            : `<button class="primary combatUnitNameSave" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" style="background:#314f72;">Save Name</button>`}
         </div>
       ` : '';
 
       const statsEditor = options.allowStatEdit ? `
-        <label style="font-size:12px;margin-top:8px;display:block;">Stats Override JSON (Admin)</label>
-        <textarea class="combatStatEditInput" data-unit-id="${u.id}" rows="5">${escapeHtml(JSON.stringify(u.stats_override || {}, null, 2))}</textarea>
-        <div class="row"><button class="primary combatStatEditSave" data-unit-id="${u.id}" style="background:#2f6a41;">Save Unit Stats</button></div>
+        <div class="row" style="margin-top:8px;">
+          <label style="min-width:90px;">Class</label>
+          <input class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="class_name" value="${escapeHtml(effectiveClass)}" placeholder="Class">
+          <label style="min-width:75px;">Status</label>
+          <input class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="status" value="${escapeHtml(effectiveStatus)}" placeholder="Status">
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <label style="min-width:90px;">Race</label>
+          <input class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="race" value="${escapeHtml(effectiveRace)}" placeholder="Race">
+          <label style="min-width:75px;">Terrain</label>
+          <input class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="terrain" value="${escapeHtml(effectiveTerrain)}" placeholder="Terrain">
+        </div>
+        <div class="res-panel" style="margin-top:8px;">
+          <div class="res-kv"><span>ATK</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="ATK" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.ATK ?? ''))}"></span></div>
+          <div class="res-kv"><span>DEF</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="DEF" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.DEF ?? ''))}"></span></div>
+          <div class="res-kv"><span>DMG</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="DMG" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.DMG ?? ''))}"></span></div>
+          <div class="res-kv"><span>HP</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="HP" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.HP ?? ''))}"></span></div>
+          <div class="res-kv"><span>MVT</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="MVT" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.MVT ?? ''))}"></span></div>
+          <div class="res-kv"><span>RNG</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="RNG" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.RNG ?? ''))}"></span></div>
+          <div class="res-kv"><span>ACT</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="ACT" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.ACT ?? ''))}"></span></div>
+          <div class="res-kv"><span>Rating</span><span><input class="combatUnitRatingInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" type="number" step="0.01" value="${escapeHtml(String(u.stats_override?.rating ?? u.effective_stats?.rating ?? ''))}"></span></div>
+        </div>
+        <div style="margin-top:8px;">
+          <label style="font-size:12px;display:block;">Admin Note</label>
+          <textarea class="combatUnitNoteInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" rows="3" placeholder="Private admin notes for this specific unit instance...">${escapeHtml(adminNote)}</textarea>
+        </div>
       ` : '';
 
       return `
         <details class="combat-unit-card">
           <summary>
-            <span>${escapeHtml(displayName)}</span>
+            <span>${escapeHtml(displayName)}${sourceQty > 1 ? ` <span class="muted">(#${instanceIndex})</span>` : ''}</span>
             <span>Rating: ${fmtNum(rating)}</span>
           </summary>
           <div style="margin-top:8px;">
             <div class="muted">Base: ${escapeHtml(baseName)}</div>
-            <div class="muted">Qty: ${fmtNum(u.qty || 0)} | Status: ${escapeHtml(String(u.status || 'owned'))} | Class: ${escapeHtml(String(u.class_name || '-'))}</div>
+            <div class="muted">Status: ${escapeHtml(effectiveStatus)} | Class: ${escapeHtml(effectiveClass || '-')} | Race: ${escapeHtml(effectiveRace || '-')} | Terrain: ${escapeHtml(effectiveTerrain || '-')}</div>
+            ${options.allowStatEdit && adminNote ? `<div class="muted" style="margin-top:6px;"><strong>Admin Note:</strong> ${escapeHtml(adminNote)}</div>` : ''}
             <div style="margin-top:8px;"><strong>Effective Stats</strong></div>
             <div class="res-panel">${renderStatsRows(u.effective_stats)}</div>
+            <details style="margin-top:8px;">
+              <summary>Army Rating Breakdown</summary>
+              <div class="res-panel" style="margin-top:6px;">${renderRatingBreakdown(u.rating_breakdown)}</div>
+            </details>
             ${nameEditor}
             ${statsEditor}
           </div>
@@ -2080,7 +2184,7 @@ async function loadCombat() {
 
   const loadData = async () => {
     if (isAdmin && !selectedPlayerId) {
-      return { snapshot: null, orders: [] };
+      return { snapshot: null, orders: [], ratingConfig: null };
     }
 
     const snapshotUrl = isAdmin
@@ -2090,19 +2194,38 @@ async function loadCombat() {
       ? `/api/admin/combat/orders?user_id=${encodeURIComponent(selectedPlayerId)}`
       : '/api/me/combat/orders';
 
-    const [snapshotRes, ordersRes] = await Promise.all([api(snapshotUrl), api(ordersUrl)]);
+    const calls = [api(snapshotUrl), api(ordersUrl)];
+    if (isAdmin) calls.push(api('/api/admin/combat/rating-config'));
+    const [snapshotRes, ordersRes, ratingRes] = await Promise.all(calls);
     const snapshot = snapshotRes && snapshotRes.ok ? await snapshotRes.json() : null;
     const orders = ordersRes && ordersRes.ok ? await ordersRes.json() : [];
-    return { snapshot, orders };
+    const ratingConfig = isAdmin && ratingRes && ratingRes.ok
+      ? await ratingRes.json()
+      : { atk: 2, def: 1.5, dmg: 3, hp: 2, mvt: 1, rng: 1, act: 1, divisor: 10 };
+    return { snapshot, orders, ratingConfig };
   };
 
   const render = async () => {
     view.innerHTML = `<div class="card"><h2>Combat</h2><div class="muted">Loading combat data...</div></div>`;
-    const { snapshot, orders } = await loadData();
+    const { snapshot, orders, ratingConfig } = await loadData();
 
     const commanders = snapshot?.commanders || [];
     const units = snapshot?.units || [];
     const nationName = String(snapshot?.nation?.name || '-');
+    const totalArmyRating = Number(snapshot?.total_army_rating || 0);
+    const sampleBreakdown = [...commanders, ...units].map((u) => u && u.rating_breakdown).find((b) => b && typeof b === 'object');
+    const effectiveRatingConfig = isAdmin
+      ? (ratingConfig || { atk: 2, def: 1.5, dmg: 3, hp: 2, mvt: 1, rng: 1, act: 1, divisor: 10 })
+      : {
+          atk: Number(sampleBreakdown?.weights?.ATK ?? 2),
+          def: Number(sampleBreakdown?.weights?.DEF ?? 1.5),
+          dmg: Number(sampleBreakdown?.weights?.DMG ?? 3),
+          hp: Number(sampleBreakdown?.weights?.HP ?? 2),
+          mvt: Number(sampleBreakdown?.weights?.MVT ?? 1),
+          rng: Number(sampleBreakdown?.weights?.RNG ?? 1),
+          act: Number(sampleBreakdown?.weights?.ACT ?? 1),
+          divisor: Number(sampleBreakdown?.divisor ?? 10),
+        };
 
     view.innerHTML = `
       <div class="card">
@@ -2111,18 +2234,28 @@ async function loadCombat() {
           <div>
             <div class="combat-commanders">
               <h3 style="margin-top:0;">Commanders</h3>
-              ${renderUnitCards(commanders, { allowNameEdit: !isAdmin, allowStatEdit: isAdmin })}
+              <div class="muted" style="margin-bottom:8px;"><strong>Total Army Rating:</strong> ${fmtNum(totalArmyRating)}</div>
+              ${renderUnitCards(commanders, { allowNameEdit: true, allowStatEdit: isAdmin })}
             </div>
             <div>
               <h3 style="margin-top:0;">Units - ${escapeHtml(nationName)}</h3>
               <div class="combat-unit-grid">
-                ${renderUnitCards(units, { allowNameEdit: !isAdmin, allowStatEdit: isAdmin })}
+                ${renderUnitCards(units, { allowNameEdit: true, allowStatEdit: isAdmin })}
               </div>
             </div>
           </div>
           <div class="combat-orders">
-            <h3 style="margin-top:0;">Orders</h3>
             ${isAdmin ? `
+              <h3 style="margin-top:0;">Rating Formula</h3>
+              <div class="res-panel" style="margin-bottom:8px;">
+                ${renderRatingHelpBubble(effectiveRatingConfig, { isAdmin: true })}
+                <div class="row"><label style="min-width:55px;">ATK</label><input id="combatRatingAtk" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.atk ?? 2))}"><label style="min-width:55px;">DEF</label><input id="combatRatingDef" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.def ?? 1.5))}"></div>
+                <div class="row"><label style="min-width:55px;">DMG</label><input id="combatRatingDmg" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.dmg ?? 3))}"><label style="min-width:55px;">HP</label><input id="combatRatingHp" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.hp ?? 2))}"></div>
+                <div class="row"><label style="min-width:55px;">MVT</label><input id="combatRatingMvt" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.mvt ?? 1))}"><label style="min-width:55px;">RNG</label><input id="combatRatingRng" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.rng ?? 1))}"></div>
+                <div class="row"><label style="min-width:55px;">ACT</label><input id="combatRatingAct" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.act ?? 1))}"><label style="min-width:55px;">/</label><input id="combatRatingDivisor" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.divisor ?? 10))}"></div>
+                <div class="row"><button class="primary" id="saveCombatRatingConfigBtn" style="background:#2f6a41;">Save Formula</button><span id="combatRatingConfigMsg" class="muted"></span></div>
+              </div>
+              <h3 style="margin-top:0;">Orders</h3>
               <div class="row" style="margin-bottom:8px;">
                 <label style="min-width:85px;">Player</label>
                 <select id="combatAdminPlayerSelect">
@@ -2131,6 +2264,10 @@ async function loadCombat() {
                 </select>
               </div>
             ` : `
+              <h3 style="margin-top:0;">Orders</h3>
+              <div class="res-panel" style="margin-bottom:8px;">
+                ${renderRatingHelpBubble(effectiveRatingConfig, { isAdmin: false })}
+              </div>
               <label style="font-size:12px;display:block;">Order Title (optional)</label>
               <input id="combatOrderTitle" type="text" placeholder="Example: Border Patrol Deployment">
               <label style="font-size:12px;display:block;margin-top:8px;">Order Text</label>
@@ -2153,10 +2290,16 @@ async function loadCombat() {
       }
     }
 
+    const normalizeNumeric = (value) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    };
+
     document.querySelectorAll('.combatUnitNameSave').forEach((btn) => {
       btn.onclick = async () => {
         const unitId = btn.dataset.unitId;
-        const input = document.querySelector(`.combatUnitNameInput[data-unit-id="${unitId}"]`);
+        const instanceIndex = Number(btn.dataset.instanceIndex || 1);
+        const input = document.querySelector(`.combatUnitNameInput[data-unit-id="${unitId}"][data-instance-index="${instanceIndex}"]`);
         if (!input) return;
         btn.disabled = true;
         const save = await api('/api/me/units/' + encodeURIComponent(unitId) + '/name', {
@@ -2173,26 +2316,45 @@ async function loadCombat() {
       };
     });
 
-    document.querySelectorAll('.combatStatEditSave').forEach((btn) => {
+    document.querySelectorAll('.combatUnitEditSave').forEach((btn) => {
       btn.onclick = async () => {
         const unitId = btn.dataset.unitId;
-        const input = document.querySelector(`.combatStatEditInput[data-unit-id="${unitId}"]`);
-        if (!input) return;
-        let parsed;
-        try {
-          parsed = JSON.parse(input.value || '{}');
-        } catch {
-          alert('Stats override JSON is invalid.');
-          return;
-        }
+        const instanceIndex = Number(btn.dataset.instanceIndex || 1);
+        const nameInput = document.querySelector(`.combatUnitNameInput[data-unit-id="${unitId}"][data-instance-index="${instanceIndex}"]`);
+        const stats = {};
+        STAT_KEYS.forEach((key) => {
+          const statInput = document.querySelector(`.combatUnitStatInput[data-unit-id="${unitId}"][data-instance-index="${instanceIndex}"][data-stat="${key}"]`);
+          const value = normalizeNumeric(statInput?.value);
+          if (value !== null) {
+            stats[key] = value;
+          }
+        });
+        const ratingInput = document.querySelector(`.combatUnitRatingInput[data-unit-id="${unitId}"][data-instance-index="${instanceIndex}"]`);
+        const classInput = document.querySelector(`.combatUnitMetaInput[data-unit-id="${unitId}"][data-instance-index="${instanceIndex}"][data-field="class_name"]`);
+        const statusInput = document.querySelector(`.combatUnitMetaInput[data-unit-id="${unitId}"][data-instance-index="${instanceIndex}"][data-field="status"]`);
+        const raceInput = document.querySelector(`.combatUnitMetaInput[data-unit-id="${unitId}"][data-instance-index="${instanceIndex}"][data-field="race"]`);
+        const terrainInput = document.querySelector(`.combatUnitMetaInput[data-unit-id="${unitId}"][data-instance-index="${instanceIndex}"][data-field="terrain"]`);
+        const noteInput = document.querySelector(`.combatUnitNoteInput[data-unit-id="${unitId}"][data-instance-index="${instanceIndex}"]`);
+        const ratingValue = ratingInput ? String(ratingInput.value || '').trim() : '';
+
         btn.disabled = true;
         const save = await api('/api/admin/combat/units/' + encodeURIComponent(unitId) + '/stats', {
           method: 'PUT',
-          body: JSON.stringify({ stats_override_json: parsed }),
+          body: JSON.stringify({
+            instance_index: instanceIndex,
+            custom_name: nameInput ? (nameInput.value || '') : '',
+            class_name: classInput ? (classInput.value || '') : '',
+            status: statusInput ? (statusInput.value || '') : '',
+            race: raceInput ? (raceInput.value || '') : '',
+            terrain: terrainInput ? (terrainInput.value || '') : '',
+            admin_note: noteInput ? (noteInput.value || '') : '',
+            rating: ratingValue === '' ? null : Number(ratingValue),
+            stats_override_json: stats,
+          }),
         });
         btn.disabled = false;
         if (!save || !save.ok) {
-          alert('Unit stats save failed.');
+          alert(await readErrorMessage(save, 'Unit update failed.'));
           return;
         }
         barkIfEnabled();
@@ -2226,6 +2388,33 @@ async function loadCombat() {
         await render();
       };
     });
+
+    const saveRatingConfigBtn = document.getElementById('saveCombatRatingConfigBtn');
+    if (saveRatingConfigBtn) {
+      saveRatingConfigBtn.onclick = async () => {
+        const msg = document.getElementById('combatRatingConfigMsg');
+        const payload = {
+          atk: Number(document.getElementById('combatRatingAtk').value || 0),
+          def: Number(document.getElementById('combatRatingDef').value || 0),
+          dmg: Number(document.getElementById('combatRatingDmg').value || 0),
+          hp: Number(document.getElementById('combatRatingHp').value || 0),
+          mvt: Number(document.getElementById('combatRatingMvt').value || 0),
+          rng: Number(document.getElementById('combatRatingRng').value || 0),
+          act: Number(document.getElementById('combatRatingAct').value || 0),
+          divisor: Number(document.getElementById('combatRatingDivisor').value || 10),
+        };
+        saveRatingConfigBtn.disabled = true;
+        const res = await api('/api/admin/combat/rating-config', { method: 'PUT', body: JSON.stringify(payload) });
+        saveRatingConfigBtn.disabled = false;
+        if (!res || !res.ok) {
+          msg.textContent = await readErrorMessage(res, 'Rating formula save failed.');
+          return;
+        }
+        msg.textContent = 'Saved.';
+        barkIfEnabled();
+        await render();
+      };
+    }
 
     const submitBtn = document.getElementById('submitCombatOrderBtn');
     if (submitBtn) {
@@ -5351,10 +5540,14 @@ async function loadOtherNations() {
         sections.push(renderSection('Terrain', terrainHtml));
       }
 
+      if (visibility.army_rating && d.army_rating !== null && d.army_rating !== undefined) {
+        sections.push(renderSection('Army Rating', `<div class="res-kv"><span>Total Army Rating</span><span>${fmtNum(d.army_rating)}</span></div>`));
+      }
+
       if (visibility.units) {
         const units = Array.isArray(d.units) ? d.units : extractList(d.units);
         const unitsHtml = units.length > 0
-          ? units.map(unit => `<div class="res-kv"><span>${escapeHtml(unit.display_name || unit.custom_name || 'Unit')} x${Number(unit.qty || 0)}</span><span>${escapeHtml(unit.class_name || unit.status || 'unit')}</span></div>`).join('')
+          ? units.map(unit => `<div class="res-kv"><span>${Number(unit.qty || 0)}X ${escapeHtml(unit.display_name || unit.custom_name || 'Unit')}</span><span>&nbsp;</span></div>`).join('')
           : '<div class="muted">No unit data visible.</div>';
         sections.push(renderSection('Units', unitsHtml));
       }
