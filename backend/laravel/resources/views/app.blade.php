@@ -557,8 +557,20 @@
     .map-stage-controls { position:absolute; left:12px; right:12px; top:10px; display:flex; justify-content:space-between; align-items:flex-start; z-index:4; pointer-events:none; }
     .map-stage-controls > * { pointer-events:auto; }
     .map-top-tools { display:flex; gap:8px; align-items:center; }
-    .map-canvas { width:100%; height:100%; display:block; cursor:grab; }
+    .map-canvas { width:100%; height:100%; display:block; cursor:grab; touch-action:none; -ms-touch-action:none; }
     .map-canvas.dragging { cursor:grabbing; }
+    body.map-fullscreen-lock { overflow: hidden; }
+    .map-stage-wrap.map-pseudo-fullscreen {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      z-index: 1200;
+      border-radius: 0;
+      height: 100vh;
+      height: 100dvh;
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
     .map-floating { position:absolute; z-index:5; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px; backdrop-filter: blur(2px); }
     .map-info-box { left:12px; top:56px; width:260px; }
     .map-bottom-center { position:absolute; left:50%; bottom:10px; transform:translateX(-50%); z-index:5; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px 10px; min-width:240px; }
@@ -736,7 +748,7 @@ const api = async (url, opts = {}) => {
   }
 };
 
-let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal', alliance_color_overrides: {}, political_nation_color_overrides: {} };
+let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal', map_zoom_sensitivity: 1, map_max_zoom_pct: 180, alliance_color_overrides: {}, political_nation_color_overrides: {} };
 let ws = null;
 let wsAuthToken = null;
 let wsAuthTokenExpiresAt = 0;
@@ -2323,6 +2335,7 @@ async function loadMap() {
 
   const layerByType = Object.fromEntries((layers || []).map(l => [l.layer_type, l.image_path]));
   const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+  const mapMaxZoomPct = clamp(toFiniteNumber(settings.map_max_zoom_pct, 180), 100, 300);
   const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -2438,7 +2451,7 @@ async function loadMap() {
             <div class="map-bottom-left" id="mapBottomLeftTools" style="display:none;"></div>
             <div class="map-bottom-center" id="mapBottomCenter">
               <label class="map-small-label" for="mapZoomPercent">Zoom</label>
-              <input id="mapZoomPercent" type="range" min="-25" max="100" step="1" value="0">
+              <input id="mapZoomPercent" type="range" min="-25" max="${mapMaxZoomPct}" step="1" value="0">
             </div>
             <div class="map-bottom-right" id="mapBottomRight">
               <div class="map-floating" style="position:relative;right:auto;bottom:auto;display:flex;gap:8px;align-items:center;">
@@ -2495,7 +2508,9 @@ async function loadMap() {
 
   let mode = 'view';
   const minZoomPct = -25;
-  const maxZoomPct = 100;
+  const maxZoomPct = mapMaxZoomPct;
+  const minZoomSensitivity = 0.25;
+  const maxZoomSensitivity = 3;
   const terrainDefaultBrushSize = 50;
   const politicalDefaultBrushSize = 8;
   let mapType = 'political';
@@ -2534,6 +2549,15 @@ async function loadMap() {
   let lastOutlinePoint = null;
   let dragAction = 'none';
   let mapSaveInProgress = false;
+  const activeTouchPointers = new Map();
+  let pinchGesture = null;
+  let pseudoFullscreenActive = false;
+
+  const getZoomSensitivity = () => clamp(
+    toFiniteNumber(settings.map_zoom_sensitivity, 1),
+    minZoomSensitivity,
+    maxZoomSensitivity
+  );
 
   const terrainColorControlsHtml = () => {
     const palette = getPalette();
@@ -2687,13 +2711,20 @@ async function loadMap() {
     return inside;
   };
 
+  const getZoomFactor = (zoomValue) => {
+    const z = toFiniteNumber(zoomValue, 0);
+    if (z >= 0) {
+      return Math.pow(2, z / 52);
+    }
+    const negativeFactor = 1 / (1 + ((-z) / 35));
+    return Math.max(0.5, negativeFactor);
+  };
+
   const getScaleForZoom = (zoomValue) => {
     const viewW = canvas.width || Math.max(200, Math.floor(stage.getBoundingClientRect().width));
     const viewH = canvas.height || Math.max(200, Math.floor(stage.getBoundingClientRect().height));
     const fitScale = Math.min(viewW / mapWidth, viewH / mapHeight);
-    const factor = zoomValue >= 0
-      ? 1 + (zoomValue / 100) * 79
-      : Math.max(0.55, 1 + (zoomValue / 100));
+    const factor = getZoomFactor(zoomValue);
     return fitScale * factor;
   };
 
@@ -3270,11 +3301,7 @@ async function loadMap() {
     if (!canvas.width || !canvas.height) resizeCanvas();
     const viewW = canvas.width;
     const viewH = canvas.height;
-    const fitScale = Math.min(viewW / mapWidth, viewH / mapHeight);
-    const factor = zoomPct >= 0
-      ? 1 + (zoomPct / 100) * 79
-      : Math.max(0.55, 1 + (zoomPct / 100));
-    const scale = fitScale * factor;
+    const scale = getScaleForZoom(zoomPct);
     transform.scale = scale;
     transform.originX = ((viewW - mapWidth * scale) / 2) + panX;
     transform.originY = ((viewH - mapHeight * scale) / 2) + panY;
@@ -4493,7 +4520,9 @@ async function loadMap() {
   stage.addEventListener('wheel', (e) => {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
-    zoomTargetPct = clamp(zoomTargetPct + (e.deltaY < 0 ? 3 : -3), minZoomPct, maxZoomPct);
+    const wheelIntensity = clamp(Math.abs(toFiniteNumber(e.deltaY, 0)) / 120, 0.35, 3.25);
+    const delta = (e.deltaY < 0 ? 2.6 : -2.6) * wheelIntensity * getZoomSensitivity();
+    zoomTargetPct = clamp(zoomTargetPct + delta, minZoomPct, maxZoomPct);
     document.getElementById('mapZoomPercent').value = String(Math.round(zoomTargetPct));
     const mobileZoom = document.getElementById('mapZoomPercentMobile');
     if (mobileZoom) mobileZoom.value = String(Math.round(zoomTargetPct));
@@ -4501,6 +4530,30 @@ async function loadMap() {
   }, { passive: false });
 
   canvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') {
+      e.preventDefault();
+      activeTouchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      canvas.setPointerCapture(e.pointerId);
+      if (activeTouchPointers.size >= 2) {
+        const points = Array.from(activeTouchPointers.values());
+        const first = points[0];
+        const second = points[1];
+        const centerX = (first.x + second.x) / 2;
+        const centerY = (first.y + second.y) / 2;
+        pinchGesture = {
+          distance: Math.max(1, Math.hypot(second.x - first.x, second.y - first.y)),
+          centerX,
+          centerY,
+        };
+        dragging = false;
+        downPoint = null;
+        dragAction = 'none';
+        canvas.classList.remove('dragging');
+        canvas.style.cursor = 'grab';
+        return;
+      }
+    }
+
     dragging = true;
     canvas.setPointerCapture(e.pointerId);
     downPoint = { x: e.clientX, y: e.clientY, panX, panY };
@@ -4535,6 +4588,42 @@ async function loadMap() {
   });
 
   canvas.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch' && activeTouchPointers.has(e.pointerId)) {
+      activeTouchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinchGesture && activeTouchPointers.size >= 2) {
+        e.preventDefault();
+        const points = Array.from(activeTouchPointers.values());
+        const first = points[0];
+        const second = points[1];
+        const centerX = (first.x + second.x) / 2;
+        const centerY = (first.y + second.y) / 2;
+        const distance = Math.max(1, Math.hypot(second.x - first.x, second.y - first.y));
+        const rect = canvas.getBoundingClientRect();
+        const centerDx = centerX - pinchGesture.centerX;
+        const centerDy = centerY - pinchGesture.centerY;
+        if (Math.abs(centerDx) > 0.01 || Math.abs(centerDy) > 0.01) {
+          panX += centerDx;
+          panY += centerDy;
+        }
+        const ratio = distance / Math.max(1, pinchGesture.distance);
+        const zoomDelta = Math.log2(Math.max(0.25, ratio)) * 28 * getZoomSensitivity();
+        if (Math.abs(zoomDelta) > 0.001) {
+          const nextZoom = clamp(zoomPct + zoomDelta, minZoomPct, maxZoomPct);
+          zoomTargetPct = nextZoom;
+          document.getElementById('mapZoomPercent').value = String(Math.round(nextZoom));
+          const mobileZoom = document.getElementById('mapZoomPercentMobile');
+          if (mobileZoom) mobileZoom.value = String(Math.round(nextZoom));
+          setZoom(nextZoom, { sx: centerX - rect.left, sy: centerY - rect.top });
+        } else {
+          scheduleRender();
+        }
+        pinchGesture.distance = distance;
+        pinchGesture.centerX = centerX;
+        pinchGesture.centerY = centerY;
+        return;
+      }
+    }
+
     if (!dragging || !downPoint) return;
 
     if (dragAction === 'move') {
@@ -4560,14 +4649,46 @@ async function loadMap() {
       }
       return;
     }
-    if (zoomPct <= 0) return;
+    if (mode !== 'view' && zoomPct <= 0) return;
     panX = downPoint.panX + (e.clientX - downPoint.x);
     panY = downPoint.panY + (e.clientY - downPoint.y);
     scheduleRender();
   });
 
   const releasePointer = (e) => {
-    if (!dragging) return;
+    if (e.pointerType === 'touch') {
+      activeTouchPointers.delete(e.pointerId);
+      if (activeTouchPointers.size < 2) {
+        pinchGesture = null;
+      }
+    }
+
+    if (canvas.hasPointerCapture(e.pointerId)) {
+      canvas.releasePointerCapture(e.pointerId);
+    }
+
+    if (e.pointerType === 'touch' && !dragging && activeTouchPointers.size === 1 && mode === 'view') {
+      const remaining = Array.from(activeTouchPointers.values())[0];
+      if (remaining) {
+        dragging = true;
+        downPoint = { x: remaining.x, y: remaining.y, panX, panY };
+        dragAction = 'none';
+        canvas.classList.add('dragging');
+        canvas.style.cursor = 'grabbing';
+        return;
+      }
+    }
+
+    if (!dragging) {
+      canvas.classList.remove('dragging');
+      if (selectedTool === 'move') {
+        canvas.style.cursor = 'grab';
+      } else {
+        canvas.style.cursor = ((mode === 'terrain-editor' || mode === 'political-editor') ? 'crosshair' : 'grab');
+      }
+      return;
+    }
+
     const wasClick = downPoint && Math.hypot(e.clientX - downPoint.x, e.clientY - downPoint.y) < 4;
     dragging = false;
     dragAction = 'none';
@@ -4590,9 +4711,6 @@ async function loadMap() {
       renderSidebar();
       scheduleRender();
     }
-    if (canvas.hasPointerCapture(e.pointerId)) {
-      canvas.releasePointerCapture(e.pointerId);
-    }
     canvas.classList.remove('dragging');
     canvas.style.cursor = selectedTool === 'move' ? 'grab' : ((mode === 'terrain-editor' || mode === 'political-editor') ? 'crosshair' : 'grab');
     if (wasClick && mode === 'view') {
@@ -4606,15 +4724,204 @@ async function loadMap() {
   canvas.addEventListener('pointerup', releasePointer);
   canvas.addEventListener('pointercancel', releasePointer);
 
+  // Fallback for mobile browsers where Pointer Events are partial or disabled.
+  if (!window.PointerEvent) {
+    const touchState = {
+      dragging: false,
+      downPoint: null,
+      pinchDistance: 0,
+      pinchCenterX: 0,
+      pinchCenterY: 0,
+    };
+
+    const firstTouchPoint = (touches) => {
+      if (!touches || !touches.length) return null;
+      const t = touches[0];
+      return { x: t.clientX, y: t.clientY };
+    };
+
+    const twoTouchPoints = (touches) => {
+      if (!touches || touches.length < 2) return null;
+      const a = touches[0];
+      const b = touches[1];
+      return {
+        a: { x: a.clientX, y: a.clientY },
+        b: { x: b.clientX, y: b.clientY },
+      };
+    };
+
+    canvas.addEventListener('touchstart', (e) => {
+      if (!e.touches?.length) return;
+      e.preventDefault();
+
+      if (e.touches.length >= 2) {
+        const points = twoTouchPoints(e.touches);
+        if (!points) return;
+        const centerX = (points.a.x + points.b.x) / 2;
+        const centerY = (points.a.y + points.b.y) / 2;
+        touchState.pinchDistance = Math.max(1, Math.hypot(points.b.x - points.a.x, points.b.y - points.a.y));
+        touchState.pinchCenterX = centerX;
+        touchState.pinchCenterY = centerY;
+        touchState.dragging = false;
+        touchState.downPoint = null;
+        return;
+      }
+
+      const p = firstTouchPoint(e.touches);
+      if (!p) return;
+      touchState.dragging = true;
+      touchState.downPoint = { x: p.x, y: p.y, panX, panY };
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+      if (!e.touches?.length) return;
+      e.preventDefault();
+
+      if (e.touches.length >= 2) {
+        const points = twoTouchPoints(e.touches);
+        if (!points) return;
+        const centerX = (points.a.x + points.b.x) / 2;
+        const centerY = (points.a.y + points.b.y) / 2;
+        const distance = Math.max(1, Math.hypot(points.b.x - points.a.x, points.b.y - points.a.y));
+        const rect = canvas.getBoundingClientRect();
+        const centerDx = centerX - touchState.pinchCenterX;
+        const centerDy = centerY - touchState.pinchCenterY;
+        if (Math.abs(centerDx) > 0.01 || Math.abs(centerDy) > 0.01) {
+          panX += centerDx;
+          panY += centerDy;
+        }
+        const ratio = distance / Math.max(1, touchState.pinchDistance);
+        const zoomDelta = Math.log2(Math.max(0.25, ratio)) * 28 * getZoomSensitivity();
+        if (Math.abs(zoomDelta) > 0.001) {
+          const nextZoom = clamp(zoomPct + zoomDelta, minZoomPct, maxZoomPct);
+          zoomTargetPct = nextZoom;
+          document.getElementById('mapZoomPercent').value = String(Math.round(nextZoom));
+          const mobileZoom = document.getElementById('mapZoomPercentMobile');
+          if (mobileZoom) mobileZoom.value = String(Math.round(nextZoom));
+          setZoom(nextZoom, { sx: centerX - rect.left, sy: centerY - rect.top });
+        } else {
+          scheduleRender();
+        }
+        touchState.pinchDistance = distance;
+        touchState.pinchCenterX = centerX;
+        touchState.pinchCenterY = centerY;
+        touchState.dragging = false;
+        touchState.downPoint = null;
+        return;
+      }
+
+      if (!touchState.dragging || !touchState.downPoint) return;
+      const p = firstTouchPoint(e.touches);
+      if (!p) return;
+      panX = touchState.downPoint.panX + (p.x - touchState.downPoint.x);
+      panY = touchState.downPoint.panY + (p.y - touchState.downPoint.y);
+      scheduleRender();
+    }, { passive: false });
+
+    const touchEndHandler = (e) => {
+      if (e.touches?.length === 1) {
+        const p = firstTouchPoint(e.touches);
+        if (p) {
+          touchState.dragging = true;
+          touchState.downPoint = { x: p.x, y: p.y, panX, panY };
+        }
+      } else {
+        touchState.dragging = false;
+        touchState.downPoint = null;
+      }
+      if (!e.touches?.length) {
+        touchState.pinchDistance = 0;
+      }
+    };
+
+    canvas.addEventListener('touchend', touchEndHandler, { passive: false });
+    canvas.addEventListener('touchcancel', touchEndHandler, { passive: false });
+  }
+
+  const updateFullscreenButtonLabel = () => {
+    const isNativeFullscreen = (document.fullscreenElement === stage) || (document.webkitFullscreenElement === stage);
+    mapFullscreenBtn.textContent = (isNativeFullscreen || pseudoFullscreenActive) ? 'Exit Fullscreen' : 'Fullscreen';
+  };
+
+  const enterPseudoFullscreen = () => {
+    stage.classList.add('map-pseudo-fullscreen');
+    document.body.classList.add('map-fullscreen-lock');
+    pseudoFullscreenActive = true;
+    updateFullscreenButtonLabel();
+    resizeCanvas();
+    render();
+  };
+
+  const exitPseudoFullscreen = () => {
+    stage.classList.remove('map-pseudo-fullscreen');
+    document.body.classList.remove('map-fullscreen-lock');
+    pseudoFullscreenActive = false;
+    updateFullscreenButtonLabel();
+    resizeCanvas();
+    render();
+  };
+
+  const requestStageFullscreen = async () => {
+    try {
+      if (stage.requestFullscreen) {
+        await stage.requestFullscreen();
+        return true;
+      }
+      if (stage.webkitRequestFullscreen) {
+        stage.webkitRequestFullscreen();
+        return true;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  };
+
+  const exitNativeFullscreen = async () => {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      return;
+    }
+    if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
+  };
+
   mapFullscreenBtn.onclick = async () => {
     try {
-      if (!document.fullscreenElement) {
-        await stage.requestFullscreen();
+      const nativeActive = (document.fullscreenElement === stage) || (document.webkitFullscreenElement === stage);
+      if (nativeActive || pseudoFullscreenActive) {
+        if (nativeActive) {
+          await exitNativeFullscreen();
+        }
+        if (pseudoFullscreenActive) {
+          exitPseudoFullscreen();
+        }
+        updateFullscreenButtonLabel();
+        return;
+      }
+      const enteredNative = await requestStageFullscreen();
+      if (!enteredNative) {
+        enterPseudoFullscreen();
       } else {
-        await document.exitFullscreen();
+        updateFullscreenButtonLabel();
       }
     } catch {}
   };
+
+  const onFullscreenChange = () => {
+    const activeFullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || null;
+    if (activeFullscreenElement !== stage && pseudoFullscreenActive) {
+      exitPseudoFullscreen();
+      return;
+    }
+    updateFullscreenButtonLabel();
+    resizeCanvas();
+    render();
+  };
+
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', onFullscreenChange);
 
   if (user.role === 'admin') {
     document.getElementById('openTerrainEditorBtn').onclick = () => setMode('terrain-editor');
@@ -5831,6 +6138,18 @@ async function loadSettings() {
         <select id="fontMode"><option value="normal">Normal Mode</option><option value="fun">Fun Mode</option><option value="cool_person">Cool Person Mode</option></select>
       </div>
       <div class="setting-group">
+        <h3 style="margin:0 0 8px 0;">Map</h3>
+        <label for="mapZoomSensitivity">Map Zoom Sensitivity: <span id="mapZoomSensitivityLabel">100%</span></label>
+        <input id="mapZoomSensitivity" type="range" min="25" max="300" step="5" value="100">
+      </div>
+      ${user.role === 'admin' ? `
+      <div class="setting-group">
+        <h3 style="margin:0 0 8px 0;">Admin Global Map Settings</h3>
+        <label for="mapMaxZoomGlobal">Global Max Zoom Percent (all players)</label>
+        <input id="mapMaxZoomGlobal" type="number" min="100" max="300" step="1" value="180">
+      </div>
+      ` : ''}
+      <div class="setting-group">
         <h3 style="margin:0 0 8px 0;">Sound</h3>
         <label><input type="checkbox" id="goofySound"> Goofy Sound on actions</label>
         <label><input type="checkbox" id="showUnreadChatBadge"> Show unread chat count on Chat tab</label>
@@ -5844,22 +6163,55 @@ async function loadSettings() {
   document.getElementById('goofySound').checked = !!settings.dog_bark_enabled;
   document.getElementById('showUnreadChatBadge').checked = settings.show_unread_chat_badge !== false;
   document.getElementById('fontMode').value = settings.font_mode || 'normal';
+  const zoomSensitivityInput = document.getElementById('mapZoomSensitivity');
+  const zoomSensitivityLabel = document.getElementById('mapZoomSensitivityLabel');
+  const clampPct = (value, min, max) => Math.max(min, Math.min(max, value));
+  const mapZoomSensitivityPct = Math.round(clampPct(toFiniteNumber(settings.map_zoom_sensitivity, 1), 0.25, 3) * 100);
+  zoomSensitivityInput.value = String(mapZoomSensitivityPct);
+  zoomSensitivityLabel.textContent = `${mapZoomSensitivityPct}%`;
+  zoomSensitivityInput.oninput = (e) => {
+    const nextPct = clampPct(toFiniteNumber(e.target.value, 100), 25, 300);
+    zoomSensitivityLabel.textContent = `${Math.round(nextPct)}%`;
+  };
+  const adminMapMaxZoomInput = user.role === 'admin' ? document.getElementById('mapMaxZoomGlobal') : null;
+  if (adminMapMaxZoomInput) {
+    const globalMaxZoom = clampPct(toFiniteNumber(settings.map_max_zoom_pct, 180), 100, 300);
+    adminMapMaxZoomInput.value = String(Math.round(globalMaxZoom));
+  }
 
   document.getElementById('saveSettings').onclick = async () => {
-    const payload = {
-      theme: document.getElementById('theme').value,
-      color_blind_mode: document.getElementById('cb').value,
-      dog_bark_enabled: document.getElementById('goofySound').checked,
-      font_mode: document.getElementById('fontMode').value,
-      show_unread_chat_badge: document.getElementById('showUnreadChatBadge').checked,
-    };
-    await api('/api/me/settings', { method: 'PATCH', body: JSON.stringify(payload) });
-    settings = { ...settings, ...payload };
-    setTheme(settings.theme);
-    applyColorBlindMode(settings.color_blind_mode);
-    setFontMode(settings.font_mode);
-    refreshChatBadge();
-    barkIfEnabled();
+    try {
+      const payload = {
+        theme: document.getElementById('theme').value,
+        color_blind_mode: document.getElementById('cb').value,
+        dog_bark_enabled: document.getElementById('goofySound').checked,
+        font_mode: document.getElementById('fontMode').value,
+        show_unread_chat_badge: document.getElementById('showUnreadChatBadge').checked,
+        map_zoom_sensitivity: clampPct(toFiniteNumber(zoomSensitivityInput.value, 100), 25, 300) / 100,
+      };
+      const userRes = await api('/api/me/settings', { method: 'PATCH', body: JSON.stringify(payload) });
+      if (!userRes?.ok) {
+        throw new Error(await readErrorMessage(userRes, 'Settings could not be saved.'));
+      }
+      if (adminMapMaxZoomInput) {
+        const adminPayload = {
+          map_max_zoom_pct: Math.round(clampPct(toFiniteNumber(adminMapMaxZoomInput.value, 180), 100, 300)),
+        };
+        const adminRes = await api('/api/admin/map-settings', { method: 'PATCH', body: JSON.stringify(adminPayload) });
+        if (!adminRes?.ok) {
+          throw new Error(await readErrorMessage(adminRes, 'Global map settings could not be saved.'));
+        }
+        settings.map_max_zoom_pct = adminPayload.map_max_zoom_pct;
+      }
+      settings = { ...settings, ...payload };
+      setTheme(settings.theme);
+      applyColorBlindMode(settings.color_blind_mode);
+      setFontMode(settings.font_mode);
+      refreshChatBadge();
+      barkIfEnabled();
+    } catch (error) {
+      window.alert(error?.message || 'Settings could not be saved.');
+    }
   };
 }
 

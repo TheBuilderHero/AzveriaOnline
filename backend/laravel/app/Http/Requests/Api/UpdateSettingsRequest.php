@@ -18,6 +18,7 @@ class UpdateSettingsRequest extends FormRequest
             'color_blind_mode' => ['nullable', 'in:none,protanopia,deuteranopia,tritanopia'],
             'dog_bark_enabled' => ['nullable', 'boolean'],
             'font_mode' => ['nullable', 'in:normal,fun,cool_person'],
+            'map_zoom_sensitivity' => ['nullable', 'numeric', 'min:0.25', 'max:3'],
             'show_unread_chat_badge' => ['nullable', 'boolean'],
             'alliance_color_overrides' => ['nullable', 'array'],
             'alliance_color_overrides.*' => ['nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],

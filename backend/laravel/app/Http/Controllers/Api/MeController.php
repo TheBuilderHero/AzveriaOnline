@@ -243,8 +243,11 @@ class MeController extends Controller
         $settings = DB::table('user_settings')->where('user_id', $request->user()->id)->first();
         if ($settings) {
             $extra = json_decode($settings->extra_json ?? '{}', true) ?: [];
+            $mapSettings = $this->loadGlobalMapSettingsRaw();
             $payload = (array) $settings;
             $payload['font_mode'] = $extra['font_mode'] ?? 'normal';
+            $payload['map_zoom_sensitivity'] = max(0.25, min(3, (float) ($extra['map_zoom_sensitivity'] ?? 1)));
+            $payload['map_max_zoom_pct'] = (int) ($mapSettings['map_max_zoom_pct'] ?? 180);
             $payload['show_unread_chat_badge'] = (bool) ($extra['show_unread_chat_badge'] ?? true);
             $payload['apply_year_change_effects'] = (bool) ($extra['apply_year_change_effects'] ?? false);
             $payload['alliance_color_overrides'] = is_array($extra['alliance_color_overrides'] ?? null)
@@ -263,6 +266,7 @@ class MeController extends Controller
             'dog_bark_enabled' => 0,
             'extra_json' => json_encode([
                 'font_mode' => 'normal',
+                'map_zoom_sensitivity' => 1,
                 'show_unread_chat_badge' => true,
                 'apply_year_change_effects' => false,
                 'alliance_color_overrides' => [],
@@ -273,6 +277,8 @@ class MeController extends Controller
         $created = DB::table('user_settings')->where('user_id', $request->user()->id)->first();
         $payload = (array) $created;
         $payload['font_mode'] = 'normal';
+        $payload['map_zoom_sensitivity'] = 1;
+        $payload['map_max_zoom_pct'] = (int) ($this->loadGlobalMapSettingsRaw()['map_max_zoom_pct'] ?? 180);
         $payload['show_unread_chat_badge'] = true;
         $payload['apply_year_change_effects'] = false;
         $payload['alliance_color_overrides'] = [];
@@ -287,6 +293,9 @@ class MeController extends Controller
         $current = $this->settings($request)->getData(true);
         $extra = json_decode($current['extra_json'] ?? '{}', true) ?: [];
         $extra['font_mode'] = $data['font_mode'] ?? ($current['font_mode'] ?? 'normal');
+        $extra['map_zoom_sensitivity'] = array_key_exists('map_zoom_sensitivity', $data)
+            ? max(0.25, min(3, (float) $data['map_zoom_sensitivity']))
+            : max(0.25, min(3, (float) ($current['map_zoom_sensitivity'] ?? 1)));
         $extra['show_unread_chat_badge'] = array_key_exists('show_unread_chat_badge', $data)
             ? (bool) $data['show_unread_chat_badge']
             : (bool) ($current['show_unread_chat_badge'] ?? true);
@@ -622,6 +631,29 @@ class MeController extends Controller
             'global' => is_array($decoded['global'] ?? null) ? $decoded['global'] : [],
             'overrides' => is_array($decoded['overrides'] ?? null) ? $decoded['overrides'] : [],
         ];
+    }
+
+    private function loadGlobalMapSettingsRaw(): array
+    {
+        $path = storage_path('app/map_settings.json');
+        if (!File::exists($path)) {
+            return ['map_max_zoom_pct' => 180];
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        if (!is_array($decoded)) {
+            return ['map_max_zoom_pct' => 180];
+        }
+
+        $maxZoom = (int) ($decoded['map_max_zoom_pct'] ?? 180);
+        if ($maxZoom < 100) {
+            $maxZoom = 100;
+        }
+        if ($maxZoom > 300) {
+            $maxZoom = 300;
+        }
+
+        return ['map_max_zoom_pct' => $maxZoom];
     }
 
     private function findNation(int $userId): ?object

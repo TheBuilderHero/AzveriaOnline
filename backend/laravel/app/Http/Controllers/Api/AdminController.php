@@ -1120,6 +1120,30 @@ class AdminController extends Controller
         return response()->json(['message' => 'Topbar resource configuration saved.']);
     }
 
+    public function mapSettings()
+    {
+        return response()->json($this->loadMapSettingsRaw());
+    }
+
+    public function updateMapSettings(Request $request)
+    {
+        $data = $request->validate([
+            'map_max_zoom_pct' => ['required', 'integer', 'min:100', 'max:300'],
+        ]);
+
+        $payload = [
+            'map_max_zoom_pct' => (int) $data['map_max_zoom_pct'],
+            'updated_at' => now()->toIso8601String(),
+            'updated_by_user_id' => (int) $request->user()->id,
+        ];
+
+        if (!$this->saveMapSettingsRaw($payload)) {
+            return response()->json(['message' => 'Map settings storage is unavailable.'], 500);
+        }
+
+        return response()->json(['message' => 'Map settings saved.']);
+    }
+
     public function deleteManagedAccount(Request $request, int $userId)
     {
         $data = $request->validate([
@@ -1434,6 +1458,46 @@ class AdminController extends Controller
     {
         try {
             $path = $this->resourceTopbarConfigPath();
+            File::ensureDirectoryExists(dirname($path));
+            File::put($path, json_encode($payload, JSON_PRETTY_PRINT));
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private function mapSettingsPath(): string
+    {
+        return storage_path('app/map_settings.json');
+    }
+
+    private function loadMapSettingsRaw(): array
+    {
+        $path = $this->mapSettingsPath();
+        if (!File::exists($path)) {
+            return ['map_max_zoom_pct' => 180];
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        if (!is_array($decoded)) {
+            return ['map_max_zoom_pct' => 180];
+        }
+
+        $maxZoom = (int) ($decoded['map_max_zoom_pct'] ?? 180);
+        if ($maxZoom < 100) {
+            $maxZoom = 100;
+        }
+        if ($maxZoom > 300) {
+            $maxZoom = 300;
+        }
+
+        return ['map_max_zoom_pct' => $maxZoom];
+    }
+
+    private function saveMapSettingsRaw(array $payload): bool
+    {
+        try {
+            $path = $this->mapSettingsPath();
             File::ensureDirectoryExists(dirname($path));
             File::put($path, json_encode($payload, JSON_PRETTY_PRINT));
             return true;

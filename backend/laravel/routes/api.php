@@ -106,6 +106,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/notifications/{notificationId}', [AdminController::class, 'deleteNotification']);
         Route::get('/resource-topbar-config', [AdminController::class, 'resourceTopbarConfig']);
         Route::put('/resource-topbar-config', [AdminController::class, 'updateResourceTopbarConfig']);
+        Route::get('/map-settings', [AdminController::class, 'mapSettings']);
+        Route::patch('/map-settings', [AdminController::class, 'updateMapSettings']);
         Route::post('/maps/layers/{layerType}', [MapController::class, 'uploadLayer']);
         Route::post('/maps/reset', [MapController::class, 'resetMap']);
         Route::post('/maps/editor-state', [MapController::class, 'saveEditorState']);
