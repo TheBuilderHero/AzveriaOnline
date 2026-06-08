@@ -48,7 +48,7 @@ class MapController extends Controller
             'width' => ['required', 'integer', 'min:100', 'max:5000'],
             'height' => ['required', 'integer', 'min:100', 'max:5000'],
             'terrain_color_overrides' => ['nullable', 'array'],
-            'terrain_color_overrides.*' => ['nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+            'terrain_color_overrides.*' => ['nullable', 'string', 'max:32'],
             'terrain_strokes' => ['nullable', 'array'],
             'terrain_strokes.*.tool' => ['nullable', 'string', 'in:brush,fill'],
             'terrain_strokes.*.terrain' => ['nullable', 'string', 'max:64'],
@@ -70,6 +70,8 @@ class MapController extends Controller
             'political_strokes.*.y' => ['nullable', 'numeric'],
             'political_strokes.*.size' => ['nullable', 'numeric', 'min:1', 'max:200'],
         ]);
+
+        $data['terrain_color_overrides'] = $this->normalizeTerrainColorOverrides($data['terrain_color_overrides'] ?? []);
 
         $payload = array_merge($this->defaultEditorState(), $data, [
             'saved_at' => now()->toIso8601String(),
@@ -176,5 +178,29 @@ class MapController extends Controller
             'political_strokes' => [],
             'political_nations' => [],
         ];
+    }
+
+    private function normalizeTerrainColorOverrides($raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($raw as $key => $value) {
+            $terrainKey = trim((string) $key);
+            if ($terrainKey === '' || mb_strlen($terrainKey) > 64) {
+                continue;
+            }
+
+            $color = strtoupper(trim((string) $value));
+            if (!preg_match('/^#[0-9A-F]{6}$/', $color)) {
+                continue;
+            }
+
+            $out[$terrainKey] = $color;
+        }
+
+        return $out;
     }
 }

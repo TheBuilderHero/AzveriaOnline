@@ -2606,4 +2606,199 @@ class AdminController extends Controller
         ]);
     }
 
+    public function developerLogs(Request $request)
+    {
+        $data = $request->validate([
+            'level' => ['sometimes', 'in:error,warning,info,all'],
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:1000'],
+            'query' => ['sometimes', 'string', 'max:120'],
+        ]);
+
+        $level = (string) ($data['level'] ?? 'all');
+        $limit = (int) ($data['limit'] ?? 200);
+        $query = strtolower(trim((string) ($data['query'] ?? '')));
+
+        $logs = $this->loadDeveloperLogsRaw();
+
+        if ($level !== 'all') {
+            $logs = array_values(array_filter($logs, static fn ($log) => (string) ($log['level'] ?? '') === $level));
+        }
+
+        if ($query !== '') {
+            $logs = array_values(array_filter($logs, static function ($log) use ($query) {
+                $haystack = strtolower(
+                    (string) ($log['summary'] ?? '') . ' ' .
+                    (string) ($log['source'] ?? '') . ' ' .
+                    (string) ($log['section'] ?? '') . ' ' .
+                    (string) json_encode($log['context'] ?? [])
+                );
+                return str_contains($haystack, $query);
+            }));
+        }
+
+        usort($logs, static function ($a, $b) {
+            return strcmp((string) ($b['timestamp'] ?? ''), (string) ($a['timestamp'] ?? ''));
+        });
+
+        return response()->json([
+            'logs' => array_slice($logs, 0, $limit),
+            'total' => count($logs),
+        ]);
+    }
+
+    public function storeDeveloperLog(Request $request)
+    {
+        $data = $request->validate([
+            'level' => ['required', 'in:error,warning,info'],
+            'summary' => ['required', 'string', 'max:300'],
+            'source' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'section' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'url' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'context' => ['sometimes', 'nullable', 'array'],
+        ]);
+
+        $logs = $this->loadDeveloperLogsRaw();
+        $entry = [
+            'id' => (string) Str::uuid(),
+            'timestamp' => now()->toIso8601String(),
+            'level' => (string) $data['level'],
+            'summary' => trim((string) $data['summary']),
+            'source' => trim((string) ($data['source'] ?? 'ui')),
+            'section' => trim((string) ($data['section'] ?? '')),
+            'url' => trim((string) ($data['url'] ?? '')),
+            'context' => is_array($data['context'] ?? null) ? $data['context'] : [],
+            'actor_user_id' => (int) $request->user()->id,
+        ];
+
+        $logs[] = $entry;
+        $max = (int) ($this->loadDeveloperLogSettingsRaw()['max_entries'] ?? 2000);
+        if ($max < 100) {
+            $max = 100;
+        }
+        if (count($logs) > $max) {
+            $logs = array_slice($logs, count($logs) - $max);
+        }
+
+        if (!$this->saveDeveloperLogsRaw($logs)) {
+            return response()->json(['message' => 'Developer log storage is unavailable.'], 500);
+        }
+
+        return response()->json(['message' => 'Developer log captured.', 'entry' => $entry]);
+    }
+
+    public function clearDeveloperLogs()
+    {
+        if (!$this->saveDeveloperLogsRaw([])) {
+            return response()->json(['message' => 'Developer log storage is unavailable.'], 500);
+        }
+        return response()->json(['message' => 'Developer logs cleared.']);
+    }
+
+    public function developerLogSettings()
+    {
+        return response()->json($this->loadDeveloperLogSettingsRaw());
+    }
+
+    public function updateDeveloperLogSettings(Request $request)
+    {
+        $data = $request->validate([
+            'capture_error' => ['sometimes', 'boolean'],
+            'capture_warning' => ['sometimes', 'boolean'],
+            'capture_info' => ['sometimes', 'boolean'],
+            'auto_capture_client' => ['sometimes', 'boolean'],
+            'max_entries' => ['sometimes', 'integer', 'min:100', 'max:5000'],
+        ]);
+
+        $settings = array_merge($this->loadDeveloperLogSettingsRaw(), $data, [
+            'updated_at' => now()->toIso8601String(),
+            'updated_by_user_id' => (int) $request->user()->id,
+        ]);
+
+        if (!$this->saveDeveloperLogSettingsRaw($settings)) {
+            return response()->json(['message' => 'Developer log settings storage is unavailable.'], 500);
+        }
+
+        return response()->json(['message' => 'Developer log settings saved.', 'settings' => $settings]);
+    }
+
+    private function developerLogsPath(): string
+    {
+        return storage_path('app/developer_logs.json');
+    }
+
+    private function developerLogSettingsPath(): string
+    {
+        return storage_path('app/developer_log_settings.json');
+    }
+
+    private function loadDeveloperLogsRaw(): array
+    {
+        $path = $this->developerLogsPath();
+        if (!File::exists($path)) {
+            return [];
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        return array_values(array_filter($decoded, static fn ($row) => is_array($row)));
+    }
+
+    private function saveDeveloperLogsRaw(array $logs): bool
+    {
+        try {
+            $path = $this->developerLogsPath();
+            File::ensureDirectoryExists(dirname($path));
+            File::put($path, json_encode(array_values($logs), JSON_PRETTY_PRINT));
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private function loadDeveloperLogSettingsRaw(): array
+    {
+        $defaults = [
+            'capture_error' => true,
+            'capture_warning' => true,
+            'capture_info' => true,
+            'auto_capture_client' => true,
+            'max_entries' => 2000,
+        ];
+
+        $path = $this->developerLogSettingsPath();
+        if (!File::exists($path)) {
+            return $defaults;
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        if (!is_array($decoded)) {
+            return $defaults;
+        }
+
+        return [
+            'capture_error' => (bool) ($decoded['capture_error'] ?? $defaults['capture_error']),
+            'capture_warning' => (bool) ($decoded['capture_warning'] ?? $defaults['capture_warning']),
+            'capture_info' => (bool) ($decoded['capture_info'] ?? $defaults['capture_info']),
+            'auto_capture_client' => (bool) ($decoded['auto_capture_client'] ?? $defaults['auto_capture_client']),
+            'max_entries' => max(100, min(5000, (int) ($decoded['max_entries'] ?? $defaults['max_entries']))),
+            'updated_at' => (string) ($decoded['updated_at'] ?? ''),
+            'updated_by_user_id' => (int) ($decoded['updated_by_user_id'] ?? 0),
+        ];
+    }
+
+    private function saveDeveloperLogSettingsRaw(array $settings): bool
+    {
+        try {
+            $path = $this->developerLogSettingsPath();
+            File::ensureDirectoryExists(dirname($path));
+            File::put($path, json_encode($settings, JSON_PRETTY_PRINT));
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
 }

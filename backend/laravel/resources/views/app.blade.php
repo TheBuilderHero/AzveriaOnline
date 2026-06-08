@@ -645,6 +645,31 @@
       border-color: #8a1a1a;
       background: #fde8e8;
     }
+    .map-busy-indicator {
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      min-height: 18px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--panel) 85%, transparent);
+    }
+    .map-spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-top-color: #2f6a41;
+      border-radius: 50%;
+      animation: map-spin 0.85s linear infinite;
+      flex: 0 0 auto;
+    }
+    @keyframes map-spin {
+      to { transform: rotate(360deg); }
+    }
     @media (max-width: 1100px) {
       .map-shell { grid-template-columns: 1fr; }
       .map-stage-wrap { height:62vh; min-height:420px; }
@@ -701,6 +726,7 @@
       <option value="">Help</option>
       <option value="about">About</option>
       <option value="docs">Documentation</option>
+      <option value="developer-options">Developer Options</option>
       <option value="report-issue">Report Issue</option>
       <option value="reset-password">Reset Password</option>
       <option value="logout">Logout</option>
@@ -737,10 +763,38 @@ const api = async (url, opts = {}) => {
       window.location.href = '/';
       return null;
     }
+    if (!opts.silentLog && !developerLogInternalPath(url)) {
+      if (res.status >= 500) {
+        captureDeveloperLog('error', `HTTP ${res.status} ${opts.method || 'GET'} ${url}`, {
+          status: res.status,
+          url,
+          method: opts.method || 'GET',
+        }, { source: 'api.http' });
+      } else if (res.status >= 400) {
+        captureDeveloperLog('warning', `HTTP ${res.status} ${opts.method || 'GET'} ${url}`, {
+          status: res.status,
+          url,
+          method: opts.method || 'GET',
+        }, { source: 'api.http' });
+      }
+    }
     return res;
   } catch (error) {
     if (error?.name === 'AbortError') {
+      if (!opts.silentLog && !developerLogInternalPath(url)) {
+        captureDeveloperLog('error', `Request timeout ${opts.method || 'GET'} ${url}`, {
+          timeout_ms: opts.timeout ?? 20000,
+          url,
+          method: opts.method || 'GET',
+        }, { source: 'api.network' });
+      }
       throw new Error('The server took too long to respond. Please try again.');
+    }
+    if (!opts.silentLog && !developerLogInternalPath(url)) {
+      captureDeveloperLog('error', `Network error ${opts.method || 'GET'} ${url}`, {
+        url,
+        method: opts.method || 'GET',
+      }, { source: 'api.network' });
     }
     throw new Error('The server could not be reached. Check the deployment and try again.');
   } finally {
@@ -756,6 +810,86 @@ let activeSectionName = '';
 const view = document.getElementById('view');
 const nav = document.getElementById('nav');
 const resourcesBar = document.getElementById('resourcesBar');
+
+const developerLogSettingsDefaults = {
+  capture_error: true,
+  capture_warning: true,
+  capture_info: true,
+  auto_capture_client: true,
+  max_entries: 2000,
+};
+let developerLogSettings = { ...developerLogSettingsDefaults };
+let developerErrorHandlersInstalled = false;
+
+function shouldCaptureDeveloperLevel(level) {
+  if (user.role !== 'admin') return false;
+  const normalized = String(level || '').toLowerCase();
+  if (normalized === 'error') return !!developerLogSettings.capture_error;
+  if (normalized === 'warning') return !!developerLogSettings.capture_warning;
+  if (normalized === 'info') return !!developerLogSettings.capture_info;
+  return false;
+}
+
+function developerLogInternalPath(url) {
+  return String(url || '').includes('/api/admin/developer/log');
+}
+
+async function loadDeveloperLogSettingsClient() {
+  if (user.role !== 'admin') return;
+  try {
+    const res = await api('/api/admin/developer/log-settings', { timeout: 10000, silentLog: true });
+    if (!res || !res.ok) return;
+    const payload = await res.json();
+    developerLogSettings = { ...developerLogSettingsDefaults, ...(payload || {}) };
+  } catch {}
+}
+
+async function captureDeveloperLog(level, summary, context = {}, opts = {}) {
+  const normalized = String(level || '').toLowerCase();
+  if (!shouldCaptureDeveloperLevel(normalized)) return;
+  if (developerLogSettings.auto_capture_client === false && opts.force !== true) return;
+
+  const payload = {
+    level: normalized,
+    summary: String(summary || 'Unknown issue').slice(0, 300),
+    source: String(opts.source || 'ui').slice(0, 120),
+    section: String(opts.section || activeSectionName || '').slice(0, 120),
+    url: String(window.location.pathname || '').slice(0, 500),
+    context: (context && typeof context === 'object') ? context : { note: String(context || '') },
+  };
+
+  try {
+    await api('/api/admin/developer/logs', {
+      method: 'POST',
+      timeout: 10000,
+      silentLog: true,
+      body: JSON.stringify(payload),
+    });
+  } catch {}
+}
+
+function installGlobalDeveloperErrorHandlers() {
+  if (developerErrorHandlersInstalled || user.role !== 'admin') return;
+  developerErrorHandlersInstalled = true;
+
+  window.addEventListener('error', (event) => {
+    captureDeveloperLog('error', 'Unhandled browser error', {
+      message: event?.message || 'Unknown browser error',
+      filename: event?.filename || '',
+      line: event?.lineno || 0,
+      column: event?.colno || 0,
+      stack: event?.error?.stack || '',
+    }, { source: 'window.error' });
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event?.reason;
+    captureDeveloperLog('error', 'Unhandled promise rejection', {
+      message: reason?.message || String(reason || 'Promise rejected without reason'),
+      stack: reason?.stack || '',
+    }, { source: 'window.unhandledrejection' });
+  });
+}
 
 const playerMenu = ['Player', 'Announcements', 'Information', 'Map', 'Combat', 'Chat', 'Other Nations', 'Shop', 'Settings'];
 const adminMenu = ['Announcements', 'All Nations', 'Notifications', 'Information', 'Resource Management', 'New Accounts', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
@@ -974,6 +1108,10 @@ async function refreshChatBadge() {
 }
 
 async function loadResources() {
+  if (user.role === 'admin') {
+    resourcesBar.innerHTML = '';
+    return;
+  }
   if (!window.resourceDefs) {
     try {
       const defsRes = await api('/api/resources');
@@ -984,7 +1122,7 @@ async function loadResources() {
       }
     } catch {}
   }
-  const res = await api('/api/me/resources');
+  const res = await api('/api/me/resources', { silentLog: true });
   if (!res || !res.ok) return;
   const r = await res.json();
   const base = r.base || {};
@@ -1195,6 +1333,7 @@ async function loadSection(name) {
     if (name === 'Information') return await loadGameInformationRules();
     if (name === 'Resource Management') return await loadResourceManagement();
     if (name === 'About') return await loadAboutPage();
+    if (name === 'Developer Options') return await loadDeveloperOptionsPage();
   // Admin Resource Management UI
   async function loadResourceManagement() {
     view.innerHTML = `<div class="card"><h2>Resource Management</h2><div id="resourceMgmtPanel"><div class="muted">Loading…</div></div></div>`;
@@ -2651,7 +2790,11 @@ async function loadMap() {
           </div>
           <div class="row" style="margin-top:10px;justify-content:space-between;flex-wrap:wrap;">
             <div id="mapSaveArea"></div>
-            <span class="map-status-message" id="mapStatusMsg"></span>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+              <span class="map-busy-indicator" id="mapBusyIndicator" style="display:none;"><span class="map-spinner"></span><span id="mapBusyText">Working...</span></span>
+              <span class="muted" id="mapPayloadSizeIndicator" title="Estimated JSON payload size for editor-state save."></span>
+              <span class="map-status-message" id="mapStatusMsg"></span>
+            </div>
           </div>
         </div>
         <div>
@@ -2673,15 +2816,29 @@ async function loadMap() {
   const mapBottomCenter = document.getElementById('mapBottomCenter');
   const mapBottomRight = document.getElementById('mapBottomRight');
   const mapSaveArea = document.getElementById('mapSaveArea');
+  const mapBusyIndicator = document.getElementById('mapBusyIndicator');
+  const mapBusyText = document.getElementById('mapBusyText');
+  const mapPayloadSizeIndicator = document.getElementById('mapPayloadSizeIndicator');
   const mapStatusMsg = document.getElementById('mapStatusMsg');
+  const MAP_STATUS_INFO_MS = 15000;
+  const MAP_STATUS_WARN_MS = 30000;
   let mapStatusMsgClearTimer = null;
+  let mapBusyDepth = 0;
+
+  const formatMapStatusTimestamp = (date = new Date()) => {
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    const ss = String(date.getSeconds()).padStart(2, '0');
+    return `[${hh}:${mm}:${ss}]`;
+  };
 
   const setMapStatus = (message, { clearAfterMs = 0, state = '' } = {}) => {
     if (mapStatusMsgClearTimer) {
       clearTimeout(mapStatusMsgClearTimer);
       mapStatusMsgClearTimer = null;
     }
-    mapStatusMsg.textContent = String(message || '');
+    const body = String(message || '').trim();
+    mapStatusMsg.textContent = body ? `${formatMapStatusTimestamp()} ${body}` : '';
     mapStatusMsg.dataset.state = state || '';
     if (clearAfterMs > 0 && mapStatusMsg.textContent) {
       const expected = mapStatusMsg.textContent;
@@ -2692,6 +2849,23 @@ async function loadMap() {
         }
         mapStatusMsgClearTimer = null;
       }, clearAfterMs);
+    }
+  };
+
+  const setMapBusy = (isBusy, message = 'Working...') => {
+    if (!mapBusyIndicator) return;
+    if (isBusy) {
+      mapBusyDepth++;
+      if (mapBusyText) {
+        mapBusyText.textContent = String(message || 'Working...');
+      }
+      mapBusyIndicator.style.display = 'inline-flex';
+      return;
+    }
+
+    mapBusyDepth = Math.max(0, mapBusyDepth - 1);
+    if (mapBusyDepth === 0) {
+      mapBusyIndicator.style.display = 'none';
     }
   };
 
@@ -3549,6 +3723,8 @@ async function loadMap() {
     if (mapType === 'political' || mapType === 'alliance' || mode === 'political-editor') {
       drawPoliticalLabels(viewW, viewH);
     }
+
+    updateMapPayloadIndicator();
   };
 
   const setNationInfo = (nationId) => {
@@ -3605,7 +3781,6 @@ async function loadMap() {
       labelCache = [];
     }
     politicalLayerDirty = true;
-    mapStatusMsg.textContent = '';
     renderSidebar();
     renderTopEditorControls();
     renderBottomTools();
@@ -3655,28 +3830,33 @@ async function loadMap() {
       lastOutlinePoint = null;
       resizeCanvas();
       render();
-      mapStatusMsg.textContent = 'Grid resized and reset to all water.';
+      setMapStatus('Grid resized and reset to all water.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'info' });
     };
 
     document.getElementById('editorBgUpload').onchange = async (e) => {
       if (!e.target.files || !e.target.files.length) return;
+      setMapBusy(true, 'Loading reference image...');
       const file = e.target.files[0];
-      if (editorBackgroundObjectUrl) {
-        URL.revokeObjectURL(editorBackgroundObjectUrl);
-        editorBackgroundObjectUrl = null;
+      try {
+        if (editorBackgroundObjectUrl) {
+          URL.revokeObjectURL(editorBackgroundObjectUrl);
+          editorBackgroundObjectUrl = null;
+        }
+        editorBackgroundObjectUrl = URL.createObjectURL(file);
+        editorBackgroundPath = editorBackgroundObjectUrl;
+        editorBgImage = await loadImage(editorBackgroundPath);
+        if (!editorBgImage) {
+          URL.revokeObjectURL(editorBackgroundObjectUrl);
+          editorBackgroundObjectUrl = null;
+          editorBackgroundPath = null;
+          setMapStatus('Reference upload failed.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
+          return;
+        }
+        render();
+        setMapStatus('Reference image loaded for this session only.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
+      } finally {
+        setMapBusy(false);
       }
-      editorBackgroundObjectUrl = URL.createObjectURL(file);
-      editorBackgroundPath = editorBackgroundObjectUrl;
-      editorBgImage = await loadImage(editorBackgroundPath);
-      if (!editorBgImage) {
-        URL.revokeObjectURL(editorBackgroundObjectUrl);
-        editorBackgroundObjectUrl = null;
-        editorBackgroundPath = null;
-        mapStatusMsg.textContent = 'Reference upload failed.';
-        return;
-      }
-      render();
-      mapStatusMsg.textContent = 'Reference image loaded for this session only.';
     };
 
     document.getElementById('editorBgClearBtn').onclick = () => {
@@ -3689,7 +3869,7 @@ async function loadMap() {
       const upload = document.getElementById('editorBgUpload');
       if (upload) upload.value = '';
       render();
-      mapStatusMsg.textContent = 'Reference image cleared.';
+      setMapStatus('Reference image cleared.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'info' });
     };
 
     const bgOpacityInput = document.getElementById('editorBgOpacity');
@@ -3859,11 +4039,11 @@ async function loadMap() {
 
   const assignOutlinedLandToNation = () => {
     if (mode !== 'political-editor' || !territoryEditing || !politicalEditNationId) {
-      mapStatusMsg.textContent = 'Enable Political territory editing first.';
+      setMapStatus('Enable Political territory editing first.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
       return;
     }
     if (outlinePoints.length < 3 || !outlineClosed) {
-      mapStatusMsg.textContent = 'Cannot assign: outline is not fully encapsulated (closed).';
+      setMapStatus('Cannot assign: outline is not fully encapsulated (closed).', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
       return;
     }
 
@@ -3883,7 +4063,7 @@ async function loadMap() {
     }
 
     if (!seed) {
-      mapStatusMsg.textContent = 'No unowned enclosed land found inside outline.';
+      setMapStatus('No unowned enclosed land found inside outline.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
       return;
     }
 
@@ -3911,7 +4091,7 @@ async function loadMap() {
     }
 
     if (leaksToEdge) {
-      mapStatusMsg.textContent = 'Cannot assign: outline does not fully encapsulate a region.';
+      setMapStatus('Cannot assign: outline does not fully encapsulate a region.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
       return;
     }
 
@@ -3926,21 +4106,25 @@ async function loadMap() {
 
     outlinePoints = [];
     outlineClosed = false;
-    mapStatusMsg.textContent = 'Encapsulated region assigned to selected nation.';
+    setMapStatus('Encapsulated region assigned to selected nation.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
     renderSidebar();
     render();
   };
 
   const syncNationTerrainStats = async () => {
+    const knownNationIds = new Set((Array.isArray(nations) ? nations : []).map(n => Number(n.id || 0)).filter(Boolean));
     const nationPayload = politicalNationsArray().map(n => ({
       id: n.id,
       name: n.name,
       alliance_name: n.alliance_name || '',
       races: n.races || [],
       pixels: nationPixelCount(n.id),
-    }));
+    })).filter(n => knownNationIds.has(Number(n.id || 0)));
+
+    const skippedUnknownNations = Math.max(0, politicalNationsArray().length - nationPayload.length);
 
     let failedNationUpdates = 0;
+    const failedDetails = [];
     for (const nation of nationPayload) {
       const breakdown = terrainPixelBreakdownForNation(nation.id);
       const terrainPayload = {
@@ -3966,13 +4150,21 @@ async function loadMap() {
       });
       if (!nationSaveRes || !nationSaveRes.ok) {
         failedNationUpdates++;
+        failedDetails.push({
+          nation_id: nation.id,
+          nation_name: nation.name,
+          status: nationSaveRes?.status || null,
+          message: await readErrorMessage(nationSaveRes, 'Nation terrain sync failed.'),
+        });
       }
     }
 
     return {
       ok: failedNationUpdates === 0,
       failedNationUpdates,
+      failedDetails,
       updatedCount: nationPayload.length,
+      skippedUnknownNations,
     };
   };
 
@@ -3995,6 +4187,41 @@ async function loadMap() {
     };
   };
 
+  let mapPayloadIndicatorLastStamp = 0;
+  let mapPayloadIndicatorLastBytes = -1;
+  const formatPayloadBytes = (bytes) => {
+    if (!Number.isFinite(bytes) || bytes < 0) return '-';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
+  const updateMapPayloadIndicator = (force = false) => {
+    if (!mapPayloadSizeIndicator) return;
+    const now = Date.now();
+    if (!force && now - mapPayloadIndicatorLastStamp < 1200) return;
+    mapPayloadIndicatorLastStamp = now;
+
+    try {
+      const json = JSON.stringify(buildEditorStatePayload());
+      const bytes = new Blob([json]).size;
+      if (!force && bytes === mapPayloadIndicatorLastBytes) return;
+      mapPayloadIndicatorLastBytes = bytes;
+
+      mapPayloadSizeIndicator.textContent = `Save payload: ${formatPayloadBytes(bytes)}`;
+      if (bytes >= 8 * 1024 * 1024) {
+        mapPayloadSizeIndicator.style.color = '#c62828';
+      } else if (bytes >= 2 * 1024 * 1024) {
+        mapPayloadSizeIndicator.style.color = '#9b5a1e';
+      } else {
+        mapPayloadSizeIndicator.style.color = '';
+      }
+    } catch {
+      mapPayloadSizeIndicator.textContent = 'Save payload: unavailable';
+      mapPayloadSizeIndicator.style.color = '#c62828';
+    }
+  };
+
   const persistCurrentMapState = async ({ successMessage = 'Map saved.' } = {}) => {
     if (mapSaveInProgress) {
       setMapStatus('Map save is already in progress...');
@@ -4009,21 +4236,31 @@ async function loadMap() {
         body: JSON.stringify(payload),
       });
       if (!saveStateRes || !saveStateRes.ok) {
-        setMapStatus('Failed to save map editor state.', { state: 'error' });
+        setMapStatus(await readErrorMessage(saveStateRes, 'Failed to save map editor state.'), { state: 'error' });
         return false;
       }
 
       const syncResult = await syncNationTerrainStats();
       if (!syncResult.ok) {
-        setMapStatus(`Map saved, but ${syncResult.failedNationUpdates} nation terrain updates failed.`, { clearAfterMs: 5000, state: 'error' });
-        return false;
+        captureDeveloperLog('warning', 'Map save partial success: nation terrain sync failures', {
+          failed_count: syncResult.failedNationUpdates,
+          failed_details: syncResult.failedDetails || [],
+          skipped_unknown_nations: syncResult.skippedUnknownNations || 0,
+        }, { source: 'map.save' });
+        setMapStatus(`Map state saved. ${syncResult.failedNationUpdates} nation terrain update(s) failed.${syncResult.skippedUnknownNations ? ` Skipped ${syncResult.skippedUnknownNations} unknown nation id(s) from backup.` : ''}`, { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
+        return true;
       }
 
       unsavedChanges = false;
-      setMapStatus(successMessage, { clearAfterMs: 3000, state: 'success' });
+      updateMapPayloadIndicator(true);
+      setMapStatus(`${successMessage}${syncResult.skippedUnknownNations ? ` Skipped ${syncResult.skippedUnknownNations} unknown nation id(s) from backup.` : ''}`, { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
       return true;
     } catch (error) {
       const message = (error && error.message) ? error.message : 'Map save failed due to a network or server error.';
+      captureDeveloperLog('error', 'Map save failed', {
+        message,
+        stack: error?.stack || '',
+      }, { source: 'map.save' });
       setMapStatus(message, { state: 'error' });
       return false;
     } finally {
@@ -4032,17 +4269,25 @@ async function loadMap() {
   };
 
   const bindMapSaveTriggers = () => {
+    const setSaveButtonsBusy = (isBusy) => {
+      document.querySelectorAll('.mapSaveTrigger').forEach((b) => {
+        b.disabled = !!isBusy;
+        b.textContent = isBusy ? 'Saving...' : 'Save';
+      });
+    };
+
     document.querySelectorAll('.mapSaveTrigger').forEach(btn => {
       btn.onclick = async (event) => {
         if (event) event.preventDefault();
         if (mapSaveInProgress) return;
-        const buttons = Array.from(document.querySelectorAll('.mapSaveTrigger'));
-        buttons.forEach(b => { b.disabled = true; });
-        setMapStatus('Saving map... large maps can take up to a couple of minutes.');
+        setSaveButtonsBusy(true);
+        setMapBusy(true, 'Saving map...');
+        setMapStatus('Save requested. Saving map now... large maps can take up to a couple of minutes.', { state: 'info' });
         try {
           await persistCurrentMapState({ successMessage: 'Map saved.' });
         } finally {
-          buttons.forEach(b => { b.disabled = false; });
+          setMapBusy(false);
+          setSaveButtonsBusy(false);
         }
       };
     });
@@ -4086,6 +4331,7 @@ async function loadMap() {
     renderBottomTools();
     renderSidebar();
     resizeCanvas();
+    updateMapPayloadIndicator(true);
     render();
   };
 
@@ -4222,7 +4468,7 @@ async function loadMap() {
       document.getElementById('clearOutlineBtn').onclick = () => {
         outlinePoints = [];
         outlineClosed = false;
-        mapStatusMsg.textContent = 'Outline cleared.';
+        setMapStatus('Outline cleared.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'info' });
         renderSidebar();
         render();
       };
@@ -4230,7 +4476,7 @@ async function loadMap() {
       document.getElementById('politicalDoneBtn').onclick = () => {
         territoryEditing = false;
         const pixels = nationPixelCount(politicalEditNationId);
-        mapStatusMsg.textContent = `Nation territory committed: ${pixels.toLocaleString()} pixels.`;
+        setMapStatus(`Nation territory committed: ${pixels.toLocaleString()} pixels.`, { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
         renderSidebar();
       };
 
@@ -4239,7 +4485,7 @@ async function loadMap() {
         if (!name) return;
         const response = await api('/api/admin/nations', { method: 'POST', body: JSON.stringify({ name }) });
         if (!response || !response.ok) {
-          mapStatusMsg.textContent = 'Failed to create nation record.';
+          setMapStatus('Failed to create nation record.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
           return;
         }
         const payload = await response.json();
@@ -5131,9 +5377,9 @@ async function loadMap() {
           link.click();
           link.remove();
           URL.revokeObjectURL(url);
-          mapStatusMsg.textContent = 'Map backup downloaded.';
+          setMapStatus('Map backup downloaded.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
         } catch {
-          mapStatusMsg.textContent = 'Failed to download map backup.';
+          setMapStatus('Failed to download map backup.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
         }
       };
     }
@@ -5145,12 +5391,13 @@ async function loadMap() {
       uploadMapBackupInput.onchange = async (event) => {
         const file = event?.target?.files?.[0];
         if (!file) return;
+        setMapBusy(true, 'Uploading backup and applying map data...');
         try {
           const text = await file.text();
           const parsed = JSON.parse(text);
           const importedState = extractEditorStateFromBackup(parsed);
           if (!importedState) {
-            mapStatusMsg.textContent = 'Invalid backup file format.';
+            setMapStatus('Invalid backup file format.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
             uploadMapBackupInput.value = '';
             return;
           }
@@ -5159,10 +5406,12 @@ async function loadMap() {
           setMode('terrain-editor');
           const saved = await persistCurrentMapState({ successMessage: 'Map backup imported and saved.' });
           if (!saved) {
-            mapStatusMsg.textContent = 'Backup loaded locally, but saving to server failed.';
+            setMapStatus('Backup loaded locally. Server save failed. See previous error details.', { state: 'error' });
           }
         } catch {
-          mapStatusMsg.textContent = 'Failed to import map backup.';
+          setMapStatus('Failed to import map backup.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
+        } finally {
+          setMapBusy(false);
         }
         uploadMapBackupInput.value = '';
       };
@@ -5171,13 +5420,18 @@ async function loadMap() {
     document.getElementById('recalcTerrainStatsBtn').onclick = async () => {
       const ok = window.confirm('Recalculate terrain stats for all nations from the current map pixels?');
       if (!ok) return;
-      const syncResult = await syncNationTerrainStats();
-      if (!syncResult.ok) {
-        mapStatusMsg.textContent = `Recalculation failed for ${syncResult.failedNationUpdates} nation(s).`;
-        return;
+      setMapBusy(true, 'Recalculating terrain stats...');
+      try {
+        const syncResult = await syncNationTerrainStats();
+        if (!syncResult.ok) {
+          setMapStatus(`Recalculation failed for ${syncResult.failedNationUpdates} nation(s).`, { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
+          return;
+        }
+        setMapStatus(`Terrain stats recalculated for ${syncResult.updatedCount} nation(s).`, { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
+        renderSidebar();
+      } finally {
+        setMapBusy(false);
       }
-      mapStatusMsg.textContent = `Terrain stats recalculated for ${syncResult.updatedCount} nation(s).`;
-      renderSidebar();
     };
     document.getElementById('resetMapBtn').onclick = async () => {
       const firstWarning = window.confirm('This will permanently reset the entire map, clear all map layers, and reset all nation terrain map values. Continue?');
@@ -5185,17 +5439,22 @@ async function loadMap() {
 
       const phrase = window.prompt('Type exactly: confirm reset of map');
       if ((phrase || '').trim() !== 'confirm reset of map') {
-        mapStatusMsg.textContent = 'Map reset cancelled: confirmation text did not match.';
+        setMapStatus('Map reset cancelled: confirmation text did not match.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
         return;
       }
 
-      const resetRes = await api('/api/admin/maps/reset', { method: 'POST' });
-      if (!resetRes || !resetRes.ok) {
-        mapStatusMsg.textContent = 'Failed to reset map.';
-        return;
-      }
+      setMapBusy(true, 'Resetting map...');
+      try {
+        const resetRes = await api('/api/admin/maps/reset', { method: 'POST' });
+        if (!resetRes || !resetRes.ok) {
+          setMapStatus('Failed to reset map.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
+          return;
+        }
 
-      await loadMap();
+        await loadMap();
+      } finally {
+        setMapBusy(false);
+      }
     };
   }
 
@@ -7771,6 +8030,194 @@ async function loadTimeTracker() {
   };
 }
 
+async function loadDeveloperOptionsPage() {
+  if (user.role !== 'admin') {
+    view.innerHTML = '<div class="card"><h2>Developer Options</h2><p class="danger">Admin access required.</p></div>';
+    return;
+  }
+
+  view.innerHTML = `
+    <div class="card">
+      <h2>Developer Options</h2>
+      <p class="muted">App-wide diagnostics and error insights. Logs are shown with a short summary first; expand any row for full details.</p>
+      <div class="row" style="align-items:flex-end;gap:8px;flex-wrap:wrap;">
+        <label>Level
+          <select id="devLogLevelFilter">
+            <option value="all">All</option>
+            <option value="error">Error</option>
+            <option value="warning">Warning</option>
+            <option value="info">Information</option>
+          </select>
+        </label>
+        <label>Search
+          <input id="devLogQuery" type="text" placeholder="message, section, source" style="min-width:220px;">
+        </label>
+        <label>Limit
+          <input id="devLogLimit" type="number" min="10" max="1000" value="200" style="width:100px;">
+        </label>
+        <button class="primary" id="devLogRefreshBtn">Refresh</button>
+        <button class="primary" id="devLogClearBtn">Clear Logs</button>
+      </div>
+      <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap;">
+        <button class="primary" id="devLogTestInfo">Test Info</button>
+        <button class="primary" id="devLogTestWarn">Test Warning</button>
+        <button class="primary" id="devLogTestError">Test Error</button>
+        <a class="primary" href="/docs/developer" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:inline-flex;align-items:center;">Open Developer Docs</a>
+      </div>
+      <div class="muted" id="devLogMeta" style="margin-top:8px;"></div>
+      <div id="devLogList" style="margin-top:10px;display:grid;gap:8px;"></div>
+    </div>
+    <div class="card" style="margin-top:12px;">
+      <h3>Logging Settings</h3>
+      <div class="row" style="gap:16px;flex-wrap:wrap;">
+        <label><input type="checkbox" id="devCaptureError"> Capture Error</label>
+        <label><input type="checkbox" id="devCaptureWarning"> Capture Warning</label>
+        <label><input type="checkbox" id="devCaptureInfo"> Capture Information</label>
+        <label><input type="checkbox" id="devAutoCaptureClient"> Auto-capture client errors</label>
+        <label>Max entries
+          <input type="number" id="devMaxEntries" min="100" max="5000" style="width:110px;">
+        </label>
+        <button class="primary" id="devSaveSettingsBtn">Save Settings</button>
+      </div>
+      <div class="muted" id="devSettingsMsg" style="margin-top:8px;"></div>
+    </div>
+  `;
+
+  const levelFilter = document.getElementById('devLogLevelFilter');
+  const queryInput = document.getElementById('devLogQuery');
+  const limitInput = document.getElementById('devLogLimit');
+  const listEl = document.getElementById('devLogList');
+  const metaEl = document.getElementById('devLogMeta');
+  const settingsMsg = document.getElementById('devSettingsMsg');
+  const clampLocal = (value, min, max) => Math.max(min, Math.min(max, value));
+
+  const formatWhen = (iso) => {
+    const d = new Date(iso || '');
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleString();
+  };
+
+  const detailsForLog = (log) => {
+    const details = {
+      id: log.id || '',
+      level: log.level || '',
+      timestamp: log.timestamp || '',
+      source: log.source || '',
+      section: log.section || '',
+      url: log.url || '',
+      actor_user_id: log.actor_user_id || null,
+      context: log.context || {},
+    };
+    return escapeHtml(JSON.stringify(details, null, 2));
+  };
+
+  const renderLogs = (logs, total) => {
+    metaEl.textContent = `Showing ${logs.length} log(s). Total matching: ${total}.`;
+    if (!logs.length) {
+      listEl.innerHTML = '<div class="muted">No logs for the selected filters.</div>';
+      return;
+    }
+    listEl.innerHTML = logs.map((log) => {
+      const level = String(log.level || 'info').toUpperCase();
+      const levelColor = log.level === 'error' ? '#b00020' : (log.level === 'warning' ? '#9b5a1e' : '#1f5ca8');
+      return `
+        <details>
+          <summary style="cursor:pointer;line-height:1.4;">
+            <strong style="color:${levelColor};">${level}</strong>
+            <span style="margin-left:8px;">${escapeHtml(log.summary || 'No summary')}</span>
+            <span class="muted" style="margin-left:8px;">${escapeHtml(formatWhen(log.timestamp))}</span>
+          </summary>
+          <pre style="margin-top:8px;white-space:pre-wrap;">${detailsForLog(log)}</pre>
+        </details>
+      `;
+    }).join('');
+  };
+
+  const reloadLogs = async () => {
+    listEl.innerHTML = '<div class="muted">Loading logs...</div>';
+    const params = new URLSearchParams();
+    params.set('level', levelFilter.value || 'all');
+    params.set('limit', String(clampLocal(toFiniteNumber(limitInput.value, 200), 10, 1000)));
+    const q = String(queryInput.value || '').trim();
+    if (q) params.set('query', q);
+    const res = await api(`/api/admin/developer/logs?${params.toString()}`, { silentLog: true });
+    if (!res || !res.ok) {
+      listEl.innerHTML = `<div class="danger">${escapeHtml(await readErrorMessage(res, 'Failed to load developer logs.'))}</div>`;
+      return;
+    }
+    const payload = await parseJsonResponse(res, { logs: [], total: 0 });
+    const logs = Array.isArray(payload?.logs) ? payload.logs : [];
+    renderLogs(logs, toFiniteNumber(payload?.total, logs.length));
+  };
+
+  const reloadSettings = async () => {
+    settingsMsg.textContent = '';
+    const res = await api('/api/admin/developer/log-settings', { silentLog: true });
+    if (!res || !res.ok) {
+      settingsMsg.textContent = await readErrorMessage(res, 'Failed to load settings.');
+      return;
+    }
+    const payload = await parseJsonResponse(res, {});
+    developerLogSettings = { ...developerLogSettingsDefaults, ...(payload || {}) };
+    document.getElementById('devCaptureError').checked = !!developerLogSettings.capture_error;
+    document.getElementById('devCaptureWarning').checked = !!developerLogSettings.capture_warning;
+    document.getElementById('devCaptureInfo').checked = !!developerLogSettings.capture_info;
+    document.getElementById('devAutoCaptureClient').checked = !!developerLogSettings.auto_capture_client;
+    document.getElementById('devMaxEntries').value = String(developerLogSettings.max_entries || 2000);
+  };
+
+  document.getElementById('devLogRefreshBtn').onclick = reloadLogs;
+  document.getElementById('devLogClearBtn').onclick = async () => {
+    const confirm = window.confirm('Clear all developer logs?');
+    if (!confirm) return;
+    const res = await api('/api/admin/developer/logs', { method: 'DELETE', silentLog: true });
+    if (!res || !res.ok) {
+      metaEl.textContent = await readErrorMessage(res, 'Failed to clear logs.');
+      return;
+    }
+    metaEl.textContent = 'Logs cleared.';
+    await reloadLogs();
+  };
+
+  document.getElementById('devSaveSettingsBtn').onclick = async () => {
+    const payload = {
+      capture_error: !!document.getElementById('devCaptureError').checked,
+      capture_warning: !!document.getElementById('devCaptureWarning').checked,
+      capture_info: !!document.getElementById('devCaptureInfo').checked,
+      auto_capture_client: !!document.getElementById('devAutoCaptureClient').checked,
+      max_entries: clampLocal(toFiniteNumber(document.getElementById('devMaxEntries').value, 2000), 100, 5000),
+    };
+    const res = await api('/api/admin/developer/log-settings', {
+      method: 'PUT',
+      silentLog: true,
+      body: JSON.stringify(payload),
+    });
+    if (!res || !res.ok) {
+      settingsMsg.textContent = await readErrorMessage(res, 'Failed to save settings.');
+      return;
+    }
+    const saved = await parseJsonResponse(res, {});
+    developerLogSettings = { ...developerLogSettingsDefaults, ...(saved?.settings || payload) };
+    settingsMsg.textContent = 'Settings saved.';
+  };
+
+  document.getElementById('devLogTestInfo').onclick = async () => {
+    await captureDeveloperLog('info', 'Manual test information log', { by: 'admin', section: activeSectionName }, { force: true, source: 'developer.page' });
+    await reloadLogs();
+  };
+  document.getElementById('devLogTestWarn').onclick = async () => {
+    await captureDeveloperLog('warning', 'Manual test warning log', { by: 'admin', section: activeSectionName }, { force: true, source: 'developer.page' });
+    await reloadLogs();
+  };
+  document.getElementById('devLogTestError').onclick = async () => {
+    await captureDeveloperLog('error', 'Manual test error log', { by: 'admin', section: activeSectionName }, { force: true, source: 'developer.page' });
+    await reloadLogs();
+  };
+
+  await reloadSettings();
+  await reloadLogs();
+}
+
 async function init() {
   let settingsRes = null;
   try {
@@ -7783,6 +8230,9 @@ async function init() {
     applyColorBlindMode(settings.color_blind_mode);
     setFontMode(settings.font_mode || 'normal');
   }
+
+  await loadDeveloperLogSettingsClient();
+  installGlobalDeveloperErrorHandlers();
 
   // Never block navigation rendering on topbar resource refresh failures.
   loadResources().catch(() => {});
@@ -7809,12 +8259,19 @@ function initMenuToggle() {
 }
 
 const helpSelect = document.getElementById('helpSelect');
+if (user.role !== 'admin') {
+  const devOption = helpSelect.querySelector('option[value="developer-options"]');
+  if (devOption) devOption.remove();
+}
 helpSelect.addEventListener('change', async (e) => {
   if (e.target.value === 'about') {
     await loadAboutPage();
   }
   if (e.target.value === 'docs') {
     window.open(user.role === 'admin' ? '/docs/admin' : '/docs/player', '_blank');
+  }
+  if (e.target.value === 'developer-options') {
+    await loadSection('Developer Options');
   }
   if (e.target.value === 'report-issue') {
     window.open('https://github.com/TheBuilderHero/AzveriaOnline/issues', '_blank', 'noopener,noreferrer');

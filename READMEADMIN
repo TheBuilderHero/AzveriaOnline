@@ -24,6 +24,14 @@ This document defines admin-only behavior in the Azveria Online web app.
 	- Political map
 - Changes are global and instantly visible to all users.
 - Note to move while drawing hold shift and click and drag to move the map.
+- Map editor now shows a live `Save payload` indicator near save/status.
+	- This is an estimated JSON size for map editor state saves.
+	- Color guide:
+		- Normal: below ~2 MB
+		- Warning: ~2 MB to ~8 MB
+		- High risk: above ~8 MB
+	- If payload is high, simplify/reduce stored stroke history before saving.
+	- Large payloads can increase save time or fail if infrastructure limits are exceeded.
 
 ### Chat
 - Access all chats.
@@ -223,7 +231,47 @@ Player:
 ### Help Dropdown
 - About (website version + game version + metadata)
 - Documentation (opens admin readme)
+- Developer Options (in-app diagnostics page for logs + logging settings)
 - Logout
+
+## Developer Options (Admin)
+
+The Help dropdown now includes **Developer Options** for app-wide diagnostics.
+
+### Error Log Tab
+- Captures failures and diagnostics from across the app (API failures, timeouts, network issues, browser runtime errors, unhandled promise rejections, and map save partial-failure details).
+- Supports level filters: `Error`, `Warning`, `Information`.
+- Supports text search + result limits.
+- Shows compact summary rows first, with expandable detail JSON for full context.
+- Includes actions:
+	- `Refresh`
+	- `Clear Logs`
+	- manual test log buttons for each level
+
+### Logging Settings Tab
+- Toggle capture by level (`Error`, `Warning`, `Information`).
+- Toggle automatic client-side capture.
+- Set retained log cap (`max_entries`, bounded 100-5000).
+- Settings persist server-side in storage JSON.
+
+### API Surface (Developer Logs)
+- `GET /api/admin/developer/logs`
+- `POST /api/admin/developer/logs`
+- `DELETE /api/admin/developer/logs`
+- `GET /api/admin/developer/log-settings`
+- `PUT /api/admin/developer/log-settings`
+
+### Next Steps
+1. Open Help -> Developer Options and run the three test log buttons (Info, Warning, Error).
+2. Confirm each test entry appears in Error Log with expandable details.
+3. Trigger one real failure (for example, force a bad map save input) and verify context captures section/source/message.
+4. Tune Logging Settings for your environment:
+	- Keep Error enabled in all environments.
+	- Keep Warning enabled in staging/production unless noise is too high.
+	- Disable Information in production if volume is excessive.
+5. Set max entries based on server constraints and expected incident volume.
+6. During incident response, use Level + Search filters first, then expand details to isolate root cause.
+7. After resolution, clear logs only when snapshots/export notes have been captured for postmortem records.
 
 ## API Permission Boundaries
 - Admin has full CRUD on nations, map layers, shop catalog, and chat membership.

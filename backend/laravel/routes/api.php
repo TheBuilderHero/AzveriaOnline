@@ -110,6 +110,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/resource-topbar-config', [AdminController::class, 'updateResourceTopbarConfig']);
         Route::get('/map-settings', [AdminController::class, 'mapSettings']);
         Route::patch('/map-settings', [AdminController::class, 'updateMapSettings']);
+        Route::get('/developer/logs', [AdminController::class, 'developerLogs']);
+        Route::post('/developer/logs', [AdminController::class, 'storeDeveloperLog']);
+        Route::delete('/developer/logs', [AdminController::class, 'clearDeveloperLogs']);
+        Route::get('/developer/log-settings', [AdminController::class, 'developerLogSettings']);
+        Route::put('/developer/log-settings', [AdminController::class, 'updateDeveloperLogSettings']);
         Route::post('/maps/layers/{layerType}', [MapController::class, 'uploadLayer']);
         Route::post('/maps/reset', [MapController::class, 'resetMap']);
         Route::post('/maps/editor-state', [MapController::class, 'saveEditorState']);

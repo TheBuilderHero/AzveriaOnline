@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 COPY docker/php-fpm/zz-listen.conf /usr/local/etc/php-fpm.d/zz-listen.conf
 COPY docker/php-fpm/opcache.ini /usr/local/etc/php/conf.d/opcache.ini
+COPY docker/php-fpm/uploads.ini /usr/local/etc/php/conf.d/uploads.ini
 
 WORKDIR /var/www/html
 
