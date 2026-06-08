@@ -2933,6 +2933,11 @@ async function loadMap() {
             <input type="color" class="terrainColorInput" data-key="${key}" value="${palette[key].startsWith('#') ? palette[key] : '#cccccc'}">
           </div>
         `).join('')}
+        <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+          <button class="primary" type="button" id="terrainColorResetBtn">Reset Colors</button>
+          <button class="primary" type="button" id="terrainColorSaveBtn">Save Colors</button>
+          <span class="muted" id="terrainColorMsg"></span>
+        </div>
       </details>
     `;
   };
@@ -2946,6 +2951,60 @@ async function loadMap() {
         render();
       });
     });
+
+    const colorMsgEl = root.querySelector('#terrainColorMsg');
+    const saveColorsBtn = root.querySelector('#terrainColorSaveBtn');
+    const resetColorsBtn = root.querySelector('#terrainColorResetBtn');
+
+    if (resetColorsBtn) {
+      resetColorsBtn.onclick = () => {
+        colorOverrides = {};
+        terrainLayerDirty = true;
+        waterLayerDirty = true;
+        if (colorMsgEl) colorMsgEl.textContent = 'Colors reset to defaults. Click Save Colors to persist.';
+        renderSidebar();
+        render();
+      };
+    }
+
+    if (saveColorsBtn) {
+      saveColorsBtn.onclick = async () => {
+        if (mapSaveInProgress) return;
+        mapSaveInProgress = true;
+        saveColorsBtn.disabled = true;
+        if (resetColorsBtn) resetColorsBtn.disabled = true;
+        if (colorMsgEl) colorMsgEl.textContent = 'Saving...';
+        setMapBusy(true, 'Saving terrain colors...');
+
+        try {
+          const saveRes = await api('/api/admin/maps/editor-state', {
+            method: 'POST',
+            timeout: 120000,
+            body: JSON.stringify(buildEditorStatePayload()),
+          });
+
+          if (!saveRes || !saveRes.ok) {
+            const msg = await readErrorMessage(saveRes, 'Failed to save terrain colors.');
+            setMapStatus(msg, { state: 'error' });
+            if (colorMsgEl) colorMsgEl.textContent = msg;
+            return;
+          }
+
+          updateMapPayloadIndicator(true);
+          setMapStatus('Terrain colors saved.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
+          if (colorMsgEl) colorMsgEl.textContent = 'Terrain colors saved.';
+        } catch (error) {
+          const message = error?.message || 'Failed to save terrain colors.';
+          setMapStatus(message, { state: 'error' });
+          if (colorMsgEl) colorMsgEl.textContent = message;
+        } finally {
+          mapSaveInProgress = false;
+          saveColorsBtn.disabled = false;
+          if (resetColorsBtn) resetColorsBtn.disabled = false;
+          setMapBusy(false);
+        }
+      };
+    }
   };
 
   const imageCache = new Map();
