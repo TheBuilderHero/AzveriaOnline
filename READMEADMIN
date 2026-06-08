@@ -16,6 +16,13 @@ This document defines admin-only behavior in the Azveria Online web app.
 - Cancel: reverts unsaved values to snapshot from select-time.
 - Supports creating placeholder (dummy) nations with full editable stats.
 
+### New Accounts / Player Deletion
+- Delete Player now supports two modes:
+	- Standard delete: removes the player account and owned nation records.
+	- Delete + purge player data: also removes player-linked app artifacts (such as map editor political references and topbar user overrides).
+- This purge option is available as a checkbox in the Delete Player Account area.
+- Safety confirmation: when purge mode is enabled, admin must also type `PURGE PLAYER DATA` before deletion is accepted.
+
 ### Map
 - View and pan/zoom all map layers.
 - Upload replacement images for:
@@ -246,7 +253,16 @@ The Help dropdown now includes **Developer Options** for app-wide diagnostics.
 - Includes actions:
 	- `Refresh`
 	- `Clear Logs`
+	- `Preview Zombie Cleanup` (non-destructive estimate with expandable per-category details and sample records)
 	- manual test log buttons for each level
+	- `Purge Zombie Data` (cleanup pass for lingering data from improperly removed accounts)
+
+### Developer Danger Warnings
+- Destructive actions in Developer Options now require explicit confirmation phrase prompts.
+- `Clear Logs` requires typing `CLEAR DEV LOGS`.
+- `Purge Zombie Data` requires typing `PURGE ZOMBIE DATA`.
+- These warnings are designed to prevent accidental destructive operations.
+- Use `Preview Zombie Cleanup` first to review impact before running purge.
 
 ### Logging Settings Tab
 - Toggle capture by level (`Error`, `Warning`, `Information`).
@@ -260,6 +276,7 @@ The Help dropdown now includes **Developer Options** for app-wide diagnostics.
 - `DELETE /api/admin/developer/logs`
 - `GET /api/admin/developer/log-settings`
 - `PUT /api/admin/developer/log-settings`
+- `POST /api/admin/developer/cleanup-zombie-data`
 
 ### Next Steps
 1. Open Help -> Developer Options and run the three test log buttons (Info, Warning, Error).

@@ -14,6 +14,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
@@ -1285,6 +1286,8 @@ class AdminController extends Controller
     {
         $data = $request->validate([
             'confirmation_name' => ['required', 'string'],
+            'purge_player_data' => ['sometimes', 'boolean'],
+            'purge_confirmation' => ['sometimes', 'nullable', 'string'],
         ], [
             'confirmation_name.required' => 'Enter the exact username to confirm account removal.',
         ]);
@@ -1300,9 +1303,245 @@ class AdminController extends Controller
             ]);
         }
 
-        $this->accounts->deleteAccount($user, false);
+        $purgePlayerData = (bool) ($data['purge_player_data'] ?? false);
+        if ($purgePlayerData) {
+            $phrase = strtoupper(trim((string) ($data['purge_confirmation'] ?? '')));
+            if ($phrase !== 'PURGE PLAYER DATA') {
+                throw ValidationException::withMessages([
+                    'purge_confirmation' => 'Type PURGE PLAYER DATA to confirm data purge mode.',
+                ]);
+            }
+        }
+        $this->accounts->deleteAccount($user, false, $purgePlayerData);
 
-        return response()->json(['message' => 'Player account deleted permanently.']);
+        return response()->json([
+            'message' => $purgePlayerData
+                ? 'Player account and related map/player data deleted permanently.'
+                : 'Player account deleted permanently.',
+        ]);
+    }
+
+    public function cleanupDeveloperZombieData(Request $request)
+    {
+        $data = $request->validate([
+            'dry_run' => ['sometimes', 'boolean'],
+            'confirmation_text' => ['sometimes', 'nullable', 'string'],
+        ]);
+
+        $dryRun = (bool) ($data['dry_run'] ?? false);
+        if (!$dryRun) {
+            if (strtoupper(trim((string) ($data['confirmation_text'] ?? ''))) !== 'PURGE ZOMBIE DATA') {
+                throw ValidationException::withMessages([
+                    'confirmation_text' => 'Type PURGE ZOMBIE DATA to continue.',
+                ]);
+            }
+        }
+
+        $validNationIds = DB::table('nations')->pluck('id')->map(static fn ($id) => (int) $id)->all();
+        $validNationSet = array_fill_keys($validNationIds, true);
+        $validUserIds = DB::table('users')->pluck('id')->map(static fn ($id) => (int) $id)->all();
+        $validUserSet = array_fill_keys($validUserIds, true);
+        $exampleLimit = 25;
+
+        $results = [
+            'map_editor_political_nations_removed' => 0,
+            'map_editor_political_strokes_removed' => 0,
+            'resource_topbar_overrides_removed' => 0,
+            'developer_logs_removed' => 0,
+        ];
+        $previewDetails = [
+            'map_editor_political_nations' => [
+                'label' => 'Map editor political nation entries',
+                'reason' => 'Nation IDs do not exist anymore (or are invalid).',
+                'count' => 0,
+                'examples' => [],
+            ],
+            'map_editor_political_strokes' => [
+                'label' => 'Map editor political strokes',
+                'reason' => 'Strokes reference deleted nation IDs or have invalid shape.',
+                'count' => 0,
+                'examples' => [],
+            ],
+            'resource_topbar_overrides' => [
+                'label' => 'Resource topbar user overrides',
+                'reason' => 'Overrides reference deleted user IDs.',
+                'count' => 0,
+                'examples' => [],
+            ],
+            'developer_logs' => [
+                'label' => 'Developer log entries',
+                'reason' => 'Log actor_user_id references deleted users or invalid log shape.',
+                'count' => 0,
+                'examples' => [],
+            ],
+        ];
+
+        $mapPath = 'maps/editor-state.json';
+        $publicDisk = Storage::disk('public');
+        if ($publicDisk->exists($mapPath)) {
+            try {
+                $decoded = json_decode((string) $publicDisk->get($mapPath), true);
+                if (is_array($decoded)) {
+                    $politicalNations = is_array($decoded['political_nations'] ?? null) ? $decoded['political_nations'] : [];
+                    $beforeNationCount = count($politicalNations);
+                    $removedPoliticalNations = [];
+                    foreach ($politicalNations as $row) {
+                        $id = (int) ($row['id'] ?? 0);
+                        if ($id > 0 && isset($validNationSet[$id])) {
+                            continue;
+                        }
+                        if (count($removedPoliticalNations) < $exampleLimit) {
+                            $removedPoliticalNations[] = [
+                                'id' => $id,
+                                'name' => (string) ($row['name'] ?? ''),
+                            ];
+                        }
+                    }
+                    $filteredPoliticalNations = array_values(array_filter($politicalNations, static function ($row) use ($validNationSet) {
+                        $id = (int) ($row['id'] ?? 0);
+                        if ($id <= 0) return false;
+                        return isset($validNationSet[$id]);
+                    }));
+                    $results['map_editor_political_nations_removed'] = max(0, $beforeNationCount - count($filteredPoliticalNations));
+                    $previewDetails['map_editor_political_nations']['count'] = $results['map_editor_political_nations_removed'];
+                    $previewDetails['map_editor_political_nations']['examples'] = $removedPoliticalNations;
+
+                    $politicalStrokes = is_array($decoded['political_strokes'] ?? null) ? $decoded['political_strokes'] : [];
+                    $beforeStrokeCount = count($politicalStrokes);
+                    $removedPoliticalStrokes = [];
+                    foreach ($politicalStrokes as $index => $row) {
+                        if (!is_array($row)) {
+                            if (count($removedPoliticalStrokes) < $exampleLimit) {
+                                $removedPoliticalStrokes[] = ['index' => $index, 'reason' => 'invalid_row_shape'];
+                            }
+                            continue;
+                        }
+                        $nationId = (int) ($row['nation_id'] ?? 0);
+                        if ($nationId > 0 && !isset($validNationSet[$nationId])) {
+                            if (count($removedPoliticalStrokes) < $exampleLimit) {
+                                $removedPoliticalStrokes[] = [
+                                    'index' => $index,
+                                    'nation_id' => $nationId,
+                                    'tool' => (string) ($row['tool'] ?? ''),
+                                    'x' => $row['x'] ?? null,
+                                    'y' => $row['y'] ?? null,
+                                ];
+                            }
+                        }
+                    }
+                    $filteredPoliticalStrokes = array_values(array_filter($politicalStrokes, static function ($row) use ($validNationSet) {
+                        if (!is_array($row)) return false;
+                        $nationId = (int) ($row['nation_id'] ?? 0);
+                        if ($nationId <= 0) return true;
+                        return isset($validNationSet[$nationId]);
+                    }));
+                    $results['map_editor_political_strokes_removed'] = max(0, $beforeStrokeCount - count($filteredPoliticalStrokes));
+                    $previewDetails['map_editor_political_strokes']['count'] = $results['map_editor_political_strokes_removed'];
+                    $previewDetails['map_editor_political_strokes']['examples'] = $removedPoliticalStrokes;
+
+                    if (!$dryRun) {
+                        $decoded['political_nations'] = $filteredPoliticalNations;
+                        $decoded['political_strokes'] = $filteredPoliticalStrokes;
+                        $publicDisk->put($mapPath, json_encode($decoded, JSON_UNESCAPED_SLASHES));
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+        }
+
+        $topbarPath = storage_path('app/resource_topbar_config.json');
+        if (File::exists($topbarPath)) {
+            try {
+                $decoded = json_decode((string) File::get($topbarPath), true);
+                if (is_array($decoded)) {
+                    $overrides = is_array($decoded['overrides'] ?? null) ? $decoded['overrides'] : [];
+                    $before = count($overrides);
+                    $removedOverrides = [];
+                    foreach ($overrides as $row) {
+                        $userId = (int) ($row['user_id'] ?? 0);
+                        if ($userId > 0 && isset($validUserSet[$userId])) {
+                            continue;
+                        }
+                        if (count($removedOverrides) < $exampleLimit) {
+                            $removedOverrides[] = [
+                                'user_id' => $userId,
+                                'mode' => (string) ($row['mode'] ?? ''),
+                                'resource_count' => is_array($row['resources'] ?? null) ? count($row['resources']) : 0,
+                            ];
+                        }
+                    }
+                    $filteredOverrides = array_values(array_filter($overrides, static function ($row) use ($validUserSet) {
+                        $userId = (int) ($row['user_id'] ?? 0);
+                        if ($userId <= 0) return false;
+                        return isset($validUserSet[$userId]);
+                    }));
+                    $results['resource_topbar_overrides_removed'] = max(0, $before - count($filteredOverrides));
+                    $previewDetails['resource_topbar_overrides']['count'] = $results['resource_topbar_overrides_removed'];
+                    $previewDetails['resource_topbar_overrides']['examples'] = $removedOverrides;
+                    if (!$dryRun) {
+                        $decoded['overrides'] = $filteredOverrides;
+                        File::put($topbarPath, json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+        }
+
+        $developerLogPath = storage_path('app/developer_logs.json');
+        if (File::exists($developerLogPath)) {
+            try {
+                $decoded = json_decode((string) File::get($developerLogPath), true);
+                if (is_array($decoded)) {
+                    $before = count($decoded);
+                    $removedLogs = [];
+                    foreach ($decoded as $row) {
+                        if (!is_array($row)) {
+                            if (count($removedLogs) < $exampleLimit) {
+                                $removedLogs[] = ['id' => null, 'reason' => 'invalid_row_shape'];
+                            }
+                            continue;
+                        }
+                        $actorId = (int) ($row['actor_user_id'] ?? 0);
+                        if ($actorId > 0 && isset($validUserSet[$actorId])) {
+                            continue;
+                        }
+                        if ($actorId <= 0 && array_key_exists('actor_user_id', $row) === false) {
+                            continue;
+                        }
+                        if (count($removedLogs) < $exampleLimit) {
+                            $removedLogs[] = [
+                                'id' => (string) ($row['id'] ?? ''),
+                                'actor_user_id' => $actorId,
+                                'level' => (string) ($row['level'] ?? ''),
+                                'summary' => (string) ($row['summary'] ?? ''),
+                            ];
+                        }
+                    }
+                    $filtered = array_values(array_filter($decoded, static function ($row) use ($validUserSet) {
+                        if (!is_array($row)) return false;
+                        $actorId = (int) ($row['actor_user_id'] ?? 0);
+                        if ($actorId <= 0) return true;
+                        return isset($validUserSet[$actorId]);
+                    }));
+                    $results['developer_logs_removed'] = max(0, $before - count($filtered));
+                    $previewDetails['developer_logs']['count'] = $results['developer_logs_removed'];
+                    $previewDetails['developer_logs']['examples'] = $removedLogs;
+                    if (!$dryRun) {
+                        File::put($developerLogPath, json_encode($filtered, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                    }
+                }
+            } catch (\Throwable $e) {
+            }
+        }
+
+        $totalRemoved = array_sum($results);
+        return response()->json([
+            'message' => $dryRun ? 'Zombie-data cleanup preview generated.' : 'Zombie-data cleanup complete.',
+            'dry_run' => $dryRun,
+            'total_removed' => $totalRemoved,
+            'details' => $results,
+            'preview_details' => $previewDetails,
+        ]);
     }
 
     public function createChat(StoreChatRequest $request)

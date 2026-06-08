@@ -1416,9 +1416,9 @@ async function loadSection(name) {
     };
     ['base','advanced'].forEach(type => {
       const groups = defs[type] || {};
-      html += `<details open style="margin-bottom:10px;"><summary style="font-size:16px;font-weight:600;">${type.charAt(0).toUpperCase()+type.slice(1)} Resources</summary>`;
+      html += `<details style="margin-bottom:10px;"><summary style="font-size:16px;font-weight:600;">${type.charAt(0).toUpperCase()+type.slice(1)} Resources</summary>`;
       sortGroupEntries(groups).forEach(([group, arr]) => {
-        html += `<details open style="margin:6px 0 0 12px;"><summary style="font-size:15px;">Group: ${escapeHtml(group)}</summary>`;
+        html += `<details style="margin:6px 0 0 12px;"><summary style="font-size:15px;">Group: ${escapeHtml(group)}</summary>`;
         html += arr.length === 0 ? '<div class="muted">No resources in this group.</div>' : arr.map(def => `
           <div class="resource-def-card">
             <form class="resourceEditForm" data-id="${def.id}">
@@ -1444,13 +1444,13 @@ async function loadSection(name) {
       html += '</details>';
     });
     html += `
-      <details open style="margin-top:12px;">
+      <details style="margin-top:12px;">
         <summary style="font-size:16px;font-weight:600;">New Account Resource Defaults</summary>
         <div class="defaults-admin-shell" style="margin-top:8px;">
           <p class="muted" style="margin-top:0;">Configure starting resources and yearly income for newly created nations. Duplicates are not allowed.</p>
 
           <div class="defaults-admin-grid">
-            <details open style="margin-top:8px;">
+            <details style="margin-top:8px;">
               <summary>Starting Resources</summary>
               <div class="defaults-admin-block" style="margin-top:8px;">
                 <div class="topbar-admin-block-head">
@@ -1472,7 +1472,7 @@ async function loadSection(name) {
               </div>
             </details>
 
-            <details open style="margin-top:8px;">
+            <details style="margin-top:8px;">
               <summary>Income Per Game Year</summary>
               <div class="defaults-admin-block" style="margin-top:8px;">
                 <div class="topbar-admin-block-head">
@@ -1501,13 +1501,13 @@ async function loadSection(name) {
           </div>
         </div>
       </details>
-      <details open style="margin-top:12px;">
+      <details style="margin-top:12px;">
         <summary style="font-size:16px;font-weight:600;">Topbar Resources</summary>
         <div class="topbar-admin-shell" style="margin-top:8px;">
           <p class="muted" style="margin-top:0;">Select which resources appear in the top-right resource bar. Set global defaults and optional per-player overrides.</p>
 
           <div class="topbar-admin-grid">
-            <details open style="margin-top:8px;">
+            <details style="margin-top:8px;">
               <summary>Global Topbar Resources</summary>
               <div class="topbar-admin-block" style="margin-top:8px;">
                 <div class="topbar-admin-block-head">
@@ -6334,6 +6334,9 @@ async function loadNewAccounts() {
       <select id="deletePlayerId">${players.map(player => `<option value="${player.id}" data-name="${player.name.replace(/"/g, '&quot;')}">${player.name} (${player.email})</option>`).join('')}</select>
       <label>Type the exact username to confirm deletion</label>
       <input id="deletePlayerConfirmName" placeholder="Exact username required">
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;"><input type="checkbox" id="deletePlayerPurgeData"> Also purge map/editor references and player-linked app data artifacts</label>
+      <label id="deletePlayerPurgeConfirmWrap" style="display:none;">Type PURGE PLAYER DATA to enable purge mode</label>
+      <input id="deletePlayerPurgeConfirm" style="display:none;" placeholder="PURGE PLAYER DATA">
       <div class="row"><button class="primary" id="deletePlayerBtn" style="background:#8a1a1a;">Delete Player Permanently</button><span class="muted" id="deletePlayerMsg"></span></div>
 
     </div>
@@ -6492,6 +6495,22 @@ async function loadNewAccounts() {
     }
   });
 
+  const deletePlayerPurgeToggle = document.getElementById('deletePlayerPurgeData');
+  const deletePlayerPurgeConfirmWrap = document.getElementById('deletePlayerPurgeConfirmWrap');
+  const deletePlayerPurgeConfirmInput = document.getElementById('deletePlayerPurgeConfirm');
+  const updateDeletePurgeUi = () => {
+    const enabled = !!deletePlayerPurgeToggle?.checked;
+    if (deletePlayerPurgeConfirmWrap) {
+      deletePlayerPurgeConfirmWrap.style.display = enabled ? 'block' : 'none';
+    }
+    if (deletePlayerPurgeConfirmInput) {
+      deletePlayerPurgeConfirmInput.style.display = enabled ? 'block' : 'none';
+      if (!enabled) deletePlayerPurgeConfirmInput.value = '';
+    }
+  };
+  deletePlayerPurgeToggle?.addEventListener('change', updateDeletePurgeUi);
+  updateDeletePurgeUi();
+
   document.getElementById('saveNewAccountDefaults').onclick = async () => {
     const payload = {
       nation_name_template: document.getElementById('na-nation-template').value,
@@ -6543,6 +6562,8 @@ async function loadNewAccounts() {
   document.getElementById('deletePlayerBtn').onclick = async () => {
     const userId = Number(document.getElementById('deletePlayerId').value);
     const confirmName = document.getElementById('deletePlayerConfirmName').value.trim();
+    const purgePlayerData = !!document.getElementById('deletePlayerPurgeData')?.checked;
+    const purgeConfirmation = String(document.getElementById('deletePlayerPurgeConfirm')?.value || '').trim();
     const selected = document.getElementById('deletePlayerId').selectedOptions[0];
     const expectedName = selected?.dataset.name || '';
 
@@ -6554,13 +6575,24 @@ async function loadNewAccounts() {
       document.getElementById('deletePlayerMsg').textContent = 'The confirmation username does not match the selected player.';
       return;
     }
-    if (!window.confirm(`Delete ${expectedName} forever? This also removes the player\'s nation data.`)) {
+    if (purgePlayerData && purgeConfirmation.toUpperCase() !== 'PURGE PLAYER DATA') {
+      document.getElementById('deletePlayerMsg').textContent = 'Type PURGE PLAYER DATA to confirm purge mode.';
+      return;
+    }
+    const prompt = purgePlayerData
+      ? `Delete ${expectedName} forever and purge related map/player data artifacts across the app?`
+      : `Delete ${expectedName} forever? This also removes the player's nation data.`;
+    if (!window.confirm(prompt)) {
       return;
     }
 
     const res = await api(`/api/admin/users/${userId}`, {
       method: 'DELETE',
-      body: JSON.stringify({ confirmation_name: confirmName })
+      body: JSON.stringify({
+        confirmation_name: confirmName,
+        purge_player_data: purgePlayerData,
+        purge_confirmation: purgeConfirmation,
+      })
     });
     document.getElementById('deletePlayerMsg').textContent = res?.ok ? 'Player deleted permanently.' : await readErrorMessage(res, 'The player could not be deleted.');
     if (res?.ok) {
@@ -8081,6 +8113,16 @@ async function loadDeveloperOptionsPage() {
       </div>
       <div class="muted" id="devSettingsMsg" style="margin-top:8px;"></div>
     </div>
+    <div class="card" style="margin-top:12px;border:1px solid #8a1a1a;">
+      <h3 style="color:#8a1a1a;">Danger Zone</h3>
+      <p class="danger" style="margin-top:0;">Destructive operations below can permanently remove data. Read prompts carefully before continuing.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <button class="primary" id="devZombieCleanupPreviewBtn" style="background:#7b5a1a;">Preview Zombie Cleanup</button>
+        <button class="primary" id="devZombieCleanupBtn" style="background:#8a1a1a;">Purge Zombie Data</button>
+        <span class="muted" id="devZombieCleanupMsg"></span>
+      </div>
+      <div id="devZombieCleanupDetails" style="margin-top:10px;"></div>
+    </div>
   `;
 
   const levelFilter = document.getElementById('devLogLevelFilter');
@@ -8089,7 +8131,44 @@ async function loadDeveloperOptionsPage() {
   const listEl = document.getElementById('devLogList');
   const metaEl = document.getElementById('devLogMeta');
   const settingsMsg = document.getElementById('devSettingsMsg');
+  const zombieCleanupMsg = document.getElementById('devZombieCleanupMsg');
+  const zombieCleanupDetailsEl = document.getElementById('devZombieCleanupDetails');
   const clampLocal = (value, min, max) => Math.max(min, Math.min(max, value));
+
+  const requireTypedDangerConfirm = (title, warning, phrase) => {
+    const proceed = window.confirm(`${warning}\n\nYou will need to type: ${phrase}`);
+    if (!proceed) return false;
+    const typed = window.prompt(`${title}\nType exactly: ${phrase}`, '');
+    return String(typed || '').trim() === phrase;
+  };
+
+  const renderZombieCleanupDetails = (payload) => {
+    if (!zombieCleanupDetailsEl) return;
+    const detailMap = (payload && typeof payload.preview_details === 'object' && payload.preview_details)
+      ? payload.preview_details
+      : {};
+    const rows = Object.values(detailMap);
+    if (!rows.length) {
+      zombieCleanupDetailsEl.innerHTML = '';
+      return;
+    }
+
+    zombieCleanupDetailsEl.innerHTML = rows.map((row) => {
+      const label = escapeHtml(String(row?.label || 'Category'));
+      const reason = escapeHtml(String(row?.reason || ''));
+      const count = toFiniteNumber(row?.count, 0);
+      const examples = Array.isArray(row?.examples) ? row.examples : [];
+      const examplesJson = escapeHtml(JSON.stringify(examples, null, 2));
+      return `
+        <details style="margin-bottom:8px;">
+          <summary style="cursor:pointer;"><strong>${label}</strong> - ${count} item(s)</summary>
+          <div class="muted" style="margin-top:6px;">${reason}</div>
+          <div style="margin-top:6px;">Sample records (up to 25):</div>
+          <pre style="margin-top:6px;white-space:pre-wrap;">${examplesJson}</pre>
+        </details>
+      `;
+    }).join('');
+  };
 
   const formatWhen = (iso) => {
     const d = new Date(iso || '');
@@ -8168,8 +8247,15 @@ async function loadDeveloperOptionsPage() {
 
   document.getElementById('devLogRefreshBtn').onclick = reloadLogs;
   document.getElementById('devLogClearBtn').onclick = async () => {
-    const confirm = window.confirm('Clear all developer logs?');
-    if (!confirm) return;
+    const confirmed = requireTypedDangerConfirm(
+      'Clear Developer Logs',
+      'Warning: this permanently deletes all current developer logs.',
+      'CLEAR DEV LOGS'
+    );
+    if (!confirmed) {
+      metaEl.textContent = 'Log clear cancelled: confirmation phrase did not match.';
+      return;
+    }
     const res = await api('/api/admin/developer/logs', { method: 'DELETE', silentLog: true });
     if (!res || !res.ok) {
       metaEl.textContent = await readErrorMessage(res, 'Failed to clear logs.');
@@ -8212,6 +8298,54 @@ async function loadDeveloperOptionsPage() {
   document.getElementById('devLogTestError').onclick = async () => {
     await captureDeveloperLog('error', 'Manual test error log', { by: 'admin', section: activeSectionName }, { force: true, source: 'developer.page' });
     await reloadLogs();
+  };
+
+  document.getElementById('devZombieCleanupBtn').onclick = async () => {
+    zombieCleanupMsg.textContent = '';
+    if (zombieCleanupDetailsEl) zombieCleanupDetailsEl.innerHTML = '';
+    const confirmed = requireTypedDangerConfirm(
+      'Purge Zombie Data',
+      'Warning: this will remove lingering data references for deleted accounts (map editor references, topbar overrides, and orphaned developer log actor links).',
+      'PURGE ZOMBIE DATA'
+    );
+    if (!confirmed) {
+      zombieCleanupMsg.textContent = 'Cleanup cancelled: confirmation phrase did not match.';
+      return;
+    }
+
+    const res = await api('/api/admin/developer/cleanup-zombie-data', {
+      method: 'POST',
+      silentLog: true,
+      body: JSON.stringify({ confirmation_text: 'PURGE ZOMBIE DATA' }),
+    });
+    if (!res || !res.ok) {
+      zombieCleanupMsg.textContent = await readErrorMessage(res, 'Zombie-data cleanup failed.');
+      return;
+    }
+    const payload = await parseJsonResponse(res, {});
+    const removed = toFiniteNumber(payload?.total_removed, 0);
+    zombieCleanupMsg.textContent = `Cleanup complete. Removed ${removed} lingering item(s). Expand details below for category breakdown and sample records.`;
+    renderZombieCleanupDetails(payload);
+    await reloadLogs();
+  };
+
+  document.getElementById('devZombieCleanupPreviewBtn').onclick = async () => {
+    zombieCleanupMsg.textContent = '';
+    if (zombieCleanupDetailsEl) zombieCleanupDetailsEl.innerHTML = '';
+    const res = await api('/api/admin/developer/cleanup-zombie-data', {
+      method: 'POST',
+      silentLog: true,
+      body: JSON.stringify({ dry_run: true }),
+    });
+    if (!res || !res.ok) {
+      zombieCleanupMsg.textContent = await readErrorMessage(res, 'Zombie cleanup preview failed.');
+      return;
+    }
+
+    const payload = await parseJsonResponse(res, {});
+    const removed = toFiniteNumber(payload?.total_removed, 0);
+    zombieCleanupMsg.textContent = `Preview complete: ${removed} item(s) would be removed. Expand details below for the full category and sample record view.`;
+    renderZombieCleanupDetails(payload);
   };
 
   await reloadSettings();

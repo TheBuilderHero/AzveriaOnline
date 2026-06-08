@@ -115,6 +115,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/developer/logs', [AdminController::class, 'clearDeveloperLogs']);
         Route::get('/developer/log-settings', [AdminController::class, 'developerLogSettings']);
         Route::put('/developer/log-settings', [AdminController::class, 'updateDeveloperLogSettings']);
+        Route::post('/developer/cleanup-zombie-data', [AdminController::class, 'cleanupDeveloperZombieData']);
         Route::post('/maps/layers/{layerType}', [MapController::class, 'uploadLayer']);
         Route::post('/maps/reset', [MapController::class, 'resetMap']);
         Route::post('/maps/editor-state', [MapController::class, 'saveEditorState']);
