@@ -9,14 +9,14 @@ This document defines admin-only behavior in the Azveria Online web app.
 - Send new global announcements.
 - Player accounts can read but cannot post.
 
-### All Nations
+### Nation Editor
 - Right panel nation selector + search.
 - Center panel editable nation state.
 - Save: commits changes to selected nation.
 - Cancel: reverts unsaved values to snapshot from select-time.
 - Supports creating placeholder (dummy) nations with full editable stats.
 
-### New Accounts / Player Deletion
+### Account Management / Player Deletion
 - Delete Player now supports two modes:
 	- Standard delete: removes the player account and owned nation records.
 	- Delete + purge player data: also removes player-linked app artifacts (such as map editor political references and topbar user overrides).
@@ -72,7 +72,7 @@ This document defines admin-only behavior in the Azveria Online web app.
 | Rebalance globally | Combat -> Rating Formula | Adjust coefficients/divisor and Save Formula | All non-overridden unit ratings recalculate |
 | Verify rating math | Unit card -> Army Rating Breakdown | Expand breakdown details | See inputs, weights, components, score, divisor, and final rating source |
 | Moderate battle orders | Orders list | Set pending/approved/denied and add note | Player order status and review note are persisted |
-| Control intel sharing | All Nations -> Nation Visibility Matrix | Toggle Army Rating visibility per viewer/subject | Army rating shown or hidden in Other Nations |
+| Control intel sharing | Nation Editor -> Nation Visibility Matrix | Toggle Army Rating visibility per viewer/subject | Army rating shown or hidden in Other Nations |
 
 #### Combat Snapshot Panels
 - **Commanders panel**:
@@ -181,7 +181,7 @@ Each order supports:
 Review updates are persisted and visible back to players.
 
 #### Visibility Matrix: Army Rating Option
-In **All Nations -> Nation Visibility Matrix**, admins can now toggle:
+In **Nation Editor -> Nation Visibility Matrix**, admins can now toggle:
 - `Army Rating`
 
 If disabled for a viewer->subject pair:
@@ -386,7 +386,7 @@ Unicode symbols, text emojis, or character symbols for the following: Ore, Coin,
 2. Edit existing resources by changing any field and clicking **Save**.
 3. Delete resources with the **Delete** button (irreversible).
 4. Use the **Order** field to control display order within each group.
-5. Use the **Type** and **Group** fields to organize resources for the All Nations, Player, and Shop UIs.
+5. Use the **Type** and **Group** fields to organize resources for the Nation Editor, Player, and Shop UIs.
 6. Use the **Meta** field for advanced configuration, icons, or rules.
 
 ---

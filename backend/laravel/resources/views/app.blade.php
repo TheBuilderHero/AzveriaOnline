@@ -892,7 +892,7 @@ function installGlobalDeveloperErrorHandlers() {
 }
 
 const playerMenu = ['Player', 'Announcements', 'Information', 'Map', 'Combat', 'Chat', 'Other Nations', 'Shop', 'Settings'];
-const adminMenu = ['Announcements', 'All Nations', 'Notifications', 'Information', 'Resource Management', 'New Accounts', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
+const adminMenu = ['Announcements', 'Nation Editor', 'Notifications', 'Information', 'Resource Management', 'Account Management', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
 
 const goofyAudio = new Audio('https://actions.google.com/sounds/v1/cartoon/boing.ogg');
 goofyAudio.preload = 'auto';
@@ -1320,7 +1320,7 @@ async function loadSection(name) {
   try {
     if (name === 'Player') return await loadPlayer();
     if (name === 'Announcements') return await loadAnnouncements();
-    if (name === 'New Accounts') return await loadNewAccounts();
+    if (name === 'Account Management' || name === 'New Accounts') return await loadNewAccounts();
     if (name === 'Time Tracker') return await loadTimeTracker();
     if (name === 'Map') return await loadMap();
     if (name === 'Combat') return await loadCombat();
@@ -1328,7 +1328,7 @@ async function loadSection(name) {
     if (name === 'Other Nations') return await loadOtherNations();
     if (name === 'Shop') return await loadShop();
     if (name === 'Settings') return await loadSettings();
-    if (name === 'All Nations') return await loadAllNations();
+    if (name === 'Nation Editor' || name === 'All Nations') return await loadAllNations();
     if (name === 'Notifications') return await loadNotifications();
     if (name === 'Information') return await loadGameInformationRules();
     if (name === 'Resource Management') return await loadResourceManagement();
@@ -5584,8 +5584,18 @@ async function loadChat(preferredChatId = null) {
           <div class="row"><button class="primary" id="newChat">Create Chat</button><span class="muted" id="chatCreateMsg"></span></div>
           <h3>Chats</h3>
           <div class="list" id="chatList">${activeChats.map(chat => `<div><button class="primary selectChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" data-archived="0" style="width:100%; margin-bottom:8px;">${chat.name}${chat.type === 'global' ? ' 🌐' : ''}${Number(chat.unread_messages || 0) > 0 ? ` (${Number(chat.unread_messages)})` : ''}</button></div>`).join('') || '<div class="muted">No active chats</div>'}</div>
-          <h3 style="margin-top:12px;">Archived</h3>
-          <div class="list" id="archivedChatList" style="max-height:140px;">${archivedChats.map(chat => `<div><button class="primary selectChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" data-archived="1" style="width:100%; margin-bottom:8px; opacity:0.7;">${chat.name}</button></div>`).join('') || '<div class="muted">No archived chats</div>'}</div>
+          <div class="row" style="margin-top:12px;justify-content:space-between;align-items:center;">
+            <h3 style="margin:0;">Archived</h3>
+            <button class="primary" id="archivedChatToggle" style="background:#4a5a6d;">Show (${archivedChats.length})</button>
+          </div>
+          <div id="archivedChatSection" style="display:none;margin-top:8px;">
+            <div class="list" id="archivedChatList" style="max-height:180px;">${archivedChats.map(chat => `
+              <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+                <button class="primary selectChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" data-archived="1" style="flex:1; opacity:0.7;">${chat.name}</button>
+                <button class="primary quickUnarchiveChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" style="background:#314f72;white-space:nowrap;">Unarchive</button>
+              </div>
+            `).join('') || '<div class="muted">No archived chats</div>'}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -5593,6 +5603,21 @@ async function loadChat(preferredChatId = null) {
 
   let activeChatId = firstChat ? Number(firstChat.id) : null;
   let activeChatArchived = !!firstChat?.is_archived;
+  let archivedChatsExpanded = false;
+
+  const setArchivedChatVisibility = () => {
+    const archivedSection = document.getElementById('archivedChatSection');
+    const archivedToggle = document.getElementById('archivedChatToggle');
+    if (!archivedSection || !archivedToggle) return;
+    archivedSection.style.display = archivedChatsExpanded ? 'block' : 'none';
+    archivedToggle.textContent = `${archivedChatsExpanded ? 'Hide' : 'Show'} (${archivedChats.length})`;
+  };
+
+  document.getElementById('archivedChatToggle').onclick = () => {
+    archivedChatsExpanded = !archivedChatsExpanded;
+    setArchivedChatVisibility();
+  };
+  setArchivedChatVisibility();
 
   const setChatActions = () => {
     const activeChat = chatsById.get(Number(activeChatId)) || null;
@@ -5634,6 +5659,22 @@ async function loadChat(preferredChatId = null) {
 
   document.querySelectorAll('.selectChat').forEach(btn => {
     btn.onclick = () => loadMessages(btn.dataset.id, btn.dataset.name, btn.dataset.archived === '1');
+  });
+  document.querySelectorAll('.quickUnarchiveChat').forEach(btn => {
+    btn.onclick = async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const chatId = Number(btn.dataset.id || 0);
+      if (!chatId) return;
+      const res = await api(`/api/chats/${chatId}/unarchive`, { method: 'PATCH' });
+      document.getElementById('chatActionMsg').textContent = res?.ok
+        ? `${btn.dataset.name || 'Chat'} restored.`
+        : await readErrorMessage(res, 'The chat could not be restored.');
+      if (res?.ok) {
+        await loadChat(chatId);
+        refreshChatBadge();
+      }
+    };
   });
   if (firstChat) {
     await loadMessages(firstChat.id, firstChat.name, firstChat.is_archived);
@@ -6308,7 +6349,7 @@ async function loadNewAccounts() {
 
   view.innerHTML = `
     <div class="card">
-      <h2>New Accounts (Admin)</h2>
+      <h2>Account Management (Admin)</h2>
       <p class="muted" style="margin-top:0;">These values are applied when a player creates a new account and nation.</p>
 
       <label>Nation Name Template</label>
@@ -6872,7 +6913,7 @@ async function loadAllNations() {
 
   view.innerHTML = `
     <div class="card">
-      <h2>All Nations (Admin)</h2>
+      <h2>Nation Editor (Admin)</h2>
       <div class="card">
         <h3 style="margin-top:0;">Nation Management</h3>
         <div class="alln-panel" style="margin-bottom:12px;">
