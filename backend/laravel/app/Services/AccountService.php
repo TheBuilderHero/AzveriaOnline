@@ -384,41 +384,48 @@ class AccountService
         }
 
         $disk = Storage::disk('public');
-        $path = 'maps/editor-state.json';
-        if (!$disk->exists($path)) {
-            return;
-        }
+        $paths = [
+            'maps/editor-state-active.json',
+            'maps/editor-state-draft.json',
+            'maps/editor-state.json',
+        ];
 
-        try {
-            $decoded = json_decode((string) $disk->get($path), true);
-            if (!is_array($decoded)) {
-                return;
+        foreach ($paths as $path) {
+            if (!$disk->exists($path)) {
+                continue;
             }
 
-            $deleted = array_fill_keys(array_map('intval', $nationIds), true);
-
-            $decoded['political_nations'] = array_values(array_filter(
-                is_array($decoded['political_nations'] ?? null) ? $decoded['political_nations'] : [],
-                static function ($row) use ($deleted) {
-                    $nationId = (int) ($row['id'] ?? 0);
-                    if ($nationId <= 0) return true;
-                    return !isset($deleted[$nationId]);
+            try {
+                $decoded = json_decode((string) $disk->get($path), true);
+                if (!is_array($decoded)) {
+                    continue;
                 }
-            ));
 
-            $decoded['political_strokes'] = array_values(array_filter(
-                is_array($decoded['political_strokes'] ?? null) ? $decoded['political_strokes'] : [],
-                static function ($row) use ($deleted) {
-                    if (!is_array($row)) return false;
-                    $nationId = (int) ($row['nation_id'] ?? 0);
-                    if ($nationId <= 0) return true;
-                    return !isset($deleted[$nationId]);
-                }
-            ));
+                $deleted = array_fill_keys(array_map('intval', $nationIds), true);
 
-            $disk->put($path, json_encode($decoded, JSON_UNESCAPED_SLASHES));
-        } catch (\Throwable $e) {
-            // Best-effort cleanup only.
+                $decoded['political_nations'] = array_values(array_filter(
+                    is_array($decoded['political_nations'] ?? null) ? $decoded['political_nations'] : [],
+                    static function ($row) use ($deleted) {
+                        $nationId = (int) ($row['id'] ?? 0);
+                        if ($nationId <= 0) return true;
+                        return !isset($deleted[$nationId]);
+                    }
+                ));
+
+                $decoded['political_strokes'] = array_values(array_filter(
+                    is_array($decoded['political_strokes'] ?? null) ? $decoded['political_strokes'] : [],
+                    static function ($row) use ($deleted) {
+                        if (!is_array($row)) return false;
+                        $nationId = (int) ($row['nation_id'] ?? 0);
+                        if ($nationId <= 0) return true;
+                        return !isset($deleted[$nationId]);
+                    }
+                ));
+
+                $disk->put($path, json_encode($decoded, JSON_UNESCAPED_SLASHES));
+            } catch (\Throwable $e) {
+                // Best-effort cleanup only.
+            }
         }
     }
 

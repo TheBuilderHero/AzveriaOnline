@@ -1376,78 +1376,105 @@ class AdminController extends Controller
             ],
         ];
 
-        $mapPath = 'maps/editor-state.json';
+        $mapPaths = [
+            'maps/editor-state-active.json',
+            'maps/editor-state-draft.json',
+            'maps/editor-state.json',
+        ];
         $publicDisk = Storage::disk('public');
-        if ($publicDisk->exists($mapPath)) {
+        foreach ($mapPaths as $mapPath) {
+            if (!$publicDisk->exists($mapPath)) {
+                continue;
+            }
+
             try {
                 $decoded = json_decode((string) $publicDisk->get($mapPath), true);
-                if (is_array($decoded)) {
-                    $politicalNations = is_array($decoded['political_nations'] ?? null) ? $decoded['political_nations'] : [];
-                    $beforeNationCount = count($politicalNations);
-                    $removedPoliticalNations = [];
-                    foreach ($politicalNations as $row) {
-                        $id = (int) ($row['id'] ?? 0);
-                        if ($id > 0 && isset($validNationSet[$id])) {
-                            continue;
+                if (!is_array($decoded)) {
+                    continue;
+                }
+
+                $politicalNations = is_array($decoded['political_nations'] ?? null) ? $decoded['political_nations'] : [];
+                $beforeNationCount = count($politicalNations);
+                $removedPoliticalNations = [];
+                foreach ($politicalNations as $row) {
+                    $id = (int) ($row['id'] ?? 0);
+                    if ($id > 0 && isset($validNationSet[$id])) {
+                        continue;
+                    }
+                    if (count($removedPoliticalNations) < $exampleLimit) {
+                        $removedPoliticalNations[] = [
+                            'id' => $id,
+                            'name' => (string) ($row['name'] ?? ''),
+                            'path' => $mapPath,
+                        ];
+                    }
+                }
+                $filteredPoliticalNations = array_values(array_filter($politicalNations, static function ($row) use ($validNationSet) {
+                    $id = (int) ($row['id'] ?? 0);
+                    if ($id <= 0) return false;
+                    return isset($validNationSet[$id]);
+                }));
+                $results['map_editor_political_nations_removed'] += max(0, $beforeNationCount - count($filteredPoliticalNations));
+
+                $politicalStrokes = is_array($decoded['political_strokes'] ?? null) ? $decoded['political_strokes'] : [];
+                $beforeStrokeCount = count($politicalStrokes);
+                $removedPoliticalStrokes = [];
+                foreach ($politicalStrokes as $index => $row) {
+                    if (!is_array($row)) {
+                        if (count($removedPoliticalStrokes) < $exampleLimit) {
+                            $removedPoliticalStrokes[] = ['index' => $index, 'reason' => 'invalid_row_shape', 'path' => $mapPath];
                         }
-                        if (count($removedPoliticalNations) < $exampleLimit) {
-                            $removedPoliticalNations[] = [
-                                'id' => $id,
-                                'name' => (string) ($row['name'] ?? ''),
+                        continue;
+                    }
+                    $nationId = (int) ($row['nation_id'] ?? 0);
+                    if ($nationId > 0 && !isset($validNationSet[$nationId])) {
+                        if (count($removedPoliticalStrokes) < $exampleLimit) {
+                            $removedPoliticalStrokes[] = [
+                                'index' => $index,
+                                'nation_id' => $nationId,
+                                'tool' => (string) ($row['tool'] ?? ''),
+                                'x' => $row['x'] ?? null,
+                                'y' => $row['y'] ?? null,
+                                'path' => $mapPath,
                             ];
                         }
                     }
-                    $filteredPoliticalNations = array_values(array_filter($politicalNations, static function ($row) use ($validNationSet) {
-                        $id = (int) ($row['id'] ?? 0);
-                        if ($id <= 0) return false;
-                        return isset($validNationSet[$id]);
-                    }));
-                    $results['map_editor_political_nations_removed'] = max(0, $beforeNationCount - count($filteredPoliticalNations));
-                    $previewDetails['map_editor_political_nations']['count'] = $results['map_editor_political_nations_removed'];
-                    $previewDetails['map_editor_political_nations']['examples'] = $removedPoliticalNations;
+                }
+                $filteredPoliticalStrokes = array_values(array_filter($politicalStrokes, static function ($row) use ($validNationSet) {
+                    if (!is_array($row)) return false;
+                    $nationId = (int) ($row['nation_id'] ?? 0);
+                    if ($nationId <= 0) return true;
+                    return isset($validNationSet[$nationId]);
+                }));
+                $results['map_editor_political_strokes_removed'] += max(0, $beforeStrokeCount - count($filteredPoliticalStrokes));
 
-                    $politicalStrokes = is_array($decoded['political_strokes'] ?? null) ? $decoded['political_strokes'] : [];
-                    $beforeStrokeCount = count($politicalStrokes);
-                    $removedPoliticalStrokes = [];
-                    foreach ($politicalStrokes as $index => $row) {
-                        if (!is_array($row)) {
-                            if (count($removedPoliticalStrokes) < $exampleLimit) {
-                                $removedPoliticalStrokes[] = ['index' => $index, 'reason' => 'invalid_row_shape'];
-                            }
-                            continue;
-                        }
-                        $nationId = (int) ($row['nation_id'] ?? 0);
-                        if ($nationId > 0 && !isset($validNationSet[$nationId])) {
-                            if (count($removedPoliticalStrokes) < $exampleLimit) {
-                                $removedPoliticalStrokes[] = [
-                                    'index' => $index,
-                                    'nation_id' => $nationId,
-                                    'tool' => (string) ($row['tool'] ?? ''),
-                                    'x' => $row['x'] ?? null,
-                                    'y' => $row['y'] ?? null,
-                                ];
-                            }
-                        }
-                    }
-                    $filteredPoliticalStrokes = array_values(array_filter($politicalStrokes, static function ($row) use ($validNationSet) {
-                        if (!is_array($row)) return false;
-                        $nationId = (int) ($row['nation_id'] ?? 0);
-                        if ($nationId <= 0) return true;
-                        return isset($validNationSet[$nationId]);
-                    }));
-                    $results['map_editor_political_strokes_removed'] = max(0, $beforeStrokeCount - count($filteredPoliticalStrokes));
-                    $previewDetails['map_editor_political_strokes']['count'] = $results['map_editor_political_strokes_removed'];
-                    $previewDetails['map_editor_political_strokes']['examples'] = $removedPoliticalStrokes;
+                if (!$dryRun) {
+                    $decoded['political_nations'] = $filteredPoliticalNations;
+                    $decoded['political_strokes'] = $filteredPoliticalStrokes;
+                    $publicDisk->put($mapPath, json_encode($decoded, JSON_UNESCAPED_SLASHES));
+                }
 
-                    if (!$dryRun) {
-                        $decoded['political_nations'] = $filteredPoliticalNations;
-                        $decoded['political_strokes'] = $filteredPoliticalStrokes;
-                        $publicDisk->put($mapPath, json_encode($decoded, JSON_UNESCAPED_SLASHES));
-                    }
+                $availableNationExampleSlots = max(0, $exampleLimit - count($previewDetails['map_editor_political_nations']['examples']));
+                if ($availableNationExampleSlots > 0 && !empty($removedPoliticalNations)) {
+                    $previewDetails['map_editor_political_nations']['examples'] = array_merge(
+                        $previewDetails['map_editor_political_nations']['examples'],
+                        array_slice($removedPoliticalNations, 0, $availableNationExampleSlots)
+                    );
+                }
+
+                $availableStrokeExampleSlots = max(0, $exampleLimit - count($previewDetails['map_editor_political_strokes']['examples']));
+                if ($availableStrokeExampleSlots > 0 && !empty($removedPoliticalStrokes)) {
+                    $previewDetails['map_editor_political_strokes']['examples'] = array_merge(
+                        $previewDetails['map_editor_political_strokes']['examples'],
+                        array_slice($removedPoliticalStrokes, 0, $availableStrokeExampleSlots)
+                    );
                 }
             } catch (\Throwable $e) {
             }
         }
+
+        $previewDetails['map_editor_political_nations']['count'] = $results['map_editor_political_nations_removed'];
+        $previewDetails['map_editor_political_strokes']['count'] = $results['map_editor_political_strokes_removed'];
 
         $topbarPath = storage_path('app/resource_topbar_config.json');
         if (File::exists($topbarPath)) {

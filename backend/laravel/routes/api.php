@@ -118,7 +118,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/developer/cleanup-zombie-data', [AdminController::class, 'cleanupDeveloperZombieData']);
         Route::post('/maps/layers/{layerType}', [MapController::class, 'uploadLayer']);
         Route::post('/maps/reset', [MapController::class, 'resetMap']);
+        Route::get('/maps/editor-state', [MapController::class, 'adminEditorState']);
         Route::post('/maps/editor-state', [MapController::class, 'saveEditorState']);
+        Route::post('/maps/editor-state/activate', [MapController::class, 'activateEditorState']);
+        Route::post('/maps/terrain-stats/bulk-sync', [MapController::class, 'syncTerrainStatsBulk']);
         Route::post('/chats', [AdminController::class, 'createChat']);
         Route::delete('/chats/{chatId}', [AdminController::class, 'deleteChat']);
         Route::post('/chats/{chatId}/members', [AdminController::class, 'addMembers']);

@@ -29,7 +29,13 @@ This document defines admin-only behavior in the Azveria Online web app.
 	- Main map
 	- Terrain map
 	- Political map
-- Changes are global and instantly visible to all users.
+- Map editor now uses Draft and Active states:
+	- `Save Draft` stores in-progress editor changes without affecting players.
+	- `Undo` is available while editing draft maps (button or `Ctrl+Z` / `Cmd+Z`).
+	- Draft saves no longer run nation terrain-stat sync, so saving is much faster for large maps.
+	- `Preview Active` shows the currently live map.
+	- `Resume Draft` returns to the saved draft for editing.
+	- `Set Draft Active` publishes the draft map to all players and then runs nation terrain-stat sync.
 - Note to move while drawing hold shift and click and drag to move the map.
 - Map editor now shows a live `Save payload` indicator near save/status.
 	- This is an estimated JSON size for map editor state saves.

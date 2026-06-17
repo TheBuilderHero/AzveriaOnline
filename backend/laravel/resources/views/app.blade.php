@@ -2649,17 +2649,27 @@ async function loadAnnouncements() {
 
 async function loadMap() {
   const MAP_BACKUP_FORMAT = 'azveria-map-backup-v1';
+  const editorStateEndpoint = user.role === 'admin' ? '/api/admin/maps/editor-state' : '/api/maps/editor-state';
   const [layersRes, terrainRes, nationsRes, editorStateRes] = await Promise.all([
     api('/api/maps/layers'),
     api('/api/me/terrain-square-miles'),
     api('/api/nations?per_page=400'),
-    api('/api/maps/editor-state'),
+    api(editorStateEndpoint),
   ]);
 
   const layers = layersRes && layersRes.ok ? await parseJsonResponse(layersRes, []) : [];
   const myTerrainSqMiles = terrainRes && terrainRes.ok ? await parseJsonResponse(terrainRes, {}) : {};
   const nations = extractList(await parseJsonResponse(nationsRes, { data: [] }));
-  const editorState = editorStateRes && editorStateRes.ok ? await parseJsonResponse(editorStateRes, {}) : {};
+  const editorStatePayload = editorStateRes && editorStateRes.ok ? await parseJsonResponse(editorStateRes, {}) : {};
+  const activeEditorStateInitial = user.role === 'admin'
+    ? (editorStatePayload.active_state || {})
+    : editorStatePayload;
+  const draftEditorStateInitial = user.role === 'admin'
+    ? (editorStatePayload.draft_state || activeEditorStateInitial)
+    : activeEditorStateInitial;
+  const adminMapPublishStatusInitial = user.role === 'admin'
+    ? ((editorStatePayload && typeof editorStatePayload.status === 'object') ? editorStatePayload.status : {})
+    : {};
 
   const layerByType = Object.fromEntries((layers || []).map(l => [l.layer_type, l.image_path]));
   const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
@@ -2712,11 +2722,16 @@ async function loadMap() {
     },
   };
 
-  let mapWidth = clamp(toFiniteNumber(editorState.width, 1200), 100, 5000);
-  let mapHeight = clamp(toFiniteNumber(editorState.height, 700), 100, 5000);
-  let terrainStrokes = Array.isArray(editorState.terrain_strokes) ? editorState.terrain_strokes.slice() : [];
-  let politicalStrokes = Array.isArray(editorState.political_strokes) ? editorState.political_strokes.slice() : [];
-  let politicalNationMeta = Array.isArray(editorState.political_nations) ? editorState.political_nations.slice() : [];
+  let activeEditorState = activeEditorStateInitial;
+  let draftEditorState = draftEditorStateInitial;
+  let adminMapPublishStatus = adminMapPublishStatusInitial;
+  let currentMapStateSource = 'active';
+
+  let mapWidth = clamp(toFiniteNumber(activeEditorState.width, 1200), 100, 5000);
+  let mapHeight = clamp(toFiniteNumber(activeEditorState.height, 700), 100, 5000);
+  let terrainStrokes = Array.isArray(activeEditorState.terrain_strokes) ? activeEditorState.terrain_strokes.slice() : [];
+  let politicalStrokes = Array.isArray(activeEditorState.political_strokes) ? activeEditorState.political_strokes.slice() : [];
+  let politicalNationMeta = Array.isArray(activeEditorState.political_nations) ? activeEditorState.political_nations.slice() : [];
   let editorBackgroundPath = null;
   let editorBackgroundObjectUrl = null;
   const editorBgOpacitySessionKey = `azveria_map_editor_bg_opacity_${user?.id || 'anon'}`;
@@ -2765,7 +2780,7 @@ async function loadMap() {
     <div class="card">
       <h2>Map</h2>
       <div class="map-right-external" id="mapAdminButtons">
-        ${user.role === 'admin' ? '<button class="primary" id="openTerrainEditorBtn">Terrain Editor</button><button class="primary" id="openPoliticalEditorBtn">Political Editor</button><button class="primary" id="downloadMapBackupBtn" style="background:#2f4f6a;">Download Map Backup</button><input id="uploadMapBackupInput" type="file" accept="application/json,.json" style="display:none;"><button class="primary" id="uploadMapBackupBtn" style="background:#5a3f7f;">Upload Map Backup</button><button class="primary" id="recalcTerrainStatsBtn" style="background:#2f6a41;">Recalculate Terrain Stats</button><button class="primary" id="resetMapBtn" style="background:#8a1a1a;">Reset Map</button>' : ''}
+        ${user.role === 'admin' ? '<button class="primary" id="openTerrainEditorBtn">Terrain Editor</button><button class="primary" id="openPoliticalEditorBtn">Political Editor</button><button class="primary" id="previewActiveMapBtn" style="background:#2f4f6a;">Preview Active</button><button class="primary" id="resumeDraftMapBtn" style="background:#5a3f7f;">Resume Draft</button><button class="primary" id="activateDraftMapBtn" style="background:#2f6a41;">Set Draft Active</button><button class="primary" id="downloadMapBackupBtn" style="background:#2f4f6a;">Download Map Backup</button><input id="uploadMapBackupInput" type="file" accept="application/json,.json" style="display:none;"><button class="primary" id="uploadMapBackupBtn" style="background:#5a3f7f;">Upload Map Backup</button><button class="primary" id="recalcTerrainStatsBtn" style="background:#2f6a41;">Recalculate Terrain Stats</button><button class="primary" id="resetMapBtn" style="background:#8a1a1a;">Reset Map</button><span class="muted" id="mapPublishStatus" style="margin-left:8px;"></span>' : ''}
       </div>
       <div class="map-shell">
         <div>
@@ -2901,8 +2916,8 @@ async function loadMap() {
     requestAnimationFrame(() => { renderScheduled = false; render(); });
   };
   let politicalNeedsPostPaintBorderUpdate = false;
-  let colorOverrides = (editorState.terrain_color_overrides && typeof editorState.terrain_color_overrides === 'object')
-    ? { ...editorState.terrain_color_overrides }
+  let colorOverrides = (activeEditorState.terrain_color_overrides && typeof activeEditorState.terrain_color_overrides === 'object')
+    ? { ...activeEditorState.terrain_color_overrides }
     : {};
   let selectedNationId = 0;
   let labelCache = [];
@@ -2915,6 +2930,138 @@ async function loadMap() {
   const activeTouchPointers = new Map();
   let pinchGesture = null;
   let pseudoFullscreenActive = false;
+  const mapUndoMaxEntries = 80;
+  let mapUndoStack = [];
+  let mapPaintUndoSnapshotTaken = false;
+
+  const snapshotDraftEditorState = () => ({
+    width: mapWidth,
+    height: mapHeight,
+    terrain_color_overrides: { ...colorOverrides },
+    terrain_strokes: JSON.parse(JSON.stringify(Array.isArray(terrainStrokes) ? terrainStrokes : [])),
+    political_strokes: JSON.parse(JSON.stringify(Array.isArray(politicalStrokes) ? politicalStrokes : [])),
+    political_nations: JSON.parse(JSON.stringify(politicalNationsArray().map(n => ({
+      id: n.id,
+      name: n.name,
+      alliance_name: n.alliance_name || '',
+      races: n.races || [],
+      pixels: nationPixelCount(n.id),
+    })))),
+  });
+
+  const updateUndoButtonState = () => {
+    const undoBtn = document.getElementById('undoMapEditorBtn');
+    if (!undoBtn) return;
+    undoBtn.disabled = !(mode === 'terrain-editor' || mode === 'political-editor') || mapUndoStack.length === 0;
+  };
+
+  const clearDraftUndoHistory = () => {
+    mapUndoStack = [];
+    mapPaintUndoSnapshotTaken = false;
+    updateUndoButtonState();
+  };
+
+  const pushDraftUndoSnapshot = () => {
+    if (!(mode === 'terrain-editor' || mode === 'political-editor')) return;
+    const snapshot = snapshotDraftEditorState();
+    const serialized = JSON.stringify(snapshot);
+    const previousSerialized = mapUndoStack.length ? mapUndoStack[mapUndoStack.length - 1].serialized : '';
+    if (serialized === previousSerialized) {
+      return;
+    }
+    mapUndoStack.push({
+      state: snapshot,
+      serialized,
+    });
+    if (mapUndoStack.length > mapUndoMaxEntries) {
+      mapUndoStack.shift();
+    }
+    updateUndoButtonState();
+  };
+
+  const undoDraftEditorChange = () => {
+    if (!(mode === 'terrain-editor' || mode === 'political-editor')) {
+      setMapStatus('Undo is available only in map editor mode.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
+      return false;
+    }
+    const entry = mapUndoStack.pop();
+    if (!entry || !entry.state) {
+      setMapStatus('Nothing to undo.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'info' });
+      updateUndoButtonState();
+      return false;
+    }
+
+    applyEditorStatePayload(entry.state, { markUnsaved: true });
+    currentMapStateSource = 'draft';
+    refreshAdminMapPublishStatus();
+    setMapStatus('Undo applied to draft map.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
+    updateUndoButtonState();
+    return true;
+  };
+
+  const formatShortTimestamp = (value) => {
+    if (!value) return 'never';
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return 'unknown';
+    return dt.toLocaleString();
+  };
+
+  const refreshAdminMapPublishStatus = () => {
+    if (user.role !== 'admin') return;
+    const statusEl = document.getElementById('mapPublishStatus');
+    const previewBtn = document.getElementById('previewActiveMapBtn');
+    const resumeBtn = document.getElementById('resumeDraftMapBtn');
+    if (!statusEl) return;
+
+    const hasUnpublished = !!adminMapPublishStatus?.has_unpublished_changes;
+    const activeSaved = formatShortTimestamp(adminMapPublishStatus?.active_saved_at);
+    const draftSaved = formatShortTimestamp(adminMapPublishStatus?.draft_saved_at);
+    const source = currentMapStateSource === 'draft' ? 'draft' : 'active';
+    statusEl.textContent = `Source: ${source} | Active: ${activeSaved} | Draft: ${draftSaved}${hasUnpublished ? ' | Unpublished changes' : ''}`;
+    statusEl.style.color = hasUnpublished ? '#9b5a1e' : '';
+
+    if (previewBtn) previewBtn.disabled = currentMapStateSource === 'active';
+    if (resumeBtn) resumeBtn.disabled = currentMapStateSource === 'draft';
+  };
+
+  const fetchAdminEditorStateBundle = async () => {
+    const res = await api('/api/admin/maps/editor-state', { timeout: 120000 });
+    if (!res || !res.ok) {
+      throw new Error(await readErrorMessage(res, 'Failed to load admin map state.'));
+    }
+    const payload = await parseJsonResponse(res, {});
+    activeEditorState = (payload && payload.active_state && typeof payload.active_state === 'object')
+      ? payload.active_state
+      : {};
+    draftEditorState = (payload && payload.draft_state && typeof payload.draft_state === 'object')
+      ? payload.draft_state
+      : activeEditorState;
+    adminMapPublishStatus = (payload && typeof payload.status === 'object') ? payload.status : {};
+    refreshAdminMapPublishStatus();
+  };
+
+  const loadStateSourceIntoCanvas = (source, { markUnsaved = false } = {}) => {
+    const targetSource = source === 'draft' ? 'draft' : 'active';
+    const payload = targetSource === 'draft' ? draftEditorState : activeEditorState;
+    applyEditorStatePayload(payload, { markUnsaved });
+    currentMapStateSource = targetSource;
+    clearDraftUndoHistory();
+    refreshAdminMapPublishStatus();
+  };
+
+  const switchToActivePreview = async () => {
+    if (user.role !== 'admin') return;
+    await fetchAdminEditorStateBundle();
+    loadStateSourceIntoCanvas('active', { markUnsaved: false });
+    setMapStatus('Showing active map.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'info' });
+  };
+
+  const switchToDraftEditing = async () => {
+    if (user.role !== 'admin') return;
+    await fetchAdminEditorStateBundle();
+    loadStateSourceIntoCanvas('draft', { markUnsaved: false });
+    setMapStatus('Showing draft map for editing.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'info' });
+  };
 
   const getZoomSensitivity = () => clamp(
     toFiniteNumber(settings.map_zoom_sensitivity, 1),
@@ -3816,10 +3963,10 @@ async function loadMap() {
   };
 
   const setMode = (nextMode) => {
-    if (mode === nextMode) return;
+    if (mode === nextMode) return true;
     if (unsavedChanges && (mode === 'terrain-editor' || mode === 'political-editor')) {
       const proceed = window.confirm('Discard unsaved map editor changes?');
-      if (!proceed) return;
+      if (!proceed) return false;
     }
     mode = nextMode;
     territoryEditing = false;
@@ -3845,6 +3992,7 @@ async function loadMap() {
     renderBottomTools();
     mapFullscreenBtn.style.display = mode === 'view' ? 'inline-block' : 'none';
     render();
+    return true;
   };
 
   const renderTopEditorControls = () => {
@@ -3872,6 +4020,7 @@ async function loadMap() {
     document.getElementById('applyGridBtn').onclick = () => {
       const nh = clamp(toFiniteNumber(document.getElementById('mapGridHeight').value, mapHeight), 100, 5000);
       const nw = clamp(toFiniteNumber(document.getElementById('mapGridWidth').value, mapWidth), 100, 5000);
+      pushDraftUndoSnapshot();
       mapWidth = nw;
       mapHeight = nh;
       resizeLayerCanvases();
@@ -3979,7 +4128,7 @@ async function loadMap() {
             </details>
           ` : ''}
           <div style="margin-top:8px;">
-            <button class="primary mapSaveTrigger" type="button" style="width:100%;">Save</button>
+            <button class="primary mapSaveTrigger" type="button" style="width:100%;">Save Draft</button>
           </div>
         </div>
       `;
@@ -4043,7 +4192,7 @@ async function loadMap() {
         <label class="map-small-label">Size</label>
         <input id="mapBrushSize" type="range" min="1" max="200" value="${brushSize}">
         <span class="map-small-label" id="mapBrushSizeLabel">${brushSize}px</span>
-        <button class="primary mapSaveTrigger" type="button">Save</button>
+        <button class="primary mapSaveTrigger" type="button">Save Draft</button>
       </div>
     `;
     document.getElementById('mapToolSelect').value = selectedTool;
@@ -4171,69 +4320,72 @@ async function loadMap() {
   };
 
   const syncNationTerrainStats = async () => {
+    const nationTerrainStatsMap = buildNationTerrainStatsMap();
     const knownNationIds = new Set((Array.isArray(nations) ? nations : []).map(n => Number(n.id || 0)).filter(Boolean));
-    const nationPayload = politicalNationsArray().map(n => ({
+    const nationPayload = buildPoliticalNationPayload(nationTerrainStatsMap).map(n => ({
       id: n.id,
-      name: n.name,
-      alliance_name: n.alliance_name || '',
-      races: n.races || [],
-      pixels: nationPixelCount(n.id),
+      terrain_square_miles: {
+        grassland: n.terrainBreakdown.grassland,
+        mountain: n.terrainBreakdown.mountain,
+        hills: n.terrainBreakdown.forest,
+        freshwater: 0,
+        seafront: n.terrainBreakdown.water,
+        desert: n.terrainBreakdown.desert,
+        forest: n.terrainBreakdown.forest,
+        water: n.terrainBreakdown.water,
+        tundra: n.terrainBreakdown.tundra,
+        magic_grassland: n.terrainBreakdown.magic_grassland,
+      },
     })).filter(n => knownNationIds.has(Number(n.id || 0)));
 
     const skippedUnknownNations = Math.max(0, politicalNationsArray().length - nationPayload.length);
 
-    let failedNationUpdates = 0;
-    const failedDetails = [];
-    for (const nation of nationPayload) {
-      const breakdown = terrainPixelBreakdownForNation(nation.id);
-      const terrainPayload = {
-        grassland: breakdown.grassland,
-        mountain: breakdown.mountain,
-        hills: breakdown.forest,
-        freshwater: 0,
-        seafront: breakdown.water,
-        desert: breakdown.desert,
-        forest: breakdown.forest,
-        water: breakdown.water,
-        tundra: breakdown.tundra,
-        magic_grassland: breakdown.magic_grassland,
+    const bulkRes = await api('/api/admin/maps/terrain-stats/bulk-sync', {
+      method: 'POST',
+      timeout: 180000,
+      body: JSON.stringify({
+        nation_stats: nationPayload.map(n => ({
+          nation_id: n.id,
+          terrain_square_miles: n.terrain_square_miles,
+        })),
+      }),
+    });
+
+    if (!bulkRes || !bulkRes.ok) {
+      return {
+        ok: false,
+        failedNationUpdates: nationPayload.length,
+        failedDetails: [{
+          nation_id: null,
+          status: bulkRes?.status || null,
+          message: await readErrorMessage(bulkRes, 'Nation terrain bulk sync failed.'),
+        }],
+        updatedCount: 0,
+        skippedUnknownNations,
       };
-      const nationSaveRes = await api('/api/admin/nations/' + nation.id, {
-        method: 'PUT',
-        timeout: 90000,
-        body: JSON.stringify({
-          name: nation.name,
-          alliance_name: nation.alliance_name,
-          terrain_square_miles: terrainPayload,
-        }),
-      });
-      if (!nationSaveRes || !nationSaveRes.ok) {
-        failedNationUpdates++;
-        failedDetails.push({
-          nation_id: nation.id,
-          nation_name: nation.name,
-          status: nationSaveRes?.status || null,
-          message: await readErrorMessage(nationSaveRes, 'Nation terrain sync failed.'),
-        });
-      }
     }
 
+    const syncPayload = await parseJsonResponse(bulkRes, {});
+    const failedCount = Math.max(0, toFiniteNumber(syncPayload.failed_count, 0));
+    const failedDetails = Array.isArray(syncPayload.failed_details) ? syncPayload.failed_details : [];
+    const serverSkippedUnknown = Math.max(0, toFiniteNumber(syncPayload.skipped_unknown_nations, 0));
+
     return {
-      ok: failedNationUpdates === 0,
-      failedNationUpdates,
+      ok: failedCount === 0,
+      failedNationUpdates: failedCount,
       failedDetails,
-      updatedCount: nationPayload.length,
-      skippedUnknownNations,
+      updatedCount: Math.max(0, toFiniteNumber(syncPayload.updated_count, nationPayload.length)),
+      skippedUnknownNations: skippedUnknownNations + serverSkippedUnknown,
     };
   };
 
   const buildEditorStatePayload = () => {
-    const nationPayload = politicalNationsArray().map(n => ({
+    const nationPayload = buildPoliticalNationPayload(buildNationTerrainStatsMap()).map(n => ({
       id: n.id,
       name: n.name,
       alliance_name: n.alliance_name || '',
       races: n.races || [],
-      pixels: nationPixelCount(n.id),
+      pixels: n.pixels,
     }));
 
     return {
@@ -4244,6 +4396,66 @@ async function loadMap() {
       political_strokes: politicalStrokes,
       political_nations: nationPayload,
     };
+  };
+
+  const buildNationTerrainStatsMap = () => {
+    const waterCode = TERRAIN_CODES.water;
+    const statsByNation = new Map();
+    const getStats = (nationId) => {
+      let stats = statsByNation.get(nationId);
+      if (stats) return stats;
+      stats = {
+        pixels: 0,
+        terrainBreakdown: Object.fromEntries(TERRAIN_KEYS.map(k => [k, 0])),
+      };
+      statsByNation.set(nationId, stats);
+      return stats;
+    };
+
+    for (let i = 0; i < ownerGrid.length; i++) {
+      const owner = ownerGrid[i];
+      if (!owner) continue;
+      if (terrainGrid[i] === waterCode) continue;
+      const stats = getStats(owner);
+      stats.pixels += 1;
+      const key = CODE_TO_TERRAIN[terrainGrid[i]] || 'grassland';
+      stats.terrainBreakdown[key] = (stats.terrainBreakdown[key] || 0) + 1;
+    }
+
+    for (let i = 0; i < ownerGrid.length; i++) {
+      const owner = ownerGrid[i];
+      if (!owner) continue;
+      if (terrainGrid[i] === waterCode) continue;
+
+      const x = i % mapWidth;
+      const y = Math.floor(i / mapWidth);
+      if (
+        (x > 0 && terrainGrid[i - 1] === waterCode) ||
+        (x < mapWidth - 1 && terrainGrid[i + 1] === waterCode) ||
+        (y > 0 && terrainGrid[i - mapWidth] === waterCode) ||
+        (y < mapHeight - 1 && terrainGrid[i + mapWidth] === waterCode)
+      ) {
+        const stats = getStats(owner);
+        stats.terrainBreakdown.water = (stats.terrainBreakdown.water || 0) + 1;
+      }
+    }
+
+    return statsByNation;
+  };
+
+  const buildPoliticalNationPayload = (nationTerrainStatsMap) => {
+    const statsByNation = nationTerrainStatsMap instanceof Map ? nationTerrainStatsMap : new Map();
+    return politicalNationsArray().map(n => {
+      const stats = statsByNation.get(Number(n.id || 0));
+      return {
+        id: n.id,
+        name: n.name,
+        alliance_name: n.alliance_name || '',
+        races: n.races || [],
+        pixels: Number(stats?.pixels || 0),
+        terrainBreakdown: stats?.terrainBreakdown || Object.fromEntries(TERRAIN_KEYS.map(k => [k, 0])),
+      };
+    });
   };
 
   let mapPayloadIndicatorLastStamp = 0;
@@ -4281,13 +4493,17 @@ async function loadMap() {
     }
   };
 
-  const persistCurrentMapState = async ({ successMessage = 'Map saved.' } = {}) => {
+  const persistCurrentMapState = async ({ successMessage = 'Draft map saved.' } = {}) => {
     if (mapSaveInProgress) {
       setMapStatus('Map save is already in progress...');
       return false;
     }
     mapSaveInProgress = true;
     try {
+      if (user.role === 'admin' && (mode === 'terrain-editor' || mode === 'political-editor')) {
+        currentMapStateSource = 'draft';
+        refreshAdminMapPublishStatus();
+      }
       const payload = buildEditorStatePayload();
       const saveStateRes = await api('/api/admin/maps/editor-state', {
         method: 'POST',
@@ -4299,20 +4515,13 @@ async function loadMap() {
         return false;
       }
 
-      const syncResult = await syncNationTerrainStats();
-      if (!syncResult.ok) {
-        captureDeveloperLog('warning', 'Map save partial success: nation terrain sync failures', {
-          failed_count: syncResult.failedNationUpdates,
-          failed_details: syncResult.failedDetails || [],
-          skipped_unknown_nations: syncResult.skippedUnknownNations || 0,
-        }, { source: 'map.save' });
-        setMapStatus(`Map state saved. ${syncResult.failedNationUpdates} nation terrain update(s) failed.${syncResult.skippedUnknownNations ? ` Skipped ${syncResult.skippedUnknownNations} unknown nation id(s) from backup.` : ''}`, { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
-        return true;
+      if (user.role === 'admin') {
+        await fetchAdminEditorStateBundle();
       }
 
       unsavedChanges = false;
       updateMapPayloadIndicator(true);
-      setMapStatus(`${successMessage}${syncResult.skippedUnknownNations ? ` Skipped ${syncResult.skippedUnknownNations} unknown nation id(s) from backup.` : ''}`, { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
+      setMapStatus(successMessage, { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
       return true;
     } catch (error) {
       const message = (error && error.message) ? error.message : 'Map save failed due to a network or server error.';
@@ -4331,7 +4540,7 @@ async function loadMap() {
     const setSaveButtonsBusy = (isBusy) => {
       document.querySelectorAll('.mapSaveTrigger').forEach((b) => {
         b.disabled = !!isBusy;
-        b.textContent = isBusy ? 'Saving...' : 'Save';
+        b.textContent = isBusy ? 'Saving Draft...' : 'Save Draft';
       });
     };
 
@@ -4340,19 +4549,29 @@ async function loadMap() {
         if (event) event.preventDefault();
         if (mapSaveInProgress) return;
         setSaveButtonsBusy(true);
-        setMapBusy(true, 'Saving map...');
-        setMapStatus('Save requested. Saving map now... large maps can take up to a couple of minutes.', { state: 'info' });
+        setMapBusy(true, 'Saving draft map...');
+        setMapStatus('Save requested. Saving draft map now... large maps can take up to a couple of minutes.', { state: 'info' });
         try {
-          await persistCurrentMapState({ successMessage: 'Map saved.' });
+          await persistCurrentMapState({ successMessage: 'Draft map saved.' });
         } finally {
           setMapBusy(false);
           setSaveButtonsBusy(false);
         }
       };
     });
+
+    const undoBtn = document.getElementById('undoMapEditorBtn');
+    if (undoBtn) {
+      undoBtn.onclick = (event) => {
+        if (event) event.preventDefault();
+        undoDraftEditorChange();
+      };
+    }
+
+    updateUndoButtonState();
   };
 
-  const applyEditorStatePayload = (payload) => {
+  const applyEditorStatePayload = (payload, { markUnsaved = true } = {}) => {
     const imported = (payload && typeof payload === 'object') ? payload : {};
     mapWidth = clamp(toFiniteNumber(imported.width, 1200), 100, 5000);
     mapHeight = clamp(toFiniteNumber(imported.height, 700), 100, 5000);
@@ -4380,7 +4599,7 @@ async function loadMap() {
     politicalLayerDirty = true;
     politicalNeedsFullRebuild = false;
     politicalNeedsPostPaintBorderUpdate = false;
-    unsavedChanges = true;
+    unsavedChanges = !!markUnsaved;
 
     resizeLayerCanvases();
     rebuildTerrainFromStrokes();
@@ -4437,7 +4656,18 @@ async function loadMap() {
         };
       });
       bindTerrainColorInputs(mapSidePanel);
-      document.getElementById('exitTerrainEditorBtn').onclick = () => setMode('view');
+      document.getElementById('exitTerrainEditorBtn').onclick = async () => {
+        const switched = setMode('view');
+        if (!switched) return;
+        if (user.role === 'admin') {
+          setMapBusy(true, 'Loading active map...');
+          try {
+            await switchToActivePreview();
+          } finally {
+            setMapBusy(false);
+          }
+        }
+      };
     } else if (mode === 'political-editor') {
       const rows = politicalNationsArray();
       const selected = getNationById(politicalEditNationId);
@@ -4550,6 +4780,7 @@ async function loadMap() {
         const payload = await response.json();
         const newId = Number(payload.id || 0);
         if (!newId) return;
+        pushDraftUndoSnapshot();
         politicalNationMap.set(newId, { id: newId, name, alliance_name: '', races: [], dirty: true });
         politicalEditNationId = newId;
         territoryEditing = true;
@@ -4566,6 +4797,7 @@ async function loadMap() {
         if (!politicalEditNationId) return;
         const ok = window.confirm('Remove all territory for this nation from the political map?');
         if (!ok) return;
+        pushDraftUndoSnapshot();
         const targetNationId = Number(politicalEditNationId);
         politicalStrokes = politicalStrokes.filter(op => Number(op.nation_id || 0) !== targetNationId);
         rebuildPoliticalFromStrokes();
@@ -4580,7 +4812,18 @@ async function loadMap() {
         render();
       };
 
-      document.getElementById('exitPoliticalEditorBtn').onclick = () => setMode('view');
+      document.getElementById('exitPoliticalEditorBtn').onclick = async () => {
+        const switched = setMode('view');
+        if (!switched) return;
+        if (user.role === 'admin') {
+          setMapBusy(true, 'Loading active map...');
+          try {
+            await switchToActivePreview();
+          } finally {
+            setMapBusy(false);
+          }
+        }
+      };
       bindTerrainColorInputs(mapSidePanel);
     } else {
       const allianceNames = Array.from(new Set(
@@ -4789,7 +5032,7 @@ async function loadMap() {
     }
 
     mapSaveArea.innerHTML = (mode === 'terrain-editor' || mode === 'political-editor')
-      ? '<button class="primary mapSaveTrigger" id="saveMapEditorBtn" type="button">Save</button>'
+      ? '<div class="row" style="gap:8px;"><button class="primary mapSaveTrigger" id="saveMapEditorBtn" type="button">Save Draft</button><button class="primary" id="undoMapEditorBtn" type="button">Undo</button></div>'
       : '';
     bindMapSaveTriggers();
   };
@@ -4899,6 +5142,10 @@ async function loadMap() {
   };
 
   const commitPaintOperation = (op) => {
+    if (!mapPaintUndoSnapshotTaken) {
+      pushDraftUndoSnapshot();
+      mapPaintUndoSnapshotTaken = true;
+    }
     if (mode === 'terrain-editor') {
       terrainStrokes.push(op);
       applyTerrainOperationToGrid(op, terrainGrid);
@@ -4925,6 +5172,7 @@ async function loadMap() {
       labelCache = [];
     }
     unsavedChanges = true;
+    updateUndoButtonState();
   };
 
   const applyPaint = (wx, wy) => {
@@ -5064,6 +5312,7 @@ async function loadMap() {
     dragAction = canPaint ? 'paint' : 'none';
 
     if (canPaint) {
+      mapPaintUndoSnapshotTaken = false;
       const { wx, wy } = toWorld(e.clientX, e.clientY);
       lastPaintPoint = { x: wx, y: wy };
       if (mode === 'political-editor' && selectedTool === 'outline') {
@@ -5186,6 +5435,7 @@ async function loadMap() {
     const wasClick = downPoint && Math.hypot(e.clientX - downPoint.x, e.clientY - downPoint.y) < 4;
     dragging = false;
     dragAction = 'none';
+    mapPaintUndoSnapshotTaken = false;
     lastPaintPoint = null;
     lastOutlinePoint = null;
     // After brush painting on the political layer, trigger a full rebuild to restore border lines.
@@ -5417,9 +5667,139 @@ async function loadMap() {
   document.addEventListener('fullscreenchange', onFullscreenChange);
   document.addEventListener('webkitfullscreenchange', onFullscreenChange);
 
+  const isTypingTarget = (target) => {
+    if (!target) return false;
+    const tag = String(target.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    return !!target.isContentEditable;
+  };
+
+  const handleUndoShortcut = (event) => {
+    if (!(mode === 'terrain-editor' || mode === 'political-editor')) return;
+    if (isTypingTarget(event.target)) return;
+    const key = String(event.key || '').toLowerCase();
+    if (!(event.ctrlKey || event.metaKey) || key !== 'z' || event.shiftKey) return;
+    event.preventDefault();
+    undoDraftEditorChange();
+  };
+
+  if (window.__azveriaMapUndoShortcutHandler) {
+    document.removeEventListener('keydown', window.__azveriaMapUndoShortcutHandler);
+  }
+  window.__azveriaMapUndoShortcutHandler = handleUndoShortcut;
+  document.addEventListener('keydown', handleUndoShortcut);
+
   if (user.role === 'admin') {
-    document.getElementById('openTerrainEditorBtn').onclick = () => setMode('terrain-editor');
-    document.getElementById('openPoliticalEditorBtn').onclick = () => setMode('political-editor');
+    document.getElementById('openTerrainEditorBtn').onclick = async () => {
+      const switched = setMode('view');
+      if (!switched) return;
+      setMapBusy(true, 'Loading draft map...');
+      try {
+        await switchToDraftEditing();
+        setMode('terrain-editor');
+      } finally {
+        setMapBusy(false);
+      }
+    };
+    document.getElementById('openPoliticalEditorBtn').onclick = async () => {
+      const switched = setMode('view');
+      if (!switched) return;
+      setMapBusy(true, 'Loading draft map...');
+      try {
+        await switchToDraftEditing();
+        setMode('political-editor');
+      } finally {
+        setMapBusy(false);
+      }
+    };
+    const previewActiveMapBtn = document.getElementById('previewActiveMapBtn');
+    if (previewActiveMapBtn) {
+      previewActiveMapBtn.onclick = async () => {
+        const switched = setMode('view');
+        if (!switched) return;
+        setMapBusy(true, 'Loading active map...');
+        try {
+          await switchToActivePreview();
+        } finally {
+          setMapBusy(false);
+        }
+      };
+    }
+    const resumeDraftMapBtn = document.getElementById('resumeDraftMapBtn');
+    if (resumeDraftMapBtn) {
+      resumeDraftMapBtn.onclick = async () => {
+        const switched = setMode('view');
+        if (!switched) return;
+        setMapBusy(true, 'Loading draft map...');
+        try {
+          await switchToDraftEditing();
+          setMode('terrain-editor');
+        } finally {
+          setMapBusy(false);
+        }
+      };
+    }
+    const activateDraftMapBtn = document.getElementById('activateDraftMapBtn');
+    if (activateDraftMapBtn) {
+      activateDraftMapBtn.onclick = async () => {
+        if (mapSaveInProgress) {
+          setMapStatus('Please wait for the current map save to finish.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
+          return;
+        }
+        if (unsavedChanges && (mode === 'terrain-editor' || mode === 'political-editor')) {
+          const shouldSaveFirst = window.confirm('You have unsaved editor changes. Save draft before activating?');
+          if (shouldSaveFirst) {
+            setMapBusy(true, 'Saving draft map before activation...');
+            try {
+              const saved = await persistCurrentMapState({ successMessage: 'Draft map saved. Ready to activate.' });
+              if (!saved) {
+                return;
+              }
+            } finally {
+              setMapBusy(false);
+            }
+          } else {
+            const proceedWithUnsaved = window.confirm('Activate the last saved draft anyway (without your unsaved edits)?');
+            if (!proceedWithUnsaved) return;
+          }
+        }
+        const ok = window.confirm('Set current draft map as the active map for all players?');
+        if (!ok) return;
+        setMapBusy(true, 'Activating draft map...');
+        try {
+          const activateRes = await api('/api/admin/maps/editor-state/activate', {
+            method: 'POST',
+            timeout: 120000,
+          });
+          if (!activateRes || !activateRes.ok) {
+            setMapStatus(await readErrorMessage(activateRes, 'Failed to activate draft map.'), { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
+            return;
+          }
+
+          setMapStatus('Draft map activated. Syncing nation terrain stats...', { state: 'info' });
+          const syncResult = await syncNationTerrainStats();
+          if (!syncResult.ok) {
+            captureDeveloperLog('warning', 'Map activation partial success: nation terrain sync failures', {
+              failed_count: syncResult.failedNationUpdates,
+              failed_details: syncResult.failedDetails || [],
+              skipped_unknown_nations: syncResult.skippedUnknownNations || 0,
+            }, { source: 'map.activate' });
+            await fetchAdminEditorStateBundle();
+            setMapStatus(`Draft map activated, but ${syncResult.failedNationUpdates} nation terrain update(s) failed.${syncResult.skippedUnknownNations ? ` Skipped ${syncResult.skippedUnknownNations} unknown nation id(s).` : ''}`, { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
+            return;
+          }
+
+          await fetchAdminEditorStateBundle();
+          const switched = setMode('view');
+          if (switched) {
+            await switchToActivePreview();
+          }
+          setMapStatus(`Draft map has been set active.${syncResult.skippedUnknownNations ? ` Skipped ${syncResult.skippedUnknownNations} unknown nation id(s).` : ''}`, { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
+        } finally {
+          setMapBusy(false);
+        }
+      };
+    }
     const downloadMapBackupBtn = document.getElementById('downloadMapBackupBtn');
     if (downloadMapBackupBtn) {
       downloadMapBackupBtn.onclick = () => {
@@ -5462,8 +5842,11 @@ async function loadMap() {
           }
 
           applyEditorStatePayload(importedState);
+          clearDraftUndoHistory();
+          currentMapStateSource = 'draft';
+          refreshAdminMapPublishStatus();
           setMode('terrain-editor');
-          const saved = await persistCurrentMapState({ successMessage: 'Map backup imported and saved.' });
+          const saved = await persistCurrentMapState({ successMessage: 'Map backup imported and saved to draft.' });
           if (!saved) {
             setMapStatus('Backup loaded locally. Server save failed. See previous error details.', { state: 'error' });
           }
@@ -5515,6 +5898,8 @@ async function loadMap() {
         setMapBusy(false);
       }
     };
+
+    refreshAdminMapPublishStatus();
   }
 
   resizeLayerCanvases();
