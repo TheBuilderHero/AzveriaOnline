@@ -6371,7 +6371,7 @@ async function loadShop() {
     }
 
     const meta = parseStructCode(item.code);
-    if (!meta || meta.level <= 1 || item.category_code !== 'upgrades') return true;
+    if (!meta || meta.level <= 1 || item.category_code !== 'build') return true;
     const requiredKey = `${meta.family}:l${meta.level - 1}`;
     return (buildingCounts[requiredKey] || 0) > 0;
   };
@@ -6394,11 +6394,59 @@ async function loadShop() {
             </datalist>
             <label style="font-size:12px;">Name</label><input id="newShopName" placeholder="Display name">
             <label style="font-size:12px;">Description / Effects</label><textarea id="newShopDescription" rows="4"></textarea>
+            <label style="font-size:12px;">Cost JSON</label><textarea id="newShopCost" rows="3">{}</textarea>
+            <label style="font-size:12px;">Structure Requirement (Craft/Recruit)</label>
+            <input id="newShopReqBuildingCode" placeholder="Building code (example: refinery)">
+            <input id="newShopReqBuildingLevel" type="number" min="1" value="1" placeholder="Building level">
+            <label style="font-size:12px;">Research Requirement (Build)</label>
+            <input id="newShopReqResearchCodes" placeholder="Comma-separated research codes">
+            <label style="font-size:12px;">Research Requirement Type (Research)</label>
+            <select id="newShopReqType">
+              <option value="none">None</option>
+              <option value="structure">Structure</option>
+              <option value="research">Research</option>
+              <option value="resource">Resource</option>
+            </select>
+            <label style="font-size:12px;">Research Requirement Resource JSON</label>
+            <textarea id="newShopReqResources" rows="3">{}</textarea>
             <label style="font-size:12px;">Product (Purchase Effect JSON)</label><textarea id="newShopProduct" rows="4">{}</textarea>
             <div class="row"><button class="primary" id="createShopItemBtn" style="width:100%;">Create Item</button></div>
             <span class="muted" id="createShopItemMsg"></span>` : ''}
         </div>
       </div>
+      ${isAdmin ? `<div class="card" style="margin-top:12px;border:1px solid color-mix(in srgb, var(--accent) 30%, var(--border));background:linear-gradient(180deg, color-mix(in srgb, var(--panel) 75%, var(--bg) 25%), var(--bg));color:var(--text);">
+        <h3 style="margin:0 0 8px;">Research Unlock Manager</h3>
+        <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap;">
+          <div style="min-width:280px;flex:2;">
+            <label style="font-size:12px;">Target Nation</label>
+            <select id="shopResearchNationSelect">
+              ${(allPlayers || []).filter(p => Number(p.nation_id || 0) > 0).map(p => `<option value="${Number(p.nation_id)}">${escapeHtml(p.name || ('User ' + p.id))} - ${escapeHtml(p.nation_name || ('Nation ' + p.nation_id))}</option>`).join('')}
+            </select>
+          </div>
+          <div style="min-width:220px;flex:2;">
+            <label style="font-size:12px;">Filter Unlock Code</label>
+            <input id="shopResearchUnlockFilter" placeholder="Type code to filter unlocks...">
+          </div>
+          <div style="min-width:220px;flex:1;">
+            <label style="font-size:12px;">Sort Unlocks</label>
+            <select id="shopResearchUnlockSort">
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="code_asc">Code A-Z</option>
+              <option value="code_desc">Code Z-A</option>
+              <option value="source_asc">Source A-Z</option>
+              <option value="source_desc">Source Z-A</option>
+            </select>
+          </div>
+          <div class="row" style="gap:6px;flex:1;min-width:230px;">
+            <button class="primary" id="refreshNationResearchBtn" style="flex:1;">Refresh</button>
+            <button class="primary" id="resetNationResearchBtn" style="flex:1;background:var(--danger);">Reset All</button>
+          </div>
+        </div>
+        <div id="shopResearchUnlockSummary" class="muted" style="margin-top:8px;"></div>
+        <span class="muted" id="shopResearchUnlockMsg" style="display:block;margin-top:4px;"></span>
+        <div id="shopResearchUnlockList" class="list" style="margin-top:8px;max-height:320px;overflow:auto;"></div>
+      </div>` : ''}
     </div>
   `;
 
@@ -6526,10 +6574,104 @@ async function loadShop() {
     return obj;
   }
 
+  const requirementFromItem = (item) => {
+    const req = safeJsonParse(item.requirement_json, {});
+    return (req && typeof req === 'object' && !Array.isArray(req)) ? req : {};
+  };
+
+  const requirementEditorMarkup = (item, req) => {
+    const category = String(item.category_code || '');
+    const type = String(req.type || '');
+    const structureCode = String(req.code || req.building_code || '');
+    const structureLevel = Number(req.level || 1) || 1;
+    const researchCodes = (() => {
+      if (Array.isArray(req.codes)) return req.codes.map(v => String(v)).filter(Boolean).join(', ');
+      if (req.code) return String(req.code);
+      return '';
+    })();
+    const resourceReq = (req.type === 'resource' && req.resources && typeof req.resources === 'object')
+      ? req.resources
+      : {};
+
+    if (category === 'craft' || category === 'recruit') {
+      return `
+        <label style="font-size:12px;margin-top:8px;display:block;">Structure Requirement</label>
+        <input id="req-structure-code-${item.id}" placeholder="Building code" value="${escapeHtml(structureCode)}">
+        <input id="req-structure-level-${item.id}" type="number" min="1" value="${structureLevel}">
+      `;
+    }
+
+    if (category === 'build') {
+      return `
+        <label style="font-size:12px;margin-top:8px;display:block;">Research Requirement (comma-separated)</label>
+        <input id="req-research-codes-${item.id}" placeholder="research_a, research_b" value="${escapeHtml(researchCodes)}">
+      `;
+    }
+
+    if (category === 'research') {
+      return `
+        <label style="font-size:12px;margin-top:8px;display:block;">Requirement Type</label>
+        <select id="req-type-${item.id}">
+          <option value="none" ${type === '' ? 'selected' : ''}>None</option>
+          <option value="structure" ${type === 'structure' ? 'selected' : ''}>Structure</option>
+          <option value="research" ${type === 'research' ? 'selected' : ''}>Research</option>
+          <option value="resource" ${type === 'resource' ? 'selected' : ''}>Resource</option>
+        </select>
+        <input id="req-structure-code-${item.id}" placeholder="Building code" value="${escapeHtml(structureCode)}">
+        <input id="req-structure-level-${item.id}" type="number" min="1" value="${structureLevel}">
+        <input id="req-research-codes-${item.id}" placeholder="research_a, research_b" value="${escapeHtml(researchCodes)}">
+        <label style="font-size:12px;margin-top:8px;display:block;">Resource Requirement JSON</label>
+        <textarea id="req-resource-json-${item.id}" rows="3">${escapeHtml(JSON.stringify(resourceReq || {}, null, 2))}</textarea>
+      `;
+    }
+
+    return '';
+  };
+
+  const readRequirementFromEditors = (item) => {
+    const category = String(item.category_code || '');
+    const readResearchCodes = (id) => String(document.getElementById(id)?.value || '')
+      .split(',')
+      .map(v => v.trim())
+      .filter(Boolean);
+
+    if (category === 'craft' || category === 'recruit') {
+      const code = String(document.getElementById(`req-structure-code-${item.id}`)?.value || '').trim();
+      const level = Math.max(1, Number(document.getElementById(`req-structure-level-${item.id}`)?.value || 1));
+      return code ? { type: 'structure', code, level } : {};
+    }
+
+    if (category === 'build') {
+      const codes = readResearchCodes(`req-research-codes-${item.id}`);
+      return codes.length ? { type: 'research', codes, mode: 'all' } : {};
+    }
+
+    if (category === 'research') {
+      const type = String(document.getElementById(`req-type-${item.id}`)?.value || 'none');
+      if (type === 'structure') {
+        const code = String(document.getElementById(`req-structure-code-${item.id}`)?.value || '').trim();
+        const level = Math.max(1, Number(document.getElementById(`req-structure-level-${item.id}`)?.value || 1));
+        return code ? { type: 'structure', code, level } : {};
+      }
+      if (type === 'research') {
+        const codes = readResearchCodes(`req-research-codes-${item.id}`);
+        return codes.length ? { type: 'research', codes, mode: 'all' } : {};
+      }
+      if (type === 'resource') {
+        const resourceReq = safeJsonParse(String(document.getElementById(`req-resource-json-${item.id}`)?.value || '{}'), {});
+        return (resourceReq && typeof resourceReq === 'object' && !Array.isArray(resourceReq))
+          ? { type: 'resource', resources: resourceReq }
+          : {};
+      }
+    }
+
+    return {};
+  };
+
   const renderItems = (category) => {
     activeCategory = category;
     const items = allItems.filter(i => i.category_code === category);
-    if (category === 'upgrades') {
+    if (category === 'build') {
       items.sort((a, b) => Number(canBuyUpgrade(b)) - Number(canBuyUpgrade(a)));
     }
     const selectedCategory = cats.find(c => c.code === category);
@@ -6543,6 +6685,7 @@ async function loadShop() {
       const maintenanceObj = (() => { try { return JSON.parse(i.maintenance_json || '{}'); } catch { return {}; } })();
       const yearlyObj = (() => { try { return JSON.parse(i.yearly_effect_json || '{}'); } catch { return {}; } })();
       const effectObj = (() => { try { return JSON.parse(i.effect_json || '{}'); } catch { return {}; } })();
+      const requirementObj = requirementFromItem(i);
       const visArr  = (() => { try { return i.visibility_json ? JSON.parse(i.visibility_json) : null; } catch { return null; } })();
 
       if (isAdmin) {
@@ -6565,14 +6708,13 @@ async function loadShop() {
               <div style="margin-top:8px;">
                 <label style="font-size:12px;">Description / Effects</label>
                 <textarea id="desc-${i.id}" rows="4">${i.description_text || ''}</textarea>
+                <label style="font-size:12px;margin-top:8px;display:block;">Name</label>
+                <input id="name-${i.id}" value="${escapeHtml(i.display_name || '')}">
+                ${requirementEditorMarkup(i, requirementObj)}
                 <label style="font-size:12px;margin-top:8px;display:block;">Product (Purchase Effect JSON)</label>
                 <textarea id="effect-${i.id}" rows="4">${JSON.stringify(effectObj || {}, null, 2)}</textarea>
                 <label style="font-size:12px;">Cost</label>
                 ${costEditorRows(costObj, i.id)}
-                <label style="font-size:12px;margin-top:8px;display:block;">Maintenance Cost</label>
-                ${jsonEditorRows(maintenanceObj, i.id, 'maint-rows')}
-                <label style="font-size:12px;margin-top:8px;display:block;">Yearly Effect</label>
-                ${jsonEditorRows(yearlyObj, i.id, 'yearly-rows')}
                 <label style="font-size:12px;margin-top:8px;display:block;">Visibility</label>
                 <label style="font-size:12px;display:flex;align-items:center;gap:4px;margin-bottom:4px;">
                   <input type="checkbox" id="vis-global-${i.id}" ${visArr === null ? 'checked' : ''} onchange="document.getElementById('vis-players-${i.id}').style.display=this.checked?'none':'block'">
@@ -6597,8 +6739,8 @@ async function loadShop() {
             <div class="muted" style="font-size:12px;">${i.description_text || ''}</div>
             <div class="muted" style="font-size:13px;">Cost: ${formatCost(costObj)}</div>
             ${Object.keys(maintenanceObj).length ? `<div class="muted" style="font-size:12px;">Yearly maintenance: ${formatCost(maintenanceObj)}</div>` : ''}
-            ${(!isUpgradeAvailable && i.category_code === 'upgrades') ? '<div class="muted" style="font-size:12px;margin-top:6px;">Need a lower-level structure to upgrade.</div>' : ''}
-            <button class="primary buyItem" data-id="${i.id}" ${(!isUpgradeAvailable && i.category_code === 'upgrades') ? 'disabled style="margin-top:6px;opacity:0.45;cursor:not-allowed;"' : 'style="margin-top:6px;"'}>Buy</button>
+            ${(!isUpgradeAvailable && i.category_code === 'build') ? '<div class="muted" style="font-size:12px;margin-top:6px;">Need a lower-level structure to upgrade.</div>' : ''}
+            <button class="primary buyItem" data-id="${i.id}" ${(!isUpgradeAvailable && i.category_code === 'build') ? 'disabled style="margin-top:6px;opacity:0.45;cursor:not-allowed;"' : 'style="margin-top:6px;"'}>Buy</button>
           </div>`;
       }
     }).join('') || '<div class="muted">No items</div>';
@@ -6632,9 +6774,10 @@ async function loadShop() {
       if (!isGlobal) {
         visibility_json = Array.from(document.querySelectorAll(`.vis-check-${id}:checked`)).map(el => Number(el.value));
       }
+      const item = allItems.find(row => Number(row.id) === id);
+      const display_name = String(document.getElementById(`name-${id}`)?.value || '').trim();
+      const requirement_json = item ? readRequirementFromEditors(item) : {};
       const cost_json = readCostRows(id);
-      const maintenance_json = readDynRows('maint-rows', id);
-      const yearly_effect_json = readDynRows('yearly-rows', id);
       const description_text = document.getElementById(`desc-${id}`).value;
       let effect_json = {};
       try {
@@ -6643,7 +6786,7 @@ async function loadShop() {
       } catch {
         effect_json = {};
       }
-      const r = await api(`/api/admin/shop/items/${id}`, { method: 'PUT', body: JSON.stringify({ cost_json, maintenance_json, yearly_effect_json, effect_json, description_text, visibility_json }) });
+      const r = await api(`/api/admin/shop/items/${id}`, { method: 'PUT', body: JSON.stringify({ display_name, cost_json, effect_json, requirement_json, description_text, visibility_json }) });
       const msgEl = document.getElementById(`edit-msg-${id}`);
       if (msgEl) msgEl.textContent = r.ok ? 'Saved' : 'Failed';
       if (r.ok) {
@@ -6688,12 +6831,53 @@ async function loadShop() {
     } catch {
       effect_json = {};
     }
+    let cost_json = {};
+    try {
+      cost_json = safeJsonParse(document.getElementById('newShopCost').value, {});
+      if (!cost_json || typeof cost_json !== 'object') cost_json = {};
+    } catch {
+      cost_json = {};
+    }
+
+    const selectedCategoryCode = cats.find(c => Number(c.id) === Number(document.getElementById('newShopCategory').value))?.code || '';
+    let requirement_json = {};
+    if (selectedCategoryCode === 'craft' || selectedCategoryCode === 'recruit') {
+      const code = String(document.getElementById('newShopReqBuildingCode')?.value || '').trim();
+      const level = Math.max(1, Number(document.getElementById('newShopReqBuildingLevel')?.value || 1));
+      requirement_json = code ? { type: 'structure', code, level } : {};
+    } else if (selectedCategoryCode === 'build') {
+      const codes = String(document.getElementById('newShopReqResearchCodes')?.value || '')
+        .split(',')
+        .map(v => v.trim())
+        .filter(Boolean);
+      requirement_json = codes.length ? { type: 'research', codes, mode: 'all' } : {};
+    } else if (selectedCategoryCode === 'research') {
+      const reqType = String(document.getElementById('newShopReqType')?.value || 'none');
+      if (reqType === 'structure') {
+        const code = String(document.getElementById('newShopReqBuildingCode')?.value || '').trim();
+        const level = Math.max(1, Number(document.getElementById('newShopReqBuildingLevel')?.value || 1));
+        requirement_json = code ? { type: 'structure', code, level } : {};
+      } else if (reqType === 'research') {
+        const codes = String(document.getElementById('newShopReqResearchCodes')?.value || '')
+          .split(',')
+          .map(v => v.trim())
+          .filter(Boolean);
+        requirement_json = codes.length ? { type: 'research', codes, mode: 'all' } : {};
+      } else if (reqType === 'resource') {
+        const resources = safeJsonParse(String(document.getElementById('newShopReqResources')?.value || '{}'), {});
+        requirement_json = (resources && typeof resources === 'object' && !Array.isArray(resources))
+          ? { type: 'resource', resources }
+          : {};
+      }
+    }
+
     const payload = {
       category_id: Number(document.getElementById('newShopCategory').value),
       display_name: document.getElementById('newShopName').value.trim(),
       description_text: document.getElementById('newShopDescription').value,
       effect_json,
-      cost_json: {},
+      cost_json,
+      requirement_json,
     };
     const r = await api('/api/admin/shop/items', { method: 'POST', body: JSON.stringify(payload) });
     document.getElementById('createShopItemMsg').textContent = r.ok ? 'Created' : 'Failed';
@@ -6710,6 +6894,172 @@ async function loadShop() {
     }
     barkIfEnabled();
   });
+
+  let researchUnlockState = {
+    nation_id: 0,
+    nation_name: '',
+    unlocks: [],
+  };
+
+  const renderResearchUnlocks = (payload = null) => {
+    if (payload && typeof payload === 'object') {
+      researchUnlockState = {
+        nation_id: Number(payload?.nation_id || 0),
+        nation_name: String(payload?.nation_name || ''),
+        unlocks: Array.isArray(payload?.unlocks) ? payload.unlocks : [],
+      };
+    }
+
+    const listEl = document.getElementById('shopResearchUnlockList');
+    const summaryEl = document.getElementById('shopResearchUnlockSummary');
+    const filterInput = document.getElementById('shopResearchUnlockFilter');
+    const sortSelect = document.getElementById('shopResearchUnlockSort');
+    if (!listEl) return;
+
+    const nationId = Number(researchUnlockState.nation_id || document.getElementById('shopResearchNationSelect')?.value || 0);
+    const rawRows = Array.isArray(researchUnlockState.unlocks) ? [...researchUnlockState.unlocks] : [];
+    const term = String(filterInput?.value || '').trim().toLowerCase();
+    const sortMode = String(sortSelect?.value || 'newest');
+
+    const normalizeDate = (row) => {
+      const rawValue = row?.researched_at || row?.created_at || row?.updated_at || null;
+      if (!rawValue) return 0;
+      const parsed = Date.parse(String(rawValue));
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const codeOf = (row) => String(row?.research_code || '').toLowerCase();
+    const sourceOf = (row) => String(row?.source_item_name || row?.shop_item_id || '').toLowerCase();
+
+    rawRows.sort((a, b) => {
+      if (sortMode === 'oldest') return normalizeDate(a) - normalizeDate(b);
+      if (sortMode === 'code_asc') return codeOf(a).localeCompare(codeOf(b));
+      if (sortMode === 'code_desc') return codeOf(b).localeCompare(codeOf(a));
+      if (sortMode === 'source_asc') return sourceOf(a).localeCompare(sourceOf(b));
+      if (sortMode === 'source_desc') return sourceOf(b).localeCompare(sourceOf(a));
+      return normalizeDate(b) - normalizeDate(a);
+    });
+
+    const rows = term
+      ? rawRows.filter((row) => String(row?.research_code || '').toLowerCase().includes(term))
+      : rawRows;
+
+    if (summaryEl) {
+      const nationLabel = researchUnlockState.nation_name || (nationId ? `Nation #${nationId}` : 'No nation selected');
+      const sortLabel = {
+        newest: 'Newest First',
+        oldest: 'Oldest First',
+        code_asc: 'Code A-Z',
+        code_desc: 'Code Z-A',
+        source_asc: 'Source A-Z',
+        source_desc: 'Source Z-A',
+      }[sortMode] || 'Newest First';
+      summaryEl.textContent = `${nationLabel} | ${rows.length}/${rawRows.length} unlock(s) shown${term ? ` | Filter: "${term}"` : ''} | Sort: ${sortLabel}`;
+    }
+
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="muted">No research unlocks found for the current selection/filter.</div>';
+      return;
+    }
+    listEl.innerHTML = rows.map((row) => {
+      const unlockId = Number(row?.id || 0);
+      const code = escapeHtml(String(row?.research_code || ''));
+      const source = escapeHtml(String(row?.source_item_name || row?.shop_item_id || '-'));
+      const when = escapeHtml(String(row?.researched_at || row?.created_at || 'unknown'));
+      return `<div class="res-kv" style="align-items:flex-start;gap:8px;"><span><strong>${code}</strong></span><span style="text-align:right;display:flex;flex-direction:column;gap:4px;align-items:flex-end;">${source}<span class="muted" style="font-size:11px;">${when}</span>${unlockId > 0 ? `<button class="primary deleteResearchUnlockBtn" data-unlock-id="${unlockId}" data-nation-id="${nationId}" style="background:var(--danger);padding:4px 8px;font-size:11px;">Remove This Unlock</button>` : ''}</span></div>`;
+    }).join('');
+
+    listEl.querySelectorAll('.deleteResearchUnlockBtn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const unlockId = Number(btn.dataset.unlockId || 0);
+        const selectedNationId = Number(btn.dataset.nationId || nationId || 0);
+        const msgEl = document.getElementById('shopResearchUnlockMsg');
+        if (!unlockId || !selectedNationId) {
+          if (msgEl) msgEl.textContent = 'Unlock selection is invalid.';
+          return;
+        }
+        if (!window.confirm('Remove this specific research unlock?')) {
+          return;
+        }
+        const removeRes = await api(`/api/admin/nations/${selectedNationId}/research-unlocks/${unlockId}`, { method: 'DELETE' });
+        if (!removeRes || !removeRes.ok) {
+          if (msgEl) msgEl.textContent = 'Failed to remove research unlock.';
+          return;
+        }
+        const reloadRes = await api(`/api/admin/nations/${selectedNationId}/research-unlocks`);
+        const reloadPayload = (reloadRes && reloadRes.ok)
+          ? await parseJsonResponse(reloadRes, {})
+          : { nation_id: selectedNationId, nation_name: '', unlocks: [] };
+        renderResearchUnlocks(reloadPayload);
+        if (msgEl) msgEl.textContent = 'Research unlock removed.';
+        barkIfEnabled();
+      });
+    });
+  };
+
+  const loadNationResearchUnlocks = async ({ silent = false } = {}) => {
+    const nationId = Number(document.getElementById('shopResearchNationSelect')?.value || 0);
+    const msgEl = document.getElementById('shopResearchUnlockMsg');
+    if (!nationId) {
+      renderResearchUnlocks({ nation_id: 0, nation_name: '', unlocks: [] });
+      if (msgEl && !silent) msgEl.textContent = 'Select a nation first.';
+      return;
+    }
+
+    const res = await api(`/api/admin/nations/${nationId}/research-unlocks`);
+    if (!res || !res.ok) {
+      if (msgEl) msgEl.textContent = 'Failed to load research unlocks.';
+      return;
+    }
+
+    const payload = await parseJsonResponse(res, {});
+    renderResearchUnlocks(payload);
+    if (msgEl && !silent) {
+      const count = Number(payload?.count || 0);
+      msgEl.textContent = `Loaded ${count} unlock(s) for ${payload?.nation_name || 'selected nation'}.`;
+    }
+  };
+
+  document.getElementById('refreshNationResearchBtn')?.addEventListener('click', async () => {
+    await loadNationResearchUnlocks();
+  });
+
+  document.getElementById('shopResearchNationSelect')?.addEventListener('change', async () => {
+    await loadNationResearchUnlocks({ silent: true });
+  });
+
+  document.getElementById('shopResearchUnlockFilter')?.addEventListener('input', () => {
+    renderResearchUnlocks();
+  });
+
+  document.getElementById('shopResearchUnlockSort')?.addEventListener('change', () => {
+    renderResearchUnlocks();
+  });
+
+  document.getElementById('resetNationResearchBtn')?.addEventListener('click', async () => {
+    const nationId = Number(document.getElementById('shopResearchNationSelect')?.value || 0);
+    const msgEl = document.getElementById('shopResearchUnlockMsg');
+    if (!nationId) {
+      if (msgEl) msgEl.textContent = 'Select a nation first.';
+      return;
+    }
+    if (!window.confirm('Reset all research unlocks for this nation?')) {
+      return;
+    }
+    const res = await api(`/api/admin/nations/${nationId}/research-unlocks`, { method: 'DELETE' });
+    if (!res || !res.ok) {
+      if (msgEl) msgEl.textContent = 'Failed to reset research unlocks.';
+      return;
+    }
+    const payload = await parseJsonResponse(res, {});
+    if (msgEl) msgEl.textContent = `Reset complete. Removed ${Number(payload?.deleted_count || 0)} unlock(s).`;
+    renderResearchUnlocks({ nation_id: nationId, nation_name: researchUnlockState.nation_name, unlocks: [] });
+    barkIfEnabled();
+  });
+
+  if (isAdmin) {
+    loadNationResearchUnlocks({ silent: true });
+  }
 }
 
 async function loadNewAccounts() {

@@ -20,6 +20,7 @@ class UpdateShopItemRequest extends FormRequest
             'maintenance_json' => ['sometimes', 'nullable', 'array'],
             'yearly_effect_json' => ['sometimes', 'nullable', 'array'],
             'effect_json' => ['sometimes', 'nullable', 'array'],
+            'requirement_json' => ['sometimes', 'nullable', 'array'],
             'is_active' => ['sometimes', 'boolean'],
             'visibility_json' => ['sometimes', 'nullable', 'array'],
             'visibility_json.*' => ['integer', 'exists:users,id'],

@@ -93,6 +93,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/nations/{nationId}/units/{nationUnitId}', [AdminController::class, 'removeUnitFromNation']);
         Route::post('/nations/{nationId}/buildings', [AdminController::class, 'addBuildingToNation']);
         Route::delete('/nations/{nationId}/buildings/{nationBuildingId}', [AdminController::class, 'removeBuildingFromNation']);
+        Route::get('/nations/{nationId}/research-unlocks', [AdminController::class, 'nationResearchUnlocks']);
+        Route::delete('/nations/{nationId}/research-unlocks/{unlockId}', [AdminController::class, 'deleteNationResearchUnlock']);
+        Route::delete('/nations/{nationId}/research-unlocks', [AdminController::class, 'resetNationResearchUnlocks']);
         Route::get('/unit-catalog', [AdminController::class, 'unitCatalog']);
         Route::get('/building-catalog', [AdminController::class, 'buildingCatalog']);
         Route::get('/new-account-defaults', [AdminController::class, 'newAccountDefaults']);

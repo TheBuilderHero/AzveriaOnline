@@ -175,9 +175,23 @@ CREATE TABLE IF NOT EXISTS shop_items (
   maintenance_json JSON NULL,
   yearly_effect_json JSON NULL,
   effect_json JSON NULL,
+  requirement_json JSON NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   visibility_json JSON NULL COMMENT 'null = global; ["all"] = global; [1,2,3] = only those user IDs',
   CONSTRAINT fk_shop_items_category FOREIGN KEY (category_id) REFERENCES shop_categories(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS nation_research (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nation_id BIGINT UNSIGNED NOT NULL,
+  shop_item_id BIGINT UNSIGNED NULL,
+  research_code VARCHAR(120) NOT NULL,
+  researched_at TIMESTAMP NULL,
+  created_at TIMESTAMP NULL,
+  updated_at TIMESTAMP NULL,
+  UNIQUE KEY uq_nation_research (nation_id, research_code),
+  CONSTRAINT fk_nation_research_nation FOREIGN KEY (nation_id) REFERENCES nations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_nation_research_item FOREIGN KEY (shop_item_id) REFERENCES shop_items(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS nation_assets (
@@ -265,12 +279,10 @@ CREATE TABLE IF NOT EXISTS game_documents (
 );
 
 INSERT INTO shop_categories (code, display_name) VALUES
-  ('refinement', 'Refinement'),
-  ('structures', 'Structures'),
-  ('upgrades', 'Upgrades'),
-  ('recruitment', 'Recruitment'),
-  ('crafting', 'Crafting'),
-  ('currency_exchange', 'Currency Exchange')
+  ('craft', 'Craft'),
+  ('build', 'Build'),
+  ('recruit', 'Recruit'),
+  ('research', 'Research')
 ON DUPLICATE KEY UPDATE display_name = VALUES(display_name);
 
 INSERT INTO map_layers (layer_type, image_path, updated_at) VALUES

@@ -79,11 +79,11 @@ ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), class_name = VALUES
 INSERT INTO shop_items (category_id, code, display_name, cost_json, effect_json, is_active)
 SELECT c.id, 'refine_ore_to_metal', 'Refine Ore to Metal', JSON_OBJECT('ore', 5), JSON_OBJECT('refined', JSON_OBJECT('M', 1)), 1
 FROM shop_categories c
-WHERE c.code = 'refinement'
+WHERE c.code = 'craft'
 ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), cost_json = VALUES(cost_json), effect_json = VALUES(effect_json), is_active = VALUES(is_active);
 
 INSERT INTO shop_items (category_id, code, display_name, cost_json, effect_json, is_active)
 SELECT c.id, 'buy_light_infantry', 'Recruit Light Infantry', JSON_OBJECT('cow', 20, 'food', 1), JSON_OBJECT('unit_code', 'dak_light_infantry', 'qty', 1), 1
 FROM shop_categories c
-WHERE c.code = 'recruitment'
+WHERE c.code = 'recruit'
 ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), cost_json = VALUES(cost_json), effect_json = VALUES(effect_json), is_active = VALUES(is_active);

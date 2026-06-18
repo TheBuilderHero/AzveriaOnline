@@ -14,12 +14,14 @@ class ShopItem extends Model
         'display_name',
         'cost_json',
         'effect_json',
+        'requirement_json',
         'is_active',
     ];
 
     protected $casts = [
         'cost_json' => 'array',
         'effect_json' => 'array',
+        'requirement_json' => 'array',
         'is_active' => 'boolean',
     ];
 

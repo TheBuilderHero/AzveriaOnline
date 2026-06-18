@@ -7,20 +7,29 @@ use App\Http\Requests\Api\BuyShopItemRequest;
 use App\Models\ShopItem;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ShopController extends Controller
 {
     public function categories()
     {
         $this->authorize('viewAny', ShopItem::class);
-        return response()->json(DB::table('shop_categories')->orderBy('id')->get());
+        $this->ensurePrimaryShopCategories();
+
+        return response()->json(
+            DB::table('shop_categories')
+                ->whereIn('code', ['craft', 'build', 'recruit', 'research'])
+                ->orderByRaw("FIELD(code, 'craft', 'build', 'recruit', 'research')")
+                ->get()
+        );
     }
 
     public function items(Request $request)
     {
         $this->authorize('viewAny', ShopItem::class);
-        $category = $request->query('category');
-        $perPage = min((int) $request->query('per_page', 30), 100);
+        $this->ensurePrimaryShopCategories();
+
+        $category = $this->normalizeCategoryCode((string) $request->query('category', ''));
         $user = $request->user();
         $isAdmin = $user && $user->role === 'admin';
 
@@ -37,11 +46,39 @@ class ShopController extends Controller
             });
         }
 
-        if ($category) {
-            $query->where('sc.code', $category);
+        if ($category !== '') {
+            $query->whereIn('sc.code', $this->categoryAliases($category));
         }
 
-        return response()->json($query->orderBy('si.id')->paginate($perPage));
+        $rows = $query->orderBy('si.id')->get()->map(function ($item) {
+            $code = $this->normalizeCategoryCode((string) ($item->category_code ?? ''));
+            $item->category_code = $code;
+            if ($code !== '') {
+                $item->category_name = ucfirst($code);
+            }
+            return $item;
+        });
+
+        if ($isAdmin) {
+            return response()->json($rows);
+        }
+
+        $nation = DB::table('nations')->where('owner_user_id', $user->id)->first();
+        if (!$nation) {
+            return response()->json([]);
+        }
+
+        $resourceRow = DB::table('nation_resources')->where('nation_id', $nation->id)->first();
+        $balances = $this->loadNationBalances($resourceRow);
+        $buildingLevels = $this->loadNationBuildingLevels((int) $nation->id);
+        $researchSet = $this->loadNationResearchSet((int) $nation->id);
+
+        $visible = $rows->filter(function ($item) use ($buildingLevels, $researchSet, $balances) {
+            $rawRequirement = json_decode((string) ($item->requirement_json ?? 'null'), true);
+            return $this->nationMeetsRequirement($rawRequirement, $buildingLevels, $researchSet, $balances);
+        })->values();
+
+        return response()->json($visible);
     }
 
     public function buy(BuyShopItemRequest $request)
@@ -49,10 +86,15 @@ class ShopController extends Controller
         $data = $request->validated();
 
         $quantity = (int) ($data['quantity'] ?? 1);
-        $item = DB::table('shop_items')->where('id', $data['item_id'])->first();
+        $item = DB::table('shop_items as si')
+            ->join('shop_categories as sc', 'si.category_id', '=', 'sc.id')
+            ->where('si.id', $data['item_id'])
+            ->select('si.*', 'sc.code as category_code')
+            ->first();
         if (!$item || !$item->is_active) {
             return response()->json(['message' => 'Item unavailable'], 422);
         }
+        $categoryCode = $this->normalizeCategoryCode((string) ($item->category_code ?? ''));
 
         $structureMeta = $this->parseStructureCode((string) $item->code);
         $effects = json_decode($item->effect_json, true) ?: [];
@@ -67,6 +109,25 @@ class ShopController extends Controller
         $resourceRow = DB::table('nation_resources')->where('nation_id', $nation->id)->first();
         if (!$resourceRow) {
             return response()->json(['message' => 'No resources found'], 404);
+        }
+
+        $buildingLevels = $this->loadNationBuildingLevels((int) $nation->id);
+        $researchSet = $this->loadNationResearchSet((int) $nation->id);
+        $balances = $this->loadNationBalances($resourceRow);
+        $rawRequirement = json_decode((string) ($item->requirement_json ?? 'null'), true);
+        if (!$this->nationMeetsRequirement($rawRequirement, $buildingLevels, $researchSet, $balances)) {
+            return response()->json(['message' => 'Requirements not met for this item.'], 422);
+        }
+
+        if ($categoryCode === 'research' && Schema::hasTable('nation_research')) {
+            $already = DB::table('nation_research')
+                ->where('nation_id', $nation->id)
+                ->where('research_code', (string) $item->code)
+                ->exists();
+            if ($already) {
+                return response()->json(['message' => 'Research already completed.'], 422);
+            }
+            $quantity = 1;
         }
 
         if ($structureMeta && $structureMeta['level'] > 1) {
@@ -287,8 +348,9 @@ class ShopController extends Controller
         $updatedRow = DB::table('nation_resources')->where('nation_id', $nation->id)->first();
         $updatedExtra = json_decode($updatedRow->extra_json ?? '{}', true) ?: [];
 
-        $hasTrackedAsset = !empty(json_decode($item->maintenance_json ?? 'null', true) ?: [])
-            || !empty(json_decode($item->yearly_effect_json ?? 'null', true) ?: []);
+        $hasTrackedAsset = $categoryCode !== 'research'
+            && (!empty(json_decode($item->maintenance_json ?? 'null', true) ?: [])
+            || !empty(json_decode($item->yearly_effect_json ?? 'null', true) ?: []));
         if ($hasTrackedAsset) {
             $existingAsset = DB::table('nation_assets')
                 ->where('nation_id', $nation->id)
@@ -308,6 +370,22 @@ class ShopController extends Controller
                     'updated_at' => now(),
                 ]);
             }
+        }
+
+        if ($categoryCode === 'research' && Schema::hasTable('nation_research')) {
+            DB::table('nation_research')->updateOrInsert(
+                [
+                    'nation_id' => $nation->id,
+                    'research_code' => (string) $item->code,
+                ],
+                [
+                    'shop_item_id' => $item->id,
+                    'researched_at' => now(),
+                    'updated_at' => now(),
+                    'created_at' => now(),
+                ]
+            );
+            $researchSet[strtolower((string) $item->code)] = true;
         }
 
         if ($structureMeta) {
@@ -481,5 +559,199 @@ class ShopController extends Controller
         ];
 
         return $aliases[$trimmed] ?? $trimmed;
+    }
+
+    private function loadNationBuildingLevels(int $nationId): array
+    {
+        $rows = DB::table('nation_buildings as nb')
+            ->join('building_catalog as bc', 'nb.building_catalog_id', '=', 'bc.id')
+            ->where('nb.nation_id', $nationId)
+            ->where('nb.status', 'built')
+            ->select('bc.code', 'nb.level')
+            ->get();
+
+        $levels = [];
+        foreach ($rows as $row) {
+            $code = strtolower((string) ($row->code ?? ''));
+            if ($code === '') {
+                continue;
+            }
+            $levels[$code] = max((int) ($levels[$code] ?? 0), (int) ($row->level ?? 0));
+        }
+
+        return $levels;
+    }
+
+    private function loadNationResearchSet(int $nationId): array
+    {
+        if (!Schema::hasTable('nation_research')) {
+            return [];
+        }
+
+        $codes = DB::table('nation_research')
+            ->where('nation_id', $nationId)
+            ->pluck('research_code')
+            ->all();
+
+        $set = [];
+        foreach ($codes as $code) {
+            $key = strtolower(trim((string) $code));
+            if ($key !== '') {
+                $set[$key] = true;
+            }
+        }
+
+        return $set;
+    }
+
+    private function loadNationBalances($resourceRow): array
+    {
+        $extra = json_decode((string) ($resourceRow->extra_json ?? '{}'), true) ?: [];
+
+        $baseColumns = ['cow', 'wood', 'ore', 'food'];
+        $base = [
+            'cow' => (float) ($resourceRow->cow ?? 0),
+            'wood' => (float) ($resourceRow->wood ?? 0),
+            'ore' => (float) ($resourceRow->ore ?? 0),
+            'food' => (float) ($resourceRow->food ?? 0),
+        ];
+        foreach ((is_array($extra['base'] ?? null) ? $extra['base'] : []) as $key => $value) {
+            if (in_array((string) $key, $baseColumns, true)) {
+                continue;
+            }
+            $base[(string) $key] = (float) $value;
+        }
+
+        return [
+            'base' => $base,
+            'advanced' => is_array($extra['advanced'] ?? null)
+                ? $extra['advanced']
+                : (is_array($extra['refined'] ?? null) ? $extra['refined'] : []),
+            'currencies' => is_array($extra['currencies'] ?? null) ? $extra['currencies'] : [],
+        ];
+    }
+
+    private function nationMeetsRequirement($requirement, array $buildingLevels, array $researchSet, array $balances): bool
+    {
+        if (!is_array($requirement) || empty($requirement)) {
+            return true;
+        }
+
+        if (isset($requirement['all']) && is_array($requirement['all'])) {
+            foreach ($requirement['all'] as $child) {
+                if (!$this->nationMeetsRequirement($child, $buildingLevels, $researchSet, $balances)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        if (isset($requirement['any']) && is_array($requirement['any'])) {
+            foreach ($requirement['any'] as $child) {
+                if ($this->nationMeetsRequirement($child, $buildingLevels, $researchSet, $balances)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        $type = strtolower((string) ($requirement['type'] ?? ''));
+        if ($type === 'structure') {
+            $code = strtolower(trim((string) ($requirement['building_code'] ?? $requirement['code'] ?? '')));
+            $level = max(1, (int) ($requirement['level'] ?? 1));
+            if ($code === '') {
+                return true;
+            }
+            return (int) ($buildingLevels[$code] ?? 0) >= $level;
+        }
+
+        if ($type === 'research') {
+            $single = strtolower(trim((string) ($requirement['code'] ?? '')));
+            if ($single !== '') {
+                return isset($researchSet[$single]);
+            }
+            $codes = is_array($requirement['codes'] ?? null) ? $requirement['codes'] : [];
+            $mode = strtolower((string) ($requirement['mode'] ?? 'all'));
+            if (empty($codes)) {
+                return true;
+            }
+            if ($mode === 'any') {
+                foreach ($codes as $code) {
+                    if (isset($researchSet[strtolower(trim((string) $code))])) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            foreach ($codes as $code) {
+                if (!isset($researchSet[strtolower(trim((string) $code))])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        if ($type === 'resource') {
+            $required = is_array($requirement['cost'] ?? null)
+                ? $requirement['cost']
+                : (is_array($requirement['resources'] ?? null) ? $requirement['resources'] : []);
+            foreach ($required as $resource => $value) {
+                $token = $this->parseResourceToken((string) $resource);
+                if (!$token) {
+                    continue;
+                }
+                $needed = (float) $value;
+                if ($token['bucket'] === 'base') {
+                    if ((float) ($balances['base'][$token['name']] ?? 0) < $needed) {
+                        return false;
+                    }
+                    continue;
+                }
+                if ($token['bucket'] === 'advanced') {
+                    if ((float) ($balances['advanced'][$token['name']] ?? 0) < $needed) {
+                        return false;
+                    }
+                    continue;
+                }
+                if ((float) ($balances['currencies'][$token['name']] ?? 0) < $needed) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        return true;
+    }
+
+    private function ensurePrimaryShopCategories(): void
+    {
+        DB::table('shop_categories')->updateOrInsert(['code' => 'craft'], ['display_name' => 'Craft']);
+        DB::table('shop_categories')->updateOrInsert(['code' => 'build'], ['display_name' => 'Build']);
+        DB::table('shop_categories')->updateOrInsert(['code' => 'recruit'], ['display_name' => 'Recruit']);
+        DB::table('shop_categories')->updateOrInsert(['code' => 'research'], ['display_name' => 'Research']);
+    }
+
+    private function normalizeCategoryCode(string $code): string
+    {
+        $value = strtolower(trim($code));
+
+        return match ($value) {
+            'refinement', 'crafting', 'currency_exchange', 'craft' => 'craft',
+            'structures', 'upgrades', 'build' => 'build',
+            'recruitment', 'recruit' => 'recruit',
+            'research' => 'research',
+            default => $value,
+        };
+    }
+
+    private function categoryAliases(string $normalized): array
+    {
+        return match ($normalized) {
+            'craft' => ['craft', 'refinement', 'crafting', 'currency_exchange'],
+            'build' => ['build', 'structures', 'upgrades'],
+            'recruit' => ['recruit', 'recruitment'],
+            'research' => ['research'],
+            default => [$normalized],
+        };
     }
 }

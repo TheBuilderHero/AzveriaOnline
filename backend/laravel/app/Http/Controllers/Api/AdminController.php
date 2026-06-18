@@ -1631,6 +1631,7 @@ class AdminController extends Controller
             'maintenance_json' => array_key_exists('maintenance_json', $data) ? json_encode($data['maintenance_json']) : $item->maintenance_json,
             'yearly_effect_json' => array_key_exists('yearly_effect_json', $data) ? json_encode($data['yearly_effect_json']) : $item->yearly_effect_json,
             'effect_json' => array_key_exists('effect_json', $data) ? json_encode($data['effect_json']) : $item->effect_json,
+            'requirement_json' => array_key_exists('requirement_json', $data) ? json_encode($data['requirement_json']) : $item->requirement_json,
             'is_active' => array_key_exists('is_active', $data) ? (int) $data['is_active'] : $item->is_active,
             'visibility_json' => array_key_exists('visibility_json', $data)
                 ? ($data['visibility_json'] === null ? null : json_encode(array_values(array_map('intval', $data['visibility_json']))))
@@ -1659,6 +1660,7 @@ class AdminController extends Controller
             'maintenance_json' => ['sometimes', 'nullable', 'array'],
             'yearly_effect_json' => ['sometimes', 'nullable', 'array'],
             'effect_json' => ['sometimes', 'nullable', 'array'],
+            'requirement_json' => ['sometimes', 'nullable', 'array'],
             'is_active' => ['sometimes', 'boolean'],
             'visibility_json' => ['sometimes', 'nullable', 'array'],
             'visibility_json.*' => ['integer', 'exists:users,id'],
@@ -1689,6 +1691,7 @@ class AdminController extends Controller
             'maintenance_json' => array_key_exists('maintenance_json', $data) ? json_encode($data['maintenance_json']) : null,
             'yearly_effect_json' => array_key_exists('yearly_effect_json', $data) ? json_encode($data['yearly_effect_json']) : null,
             'effect_json' => array_key_exists('effect_json', $data) ? json_encode($data['effect_json']) : null,
+            'requirement_json' => array_key_exists('requirement_json', $data) ? json_encode($data['requirement_json']) : null,
             'is_active' => (int) ($data['is_active'] ?? 1),
             'visibility_json' => array_key_exists('visibility_json', $data)
                 ? ($data['visibility_json'] === null ? null : json_encode(array_values(array_map('intval', $data['visibility_json']))))
@@ -1709,6 +1712,96 @@ class AdminController extends Controller
         DB::table('nation_assets')->where('shop_item_id', $itemId)->delete();
         DB::table('shop_items')->where('id', $itemId)->delete();
         return response()->json(['message' => 'Shop item deleted']);
+    }
+
+    public function nationResearchUnlocks(int $nationId)
+    {
+        $nation = DB::table('nations')->where('id', $nationId)->first();
+        if (!$nation) {
+            return response()->json(['message' => 'Nation not found'], 404);
+        }
+
+        if (!Schema::hasTable('nation_research')) {
+            return response()->json([
+                'nation_id' => (int) $nationId,
+                'nation_name' => (string) $nation->name,
+                'unlocks' => [],
+                'message' => 'Research unlock storage is not initialized yet.',
+            ]);
+        }
+
+        $rows = DB::table('nation_research as nr')
+            ->leftJoin('shop_items as si', 'nr.shop_item_id', '=', 'si.id')
+            ->where('nr.nation_id', $nationId)
+            ->select(
+                'nr.id',
+                'nr.research_code',
+                'nr.shop_item_id',
+                'nr.researched_at',
+                'nr.created_at',
+                'si.display_name as source_item_name'
+            )
+            ->orderByDesc('nr.researched_at')
+            ->orderBy('nr.id')
+            ->get();
+
+        return response()->json([
+            'nation_id' => (int) $nationId,
+            'nation_name' => (string) $nation->name,
+            'unlocks' => $rows,
+            'count' => $rows->count(),
+        ]);
+    }
+
+    public function resetNationResearchUnlocks(int $nationId)
+    {
+        $nation = DB::table('nations')->where('id', $nationId)->first();
+        if (!$nation) {
+            return response()->json(['message' => 'Nation not found'], 404);
+        }
+
+        if (!Schema::hasTable('nation_research')) {
+            return response()->json(['message' => 'Research unlock storage is not initialized yet.'], 422);
+        }
+
+        $deleted = DB::table('nation_research')->where('nation_id', $nationId)->delete();
+
+        return response()->json([
+            'message' => 'Research unlocks reset.',
+            'nation_id' => (int) $nationId,
+            'nation_name' => (string) $nation->name,
+            'deleted_count' => (int) $deleted,
+        ]);
+    }
+
+    public function deleteNationResearchUnlock(int $nationId, int $unlockId)
+    {
+        $nation = DB::table('nations')->where('id', $nationId)->first();
+        if (!$nation) {
+            return response()->json(['message' => 'Nation not found'], 404);
+        }
+
+        if (!Schema::hasTable('nation_research')) {
+            return response()->json(['message' => 'Research unlock storage is not initialized yet.'], 422);
+        }
+
+        $row = DB::table('nation_research')
+            ->where('id', $unlockId)
+            ->where('nation_id', $nationId)
+            ->first();
+
+        if (!$row) {
+            return response()->json(['message' => 'Research unlock not found for this nation.'], 404);
+        }
+
+        DB::table('nation_research')->where('id', $unlockId)->delete();
+
+        return response()->json([
+            'message' => 'Research unlock removed.',
+            'nation_id' => (int) $nationId,
+            'unlock_id' => (int) $unlockId,
+            'research_code' => (string) ($row->research_code ?? ''),
+        ]);
     }
 
     public function notifications()
