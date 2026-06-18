@@ -2729,8 +2729,19 @@ async function loadMap() {
 
   let mapWidth = clamp(toFiniteNumber(activeEditorState.width, 1200), 100, 5000);
   let mapHeight = clamp(toFiniteNumber(activeEditorState.height, 700), 100, 5000);
-  let terrainStrokes = Array.isArray(activeEditorState.terrain_strokes) ? activeEditorState.terrain_strokes.slice() : [];
-  let politicalStrokes = Array.isArray(activeEditorState.political_strokes) ? activeEditorState.political_strokes.slice() : [];
+  const deepCloneJson = (value, fallback) => {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return fallback;
+    }
+  };
+  const cloneStrokeArray = (value, fallback = []) => {
+    const safeFallback = Array.isArray(fallback) ? deepCloneJson(fallback, []) : [];
+    return deepCloneJson(Array.isArray(value) ? value : safeFallback, safeFallback);
+  };
+  let terrainStrokes = cloneStrokeArray(activeEditorState.terrain_strokes, []);
+  let politicalStrokes = cloneStrokeArray(activeEditorState.political_strokes, []);
   let politicalNationMeta = Array.isArray(activeEditorState.political_nations) ? activeEditorState.political_nations.slice() : [];
   let editorBackgroundPath = null;
   let editorBackgroundObjectUrl = null;
@@ -2934,19 +2945,13 @@ async function loadMap() {
   let mapUndoStack = [];
   let mapPaintUndoSnapshotTaken = false;
 
-  const snapshotDraftEditorState = () => ({
+  const snapshotDraftEditorState = () => deepCloneJson(buildEditorStatePayload(), {
     width: mapWidth,
     height: mapHeight,
-    terrain_color_overrides: { ...colorOverrides },
-    terrain_strokes: JSON.parse(JSON.stringify(Array.isArray(terrainStrokes) ? terrainStrokes : [])),
-    political_strokes: JSON.parse(JSON.stringify(Array.isArray(politicalStrokes) ? politicalStrokes : [])),
-    political_nations: JSON.parse(JSON.stringify(politicalNationsArray().map(n => ({
-      id: n.id,
-      name: n.name,
-      alliance_name: n.alliance_name || '',
-      races: n.races || [],
-      pixels: nationPixelCount(n.id),
-    })))),
+    terrain_color_overrides: {},
+    terrain_strokes: [],
+    political_strokes: [],
+    political_nations: [],
   });
 
   const updateUndoButtonState = () => {
@@ -4575,9 +4580,9 @@ async function loadMap() {
     const imported = (payload && typeof payload === 'object') ? payload : {};
     mapWidth = clamp(toFiniteNumber(imported.width, 1200), 100, 5000);
     mapHeight = clamp(toFiniteNumber(imported.height, 700), 100, 5000);
-    terrainStrokes = Array.isArray(imported.terrain_strokes) ? imported.terrain_strokes.slice() : [{ tool: 'fill', terrain: 'water', x: 0, y: 0 }];
-    politicalStrokes = Array.isArray(imported.political_strokes) ? imported.political_strokes.slice() : [];
-    politicalNationMeta = Array.isArray(imported.political_nations) ? imported.political_nations.slice() : [];
+    terrainStrokes = cloneStrokeArray(imported.terrain_strokes, [{ tool: 'fill', terrain: 'water', x: 0, y: 0 }]);
+    politicalStrokes = cloneStrokeArray(imported.political_strokes, []);
+    politicalNationMeta = deepCloneJson(Array.isArray(imported.political_nations) ? imported.political_nations : [], []);
     colorOverrides = (imported.terrain_color_overrides && typeof imported.terrain_color_overrides === 'object')
       ? { ...imported.terrain_color_overrides }
       : {};
