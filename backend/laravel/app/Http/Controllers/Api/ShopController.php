@@ -177,13 +177,7 @@ class ShopController extends Controller
 
         $costs = json_decode($item->cost_json, true) ?: [];
         $extra = json_decode($resourceRow->extra_json ?? '{}', true) ?: [];
-        $baseColumns = ['cow', 'wood', 'ore', 'food'];
-        $base = [
-            'cow' => (float) ($resourceRow->cow ?? 0),
-            'wood' => (float) ($resourceRow->wood ?? 0),
-            'ore' => (float) ($resourceRow->ore ?? 0),
-            'food' => (float) ($resourceRow->food ?? 0),
-        ];
+        $base = $this->legacyCoreBaseResourceValues($resourceRow);
         foreach ((is_array($extra['base'] ?? null) ? $extra['base'] : []) as $key => $value) {
             $base[(string) $key] = (float) $value;
         }
@@ -450,7 +444,7 @@ class ShopController extends Controller
                 . ' Purchase cost: ' . json_encode($costs)
                 . '. Purchase effect: ' . json_encode($effects)
                 . '. Remaining balances after purchase: ' . json_encode([
-                    'base' => ['cow' => (float) $updatedRow->cow, 'wood' => (float) $updatedRow->wood, 'ore' => (float) $updatedRow->ore, 'food' => (float) $updatedRow->food],
+                    'base' => $this->legacyCoreBaseResourceValues($updatedRow),
                     'advanced' => $updatedExtra['advanced'] ?? ($updatedExtra['refined'] ?? []),
                     'currencies' => $updatedExtra['currencies'] ?? [],
                 ]),
@@ -469,7 +463,7 @@ class ShopController extends Controller
         return response()->json([
             'message' => 'Purchase successful',
             'remaining' => [
-                'base'       => ['cow' => (float)$updatedRow->cow, 'wood' => (float)$updatedRow->wood, 'ore' => (float)$updatedRow->ore, 'food' => (float)$updatedRow->food],
+                'base'       => $this->legacyCoreBaseResourceValues($updatedRow),
                 'advanced'   => $updatedExtra['advanced']   ?? ($updatedExtra['refined'] ?? []),
                 'refined'    => $updatedExtra['advanced']   ?? ($updatedExtra['refined'] ?? []),
                 'currencies' => $updatedExtra['currencies'] ?? [],
@@ -495,10 +489,10 @@ class ShopController extends Controller
             if ($type === 'base') {
                 return ['bucket' => 'base', 'name' => $name];
             }
-            if ($type === 'advanced' || $type === 'refined') {
+            if ($type === 'advanced') {
                 return ['bucket' => 'advanced', 'name' => $name];
             }
-            if ($type === 'currencies' || $type === 'currency' || $type === 'curr') {
+            if ($type === 'currencies') {
                 return ['bucket' => 'currencies', 'name' => $name];
             }
 
@@ -608,15 +602,10 @@ class ShopController extends Controller
     {
         $extra = json_decode((string) ($resourceRow->extra_json ?? '{}'), true) ?: [];
 
-        $baseColumns = ['cow', 'wood', 'ore', 'food'];
-        $base = [
-            'cow' => (float) ($resourceRow->cow ?? 0),
-            'wood' => (float) ($resourceRow->wood ?? 0),
-            'ore' => (float) ($resourceRow->ore ?? 0),
-            'food' => (float) ($resourceRow->food ?? 0),
-        ];
+        $base = $this->legacyCoreBaseResourceValues($resourceRow);
+        $coreKeys = array_fill_keys(array_keys($base), true);
         foreach ((is_array($extra['base'] ?? null) ? $extra['base'] : []) as $key => $value) {
-            if (in_array((string) $key, $baseColumns, true)) {
+            if (isset($coreKeys[(string) $key])) {
                 continue;
             }
             $base[(string) $key] = (float) $value;
@@ -629,6 +618,23 @@ class ShopController extends Controller
                 : (is_array($extra['refined'] ?? null) ? $extra['refined'] : []),
             'currencies' => is_array($extra['currencies'] ?? null) ? $extra['currencies'] : [],
         ];
+    }
+
+    private function legacyCoreBaseResourceValues(object $resourceRow): array
+    {
+        $out = [];
+        foreach (get_object_vars($resourceRow) as $key => $value) {
+            $name = (string) $key;
+            if (in_array($name, ['nation_id', 'extra_json', 'updated_at', 'created_at'], true)) {
+                continue;
+            }
+            if (!is_numeric($value)) {
+                continue;
+            }
+            $out[$name] = (float) $value;
+        }
+
+        return $out;
     }
 
     private function nationMeetsRequirement($requirement, array $buildingLevels, array $researchSet, array $balances): bool

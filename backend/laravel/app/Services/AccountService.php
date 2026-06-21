@@ -156,11 +156,12 @@ class AccountService
 
         // Backward-compatible fallback for old defaults format.
         if (!array_key_exists('starting_resources', $defaults) && empty($startingRows)) {
-            foreach (['cow', 'wood', 'ore', 'food'] as $k) {
-                if (!array_key_exists($k, $resources)) {
+            foreach ($resources as $k => $v) {
+                $name = trim((string) $k);
+                if ($name === '') {
                     continue;
                 }
-                $startingRows[] = ['type' => 'base', 'name' => $k, 'amount' => (float) $resources[$k]];
+                $startingRows[] = ['type' => 'base', 'name' => $name, 'amount' => (float) $v];
             }
         }
 

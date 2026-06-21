@@ -14,6 +14,7 @@ class UpdateShopItemRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'code' => ['sometimes', 'nullable', 'string', 'max:64'],
             'display_name' => ['sometimes', 'string', 'max:160'],
             'description_text' => ['sometimes', 'nullable', 'string', 'max:20000'],
             'cost_json' => ['sometimes', 'array'],

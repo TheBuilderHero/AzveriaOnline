@@ -45,10 +45,7 @@ class AdminController extends Controller
             'terrain_square_miles' => ['sometimes', 'array'],
             'terrain_square_miles.*' => ['numeric', 'min:0'],
             'income_defaults' => ['sometimes', 'array'],
-            'income_defaults.cow' => ['sometimes', 'numeric', 'min:0'],
-            'income_defaults.wood' => ['sometimes', 'numeric', 'min:0'],
-            'income_defaults.ore' => ['sometimes', 'numeric', 'min:0'],
-            'income_defaults.food' => ['sometimes', 'numeric', 'min:0'],
+            'income_defaults.*' => ['sometimes', 'numeric', 'min:0'],
             'income_randomize_resources' => ['sometimes', 'boolean'],
             'income_resource_min' => ['sometimes', 'numeric', 'min:0'],
             'income_resource_max' => ['sometimes', 'numeric', 'min:0'],
@@ -164,6 +161,36 @@ class AdminController extends Controller
         return response()->json(['id' => $nationId, 'message' => 'Placeholder nation created'], 201);
     }
 
+    public function deletePlaceholderNation(Request $request, int $nationId)
+    {
+        $nation = DB::table('nations')->where('id', $nationId)->first();
+        if (!$nation) {
+            return response()->json(['message' => 'Nation not found'], 404);
+        }
+
+        if ((int) ($nation->is_placeholder ?? 0) !== 1) {
+            return response()->json(['message' => 'Only placeholder nations can be deleted from this action.'], 422);
+        }
+
+        $data = $request->validate([
+            'confirm_name' => ['required', 'string', 'max:150'],
+        ]);
+
+        $confirmName = trim((string) ($data['confirm_name'] ?? ''));
+        $nationName = trim((string) ($nation->name ?? ''));
+        if ($confirmName !== $nationName) {
+            return response()->json(['message' => 'Confirmation name does not match nation name.'], 422);
+        }
+
+        DB::table('nations')->where('id', $nationId)->delete();
+
+        return response()->json([
+            'message' => 'Placeholder nation deleted',
+            'nation_id' => (int) $nationId,
+            'nation_name' => $nationName,
+        ]);
+    }
+
     public function updateNation(UpdateNationRequest $request, int $nationId)
     {
         $nation = DB::table('nations')->where('id', $nationId)->first();
@@ -189,12 +216,25 @@ class AdminController extends Controller
             $basePayload = is_array($resourcePayload['base'] ?? null) ? $resourcePayload['base'] : $resourcePayload;
             $advancedPayload = is_array($resourcePayload['advanced'] ?? null) ? $resourcePayload['advanced'] : [];
 
+            $coreColumns = [];
+            foreach (get_object_vars((object) $res) as $key => $value) {
+                $name = (string) $key;
+                if (in_array($name, ['nation_id', 'extra_json', 'updated_at', 'created_at'], true)) {
+                    continue;
+                }
+                if (!is_numeric($value)) {
+                    continue;
+                }
+                $coreColumns[] = $name;
+            }
+            $coreColumnSet = array_fill_keys($coreColumns, true);
+
             $extraBase = is_array($extra['base'] ?? null) ? $extra['base'] : [];
             $extraAdvanced = is_array($extra['advanced'] ?? null) ? $extra['advanced'] : [];
 
             if (!empty($basePayload)) {
                 foreach ($basePayload as $key => $value) {
-                    if (in_array($key, ['cow', 'wood', 'ore', 'food'], true)) {
+                    if (isset($coreColumnSet[(string) $key])) {
                         continue;
                     }
                     $extraBase[(string) $key] = (float) $value;
@@ -221,14 +261,17 @@ class AdminController extends Controller
             $extra['base'] = $extraBase;
             $extra['advanced'] = $extraAdvanced;
 
-            DB::table('nation_resources')->where('nation_id', $nationId)->update([
-                'cow' => array_key_exists('cow', $basePayload) ? (float) $basePayload['cow'] : ($res->cow ?? 0),
-                'wood' => array_key_exists('wood', $basePayload) ? (float) $basePayload['wood'] : ($res->wood ?? 0),
-                'ore' => array_key_exists('ore', $basePayload) ? (float) $basePayload['ore'] : ($res->ore ?? 0),
-                'food' => array_key_exists('food', $basePayload) ? (float) $basePayload['food'] : ($res->food ?? 0),
+            $resourceUpdate = [
                 'extra_json' => json_encode($extra),
                 'updated_at' => now(),
-            ]);
+            ];
+            foreach ($coreColumns as $column) {
+                $resourceUpdate[$column] = array_key_exists($column, $basePayload)
+                    ? (float) $basePayload[$column]
+                    : (float) ($res->{$column} ?? 0);
+            }
+
+            DB::table('nation_resources')->where('nation_id', $nationId)->update($resourceUpdate);
         }
 
         if (isset($data['terrain_square_miles'])) {
@@ -380,12 +423,201 @@ class AdminController extends Controller
 
     public function buildingCatalog()
     {
-        $rows = DB::table('building_catalog')
-            ->select('id', 'code', 'display_name', 'max_level')
-            ->orderBy('display_name')
-            ->get();
+        $hasListOrder = Schema::hasColumn('building_catalog', 'list_order');
+
+        $query = DB::table('building_catalog')
+            ->select('id', 'code', 'display_name', 'max_level');
+
+        if ($hasListOrder) {
+            $query->addSelect('list_order')->orderBy('list_order');
+        } else {
+            $query->selectRaw('0 as list_order');
+        }
+
+        $rows = $query->orderBy('display_name')->get();
 
         return response()->json($rows);
+    }
+
+    public function structures()
+    {
+        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json')) {
+            return response()->json([
+                'message' => 'Structure editor storage is not initialized yet. Run the latest database migration.',
+            ], 422);
+        }
+
+        $rows = DB::table('building_catalog')
+            ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json')
+            ->orderBy('list_order')
+            ->orderBy('display_name')
+            ->get()
+            ->map(function ($row) {
+                $row->yearly_production_json = $this->normalizeStructureProductionMap(
+                    json_decode((string) ($row->yearly_production_json ?? 'null'), true) ?: []
+                );
+                return $row;
+            });
+
+        return response()->json($rows);
+    }
+
+    public function createStructure(Request $request)
+    {
+        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json')) {
+            return response()->json([
+                'message' => 'Structure editor storage is not initialized yet. Run the latest database migration.',
+            ], 422);
+        }
+
+        $data = $request->validate([
+            'code' => ['required', 'string', 'max:80'],
+            'display_name' => ['required', 'string', 'max:160'],
+            'max_level' => ['required', 'integer', 'min:1', 'max:100'],
+            'list_order' => ['sometimes', 'integer', 'min:0', 'max:100000'],
+            'yearly_production_json' => ['sometimes', 'array'],
+        ]);
+
+        $code = trim(Str::slug((string) ($data['code'] ?? ''), '_'), '_');
+        if ($code === '') {
+            return response()->json(['message' => 'Structure code is invalid.'], 422);
+        }
+        if (DB::table('building_catalog')->where('code', $code)->exists()) {
+            return response()->json(['message' => 'Structure code already exists.'], 422);
+        }
+
+        $normalizedProduction = $this->normalizeStructureProductionMap($data['yearly_production_json'] ?? []);
+        $now = now();
+
+        $structureId = DB::table('building_catalog')->insertGetId([
+            'code' => $code,
+            'display_name' => trim((string) $data['display_name']),
+            'max_level' => (int) $data['max_level'],
+            'list_order' => (int) ($data['list_order'] ?? 0),
+            'yearly_production_json' => json_encode($normalizedProduction),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $syncedLevels = $this->syncStructureShopLevels(
+            $code,
+            trim((string) $data['display_name']),
+            (int) $data['max_level'],
+            $normalizedProduction
+        );
+
+        $fresh = DB::table('building_catalog')
+            ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json')
+            ->where('id', $structureId)
+            ->first();
+        $fresh->yearly_production_json = $this->normalizeStructureProductionMap(
+            json_decode((string) ($fresh->yearly_production_json ?? 'null'), true) ?: []
+        );
+
+        return response()->json([
+            'message' => 'Structure created',
+            'structure' => $fresh,
+            'shop_levels_synced' => $syncedLevels,
+        ], 201);
+    }
+
+    public function updateStructure(Request $request, int $structureId)
+    {
+        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json')) {
+            return response()->json([
+                'message' => 'Structure editor storage is not initialized yet. Run the latest database migration.',
+            ], 422);
+        }
+
+        $structure = DB::table('building_catalog')->where('id', $structureId)->first();
+        if (!$structure) {
+            return response()->json(['message' => 'Structure not found'], 404);
+        }
+
+        $data = $request->validate([
+            'display_name' => ['required', 'string', 'max:160'],
+            'max_level' => ['required', 'integer', 'min:1', 'max:100'],
+            'list_order' => ['sometimes', 'integer', 'min:0', 'max:100000'],
+            'yearly_production_json' => ['sometimes', 'array'],
+        ]);
+
+        $normalizedProduction = $this->normalizeStructureProductionMap($data['yearly_production_json'] ?? []);
+
+        DB::table('building_catalog')->where('id', $structureId)->update([
+            'display_name' => trim((string) $data['display_name']),
+            'max_level' => (int) $data['max_level'],
+            'list_order' => (int) ($data['list_order'] ?? ($structure->list_order ?? 0)),
+            'yearly_production_json' => json_encode($normalizedProduction),
+            'updated_at' => now(),
+        ]);
+
+        // Keep structure-level shop production in sync with structure editor updates.
+        $syncedLevels = $this->syncStructureShopLevels(
+            (string) $structure->code,
+            trim((string) $data['display_name']),
+            (int) $data['max_level'],
+            $normalizedProduction
+        );
+
+        $fresh = DB::table('building_catalog')
+            ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json')
+            ->where('id', $structureId)
+            ->first();
+        $fresh->yearly_production_json = $this->normalizeStructureProductionMap(
+            json_decode((string) ($fresh->yearly_production_json ?? 'null'), true) ?: []
+        );
+
+        return response()->json([
+            'message' => 'Structure updated',
+            'structure' => $fresh,
+            'shop_levels_synced' => $syncedLevels,
+        ]);
+    }
+
+    public function deleteStructure(Request $request, int $structureId)
+    {
+        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json')) {
+            return response()->json([
+                'message' => 'Structure editor storage is not initialized yet. Run the latest database migration.',
+            ], 422);
+        }
+
+        $structure = DB::table('building_catalog')->where('id', $structureId)->first();
+        if (!$structure) {
+            return response()->json(['message' => 'Structure not found'], 404);
+        }
+
+        $data = $request->validate([
+            'confirm_code' => ['required', 'string', 'max:80'],
+        ]);
+
+        $confirmCode = trim((string) ($data['confirm_code'] ?? ''));
+        $structureCode = trim((string) ($structure->code ?? ''));
+        if ($confirmCode !== $structureCode) {
+            return response()->json(['message' => 'Confirmation code does not match structure code.'], 422);
+        }
+
+        $deleted = DB::transaction(function () use ($structureId, $structureCode) {
+            $shopPattern = 'struct_' . $structureCode . '_l%';
+            $deletedShopItems = DB::table('shop_items')
+                ->where('code', 'like', $shopPattern)
+                ->delete();
+
+            $deletedStructures = DB::table('building_catalog')
+                ->where('id', $structureId)
+                ->delete();
+
+            return [
+                'deleted_structures' => (int) $deletedStructures,
+                'deleted_shop_items' => (int) $deletedShopItems,
+            ];
+        });
+
+        return response()->json([
+            'message' => 'Structure deleted',
+            'deleted' => $deleted,
+            'code' => $structureCode,
+        ]);
     }
 
     public function visibilityFields()
@@ -406,46 +638,138 @@ class AdminController extends Controller
 
     public function visibilityRules(Request $request)
     {
-        $data = $request->validate([
-            'viewer_user_id' => ['required', 'integer', 'exists:users,id'],
-            'subject_user_id' => ['required', 'integer', 'exists:users,id'],
-        ]);
+        $viewerRaw = $request->query('viewer_user_id');
+        $subjectRaw = $request->query('subject_user_id');
+        [$viewerMode, $viewerId] = $this->parseVisibilitySelector($viewerRaw, 'viewer_user_id');
+        [$subjectMode, $subjectId] = $this->parseVisibilitySelector($subjectRaw, 'subject_user_id');
 
-        $this->ensureDistinctVisibilityPair((int) $data['viewer_user_id'], (int) $data['subject_user_id']);
+        if ($viewerMode === 'user' && $subjectMode === 'user') {
+            $this->ensureDistinctVisibilityPair($viewerId, $subjectId);
+        }
 
-        $rows = DB::table('player_visibility_rules')
-            ->where('viewer_user_id', (int) $data['viewer_user_id'])
-            ->where('subject_user_id', (int) $data['subject_user_id'])
-            ->get();
+        $ruleMap = $this->resolveVisibilityRuleMap($viewerMode, $viewerId, $subjectMode, $subjectId);
+        $rows = [];
+        foreach ($this->visibilityFieldKeys() as $fieldKey) {
+            $rows[] = [
+                'field_key' => $fieldKey,
+                'is_allowed' => (bool) ($ruleMap[$fieldKey] ?? true),
+            ];
+        }
 
         return response()->json($rows);
     }
 
     public function updateVisibilityRules(Request $request)
     {
+        $viewerRaw = $request->input('viewer_user_id');
+        $subjectRaw = $request->input('subject_user_id');
+        [$viewerMode, $viewerId] = $this->parseVisibilitySelector($viewerRaw, 'viewer_user_id');
+        [$subjectMode, $subjectId] = $this->parseVisibilitySelector($subjectRaw, 'subject_user_id');
+
+        if ($viewerMode === 'user' && $subjectMode === 'user') {
+            $this->ensureDistinctVisibilityPair($viewerId, $subjectId);
+        }
+
+        $fieldKeys = $this->visibilityFieldKeys();
+        $fieldSet = array_fill_keys($fieldKeys, true);
+
+        $singleField = trim((string) $request->input('field_key', ''));
+        $hasSingle = $singleField !== '';
+        if ($hasSingle && !isset($fieldSet[$singleField])) {
+            throw ValidationException::withMessages([
+                'field_key' => ['Invalid visibility field key.'],
+            ]);
+        }
+
+        $singleAllowed = null;
+        if ($hasSingle) {
+            $singleAllowed = (bool) $request->validate([
+                'is_allowed' => ['required', 'boolean'],
+            ])['is_allowed'];
+        }
+
+        if ($viewerMode !== 'user' || $subjectMode !== 'user' || $hasSingle) {
+            if (!$hasSingle) {
+                throw ValidationException::withMessages([
+                    'field_key' => ['When using All for viewer or subject, update exactly one field at a time.'],
+                ]);
+            }
+
+            $defaults = $this->loadVisibilityDefaultsRaw();
+            $defaultsChanged = false;
+
+            if ($viewerMode === 'all' && $subjectMode === 'all') {
+                $defaults['global'][$singleField] = $singleAllowed;
+                $defaultsChanged = true;
+            } elseif ($viewerMode === 'all' && $subjectMode === 'user') {
+                $sid = (string) $subjectId;
+                $subjectDefaults = is_array($defaults['subject'][$sid] ?? null) ? $defaults['subject'][$sid] : [];
+                $subjectDefaults[$singleField] = $singleAllowed;
+                $defaults['subject'][$sid] = $subjectDefaults;
+                $defaultsChanged = true;
+            } elseif ($viewerMode === 'user' && $subjectMode === 'all') {
+                $vid = (string) $viewerId;
+                $viewerDefaults = is_array($defaults['viewer'][$vid] ?? null) ? $defaults['viewer'][$vid] : [];
+                $viewerDefaults[$singleField] = $singleAllowed;
+                $defaults['viewer'][$vid] = $viewerDefaults;
+                $defaultsChanged = true;
+            } else {
+                DB::table('player_visibility_rules')->updateOrInsert(
+                    [
+                        'viewer_user_id' => $viewerId,
+                        'subject_user_id' => $subjectId,
+                        'field_key' => $singleField,
+                    ],
+                    [
+                        'is_allowed' => (int) $singleAllowed,
+                        'updated_at' => now(),
+                    ]
+                );
+            }
+
+            if ($defaultsChanged && !$this->saveVisibilityDefaultsRaw($defaults)) {
+                return response()->json(['message' => 'Visibility defaults storage is unavailable.'], 500);
+            }
+
+            if ($singleAllowed === true) {
+                $query = DB::table('player_visibility_rules')
+                    ->where('field_key', $singleField)
+                    ->where('is_allowed', 0);
+                if ($viewerMode === 'user') {
+                    $query->where('viewer_user_id', $viewerId);
+                }
+                if ($subjectMode === 'user') {
+                    $query->where('subject_user_id', $subjectId);
+                }
+                $query->update([
+                    'is_allowed' => 1,
+                    'updated_at' => now(),
+                ]);
+            }
+
+            return response()->json(['message' => 'Visibility field updated']);
+        }
+
         $data = $request->validate([
-            'viewer_user_id' => ['required', 'integer', 'exists:users,id'],
-            'subject_user_id' => ['required', 'integer', 'exists:users,id'],
             'rules' => ['required', 'array'],
             'rules.*.field_key' => ['required', 'string', 'max:80'],
             'rules.*.is_allowed' => ['required', 'boolean'],
         ]);
 
-        $viewer = (int) $data['viewer_user_id'];
-        $subject = (int) $data['subject_user_id'];
-
-        $this->ensureDistinctVisibilityPair($viewer, $subject);
-
         DB::table('player_visibility_rules')
-            ->where('viewer_user_id', $viewer)
-            ->where('subject_user_id', $subject)
+            ->where('viewer_user_id', $viewerId)
+            ->where('subject_user_id', $subjectId)
             ->delete();
 
         foreach ($data['rules'] as $rule) {
+            $fieldKey = (string) $rule['field_key'];
+            if (!isset($fieldSet[$fieldKey])) {
+                continue;
+            }
             DB::table('player_visibility_rules')->insert([
-                'viewer_user_id' => $viewer,
-                'subject_user_id' => $subject,
-                'field_key' => (string) $rule['field_key'],
+                'viewer_user_id' => $viewerId,
+                'subject_user_id' => $subjectId,
+                'field_key' => $fieldKey,
                 'is_allowed' => (int) ((bool) $rule['is_allowed']),
                 'updated_at' => now(),
             ]);
@@ -952,31 +1276,43 @@ class AdminController extends Controller
 
     public function combatRatingConfig()
     {
-        return response()->json($this->loadCombatRatingConfigRaw());
+        return response()->json(array_merge($this->loadCombatRatingConfigRaw(), [
+            'allowed_variables' => ['ATK', 'DEF', 'DMG', 'HP', 'MVT', 'RNG', 'ACT'],
+            'allowed_operators' => ['+', '-', '*', '/', '^', '(', ')'],
+            'final_rounding' => 'floor',
+        ]));
     }
 
     public function updateCombatRatingConfig(Request $request)
     {
         $data = $request->validate([
-            'atk' => ['required', 'numeric', 'min:0', 'max:100'],
-            'def' => ['required', 'numeric', 'min:0', 'max:100'],
-            'dmg' => ['required', 'numeric', 'min:0', 'max:100'],
-            'hp' => ['required', 'numeric', 'min:0', 'max:100'],
-            'mvt' => ['required', 'numeric', 'min:0', 'max:100'],
-            'rng' => ['required', 'numeric', 'min:0', 'max:100'],
-            'act' => ['required', 'numeric', 'min:0', 'max:100'],
-            'divisor' => ['required', 'numeric', 'min:0.01', 'max:1000'],
+            'formula_expression' => ['required', 'string', 'max:240'],
+            'apply_confirmation' => ['required', 'string', 'max:80'],
         ]);
 
+        if (trim((string) $data['apply_confirmation']) !== 'APPLY RATING FORMULA') {
+            return response()->json(['message' => 'Final apply confirmation did not match.'], 422);
+        }
+
+        $formulaExpression = trim((string) $data['formula_expression']);
+        try {
+            // Validate expression once at save-time using zeroed sample inputs.
+            $this->evaluateCombatFormulaExpression($formulaExpression, [
+                'ATK' => 0,
+                'DEF' => 0,
+                'DMG' => 0,
+                'HP' => 0,
+                'MVT' => 0,
+                'RNG' => 0,
+                'ACT' => 0,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Formula is invalid: ' . $e->getMessage()], 422);
+        }
+
         $payload = [
-            'atk' => (float) $data['atk'],
-            'def' => (float) $data['def'],
-            'dmg' => (float) $data['dmg'],
-            'hp' => (float) $data['hp'],
-            'mvt' => (float) $data['mvt'],
-            'rng' => (float) $data['rng'],
-            'act' => (float) $data['act'],
-            'divisor' => (float) $data['divisor'],
+            'formula_expression' => $formulaExpression,
+            'rounding_mode' => 'floor',
             'updated_at' => now()->toIso8601String(),
             'updated_by_user_id' => (int) $request->user()->id,
         ];
@@ -986,6 +1322,42 @@ class AdminController extends Controller
         }
 
         return response()->json(['message' => 'Combat rating config saved.']);
+    }
+
+    public function previewCombatRatingConfig(Request $request)
+    {
+        $data = $request->validate([
+            'formula_expression' => ['required', 'string', 'max:240'],
+            'stats' => ['required', 'array'],
+            'stats.ATK' => ['sometimes', 'numeric'],
+            'stats.DEF' => ['sometimes', 'numeric'],
+            'stats.DMG' => ['sometimes', 'numeric'],
+            'stats.HP' => ['sometimes', 'numeric'],
+            'stats.MVT' => ['sometimes', 'numeric'],
+            'stats.RNG' => ['sometimes', 'numeric'],
+            'stats.ACT' => ['sometimes', 'numeric'],
+        ]);
+
+        $stats = [
+            'ATK' => (float) ($data['stats']['ATK'] ?? 0),
+            'DEF' => (float) ($data['stats']['DEF'] ?? 0),
+            'DMG' => (float) ($data['stats']['DMG'] ?? 0),
+            'HP' => (float) ($data['stats']['HP'] ?? 0),
+            'MVT' => (float) ($data['stats']['MVT'] ?? 0),
+            'RNG' => (float) ($data['stats']['RNG'] ?? 0),
+            'ACT' => (float) ($data['stats']['ACT'] ?? 0),
+        ];
+
+        try {
+            $breakdown = $this->buildCombatRatingBreakdown($stats, (string) $data['formula_expression']);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Formula preview failed: ' . $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => 'Preview generated.',
+            'breakdown' => $breakdown,
+        ]);
     }
 
     public function updateCombatOrderStatus(Request $request, int $notificationId)
@@ -1116,6 +1488,15 @@ class AdminController extends Controller
             }
         }
 
+        if (array_key_exists('custom_name', $data) && $useInstance) {
+            $value = trim((string) ($data['custom_name'] ?? ''));
+            if ($value === '') {
+                unset($instanceOverride['custom_name']);
+            } else {
+                $instanceOverride['custom_name'] = $value;
+            }
+        }
+
         if ($useInstance) {
             if (empty($instanceOverride)) {
                 unset($instances[$instanceKey]);
@@ -1131,7 +1512,7 @@ class AdminController extends Controller
         }
 
         DB::table('nation_units')->where('id', $nationUnitId)->update([
-            'custom_name' => array_key_exists('custom_name', $data)
+            'custom_name' => (!$useInstance && array_key_exists('custom_name', $data))
                 ? trim((string) ($data['custom_name'] ?? ''))
                 : $unit->custom_name,
             'stats_override_json' => json_encode($normalized),
@@ -1266,11 +1647,29 @@ class AdminController extends Controller
     public function updateMapSettings(Request $request)
     {
         $data = $request->validate([
-            'map_max_zoom_pct' => ['required', 'integer', 'min:100', 'max:300'],
+            'map_max_zoom_pct' => ['sometimes', 'integer', 'min:100', 'max:300'],
+            'map_show_nation_names' => ['sometimes', 'boolean'],
+            'map_popup_fields' => ['sometimes', 'array', 'max:12'],
+            'map_popup_fields.*' => ['required', 'string', 'in:alliance,leader_name,about_text,color,owned_terrain_pixels,total_army_rating,units_count,buildings_count,races'],
+            'map_terrain_color_overrides' => ['sometimes', 'array'],
+            'map_terrain_color_overrides.*' => ['nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
         ]);
 
+        $current = $this->loadMapSettingsRaw();
+
         $payload = [
-            'map_max_zoom_pct' => (int) $data['map_max_zoom_pct'],
+            'map_max_zoom_pct' => array_key_exists('map_max_zoom_pct', $data)
+                ? (int) $data['map_max_zoom_pct']
+                : (int) ($current['map_max_zoom_pct'] ?? 180),
+            'map_show_nation_names' => array_key_exists('map_show_nation_names', $data)
+                ? (bool) $data['map_show_nation_names']
+                : (bool) ($current['map_show_nation_names'] ?? true),
+            'map_popup_fields' => array_key_exists('map_popup_fields', $data)
+                ? $this->normalizeMapPopupFields($data['map_popup_fields'], false)
+                : $this->normalizeMapPopupFields($current['map_popup_fields'] ?? []),
+            'map_terrain_color_overrides' => array_key_exists('map_terrain_color_overrides', $data)
+                ? $this->normalizeMapTerrainColorOverrides($data['map_terrain_color_overrides'])
+                : $this->normalizeMapTerrainColorOverrides($current['map_terrain_color_overrides'] ?? []),
             'updated_at' => now()->toIso8601String(),
             'updated_by_user_id' => (int) $request->user()->id,
         ];
@@ -1624,7 +2023,31 @@ class AdminController extends Controller
             return response()->json(['message' => 'Shop item not found'], 404);
         }
 
+        $nextCode = $item->code;
+        if (array_key_exists('code', $data)) {
+            $rawCode = trim((string) ($data['code'] ?? ''));
+            if ($rawCode === '') {
+                return response()->json(['message' => 'Item code cannot be empty.'], 422);
+            }
+
+            $normalizedCode = trim(Str::slug($rawCode, '_'), '_');
+            if ($normalizedCode === '') {
+                return response()->json(['message' => 'Item code is invalid.'], 422);
+            }
+
+            $duplicate = DB::table('shop_items')
+                ->where('code', $normalizedCode)
+                ->where('id', '!=', $itemId)
+                ->exists();
+            if ($duplicate) {
+                return response()->json(['message' => 'Item code already exists.'], 422);
+            }
+
+            $nextCode = $normalizedCode;
+        }
+
         $updated = [
+            'code' => $nextCode,
             'display_name' => $data['display_name'] ?? $item->display_name,
             'description_text' => $data['description_text'] ?? $item->description_text,
             'cost_json' => array_key_exists('cost_json', $data) ? json_encode($data['cost_json']) : $item->cost_json,
@@ -1846,6 +2269,124 @@ class AdminController extends Controller
         }
     }
 
+    private function visibilityFieldKeys(): array
+    {
+        return [
+            'leader_name',
+            'alliance_name',
+            'about_text',
+            'resources_base',
+            'resources_advanced',
+            'resources_currencies',
+            'terrain',
+            'army_rating',
+            'units',
+            'buildings',
+        ];
+    }
+
+    private function parseVisibilitySelector($raw, string $field): array
+    {
+        $value = strtolower(trim((string) ($raw ?? '')));
+        if ($value === '' || $value === 'all') {
+            return ['all', 0];
+        }
+
+        if (!ctype_digit($value)) {
+            throw ValidationException::withMessages([
+                $field => ['Use a valid player id or All.'],
+            ]);
+        }
+
+        $userId = (int) $value;
+        if ($userId <= 0 || !DB::table('users')->where('id', $userId)->exists()) {
+            throw ValidationException::withMessages([
+                $field => ['Selected player was not found.'],
+            ]);
+        }
+
+        return ['user', $userId];
+    }
+
+    private function visibilityDefaultsPath(): string
+    {
+        return storage_path('app/visibility_defaults.json');
+    }
+
+    private function loadVisibilityDefaultsRaw(): array
+    {
+        $path = $this->visibilityDefaultsPath();
+        if (!File::exists($path)) {
+            return ['global' => [], 'viewer' => [], 'subject' => []];
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        if (!is_array($decoded)) {
+            return ['global' => [], 'viewer' => [], 'subject' => []];
+        }
+
+        return [
+            'global' => is_array($decoded['global'] ?? null) ? $decoded['global'] : [],
+            'viewer' => is_array($decoded['viewer'] ?? null) ? $decoded['viewer'] : [],
+            'subject' => is_array($decoded['subject'] ?? null) ? $decoded['subject'] : [],
+        ];
+    }
+
+    private function saveVisibilityDefaultsRaw(array $payload): bool
+    {
+        try {
+            $path = $this->visibilityDefaultsPath();
+            File::ensureDirectoryExists(dirname($path));
+            File::put($path, json_encode($payload, JSON_PRETTY_PRINT));
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private function resolveVisibilityRuleMap(string $viewerMode, int $viewerId, string $subjectMode, int $subjectId): array
+    {
+        $map = array_fill_keys($this->visibilityFieldKeys(), true);
+        $defaults = $this->loadVisibilityDefaultsRaw();
+
+        foreach ((array) ($defaults['global'] ?? []) as $field => $allowed) {
+            if (array_key_exists($field, $map)) {
+                $map[$field] = (bool) $allowed;
+            }
+        }
+
+        if ($viewerMode === 'user') {
+            foreach ((array) ($defaults['viewer'][(string) $viewerId] ?? []) as $field => $allowed) {
+                if (array_key_exists($field, $map)) {
+                    $map[$field] = (bool) $allowed;
+                }
+            }
+        }
+
+        if ($subjectMode === 'user') {
+            foreach ((array) ($defaults['subject'][(string) $subjectId] ?? []) as $field => $allowed) {
+                if (array_key_exists($field, $map)) {
+                    $map[$field] = (bool) $allowed;
+                }
+            }
+        }
+
+        if ($viewerMode === 'user' && $subjectMode === 'user') {
+            $rows = DB::table('player_visibility_rules')
+                ->where('viewer_user_id', $viewerId)
+                ->where('subject_user_id', $subjectId)
+                ->get();
+            foreach ($rows as $rule) {
+                $field = (string) $rule->field_key;
+                if (array_key_exists($field, $map)) {
+                    $map[$field] = (bool) $rule->is_allowed;
+                }
+            }
+        }
+
+        return $map;
+    }
+
     private function availableTopbarResources(): array
     {
         $rows = DB::table('resource_definitions')
@@ -1971,12 +2512,22 @@ class AdminController extends Controller
     {
         $path = $this->mapSettingsPath();
         if (!File::exists($path)) {
-            return ['map_max_zoom_pct' => 180];
+            return [
+                'map_max_zoom_pct' => 180,
+                'map_show_nation_names' => false,
+                'map_popup_fields' => $this->defaultMapPopupFields(),
+                'map_terrain_color_overrides' => [],
+            ];
         }
 
         $decoded = json_decode((string) File::get($path), true);
         if (!is_array($decoded)) {
-            return ['map_max_zoom_pct' => 180];
+            return [
+                'map_max_zoom_pct' => 180,
+                'map_show_nation_names' => false,
+                'map_popup_fields' => $this->defaultMapPopupFields(),
+                'map_terrain_color_overrides' => [],
+            ];
         }
 
         $maxZoom = (int) ($decoded['map_max_zoom_pct'] ?? 180);
@@ -1987,7 +2538,87 @@ class AdminController extends Controller
             $maxZoom = 300;
         }
 
-        return ['map_max_zoom_pct' => $maxZoom];
+        return [
+            'map_max_zoom_pct' => $maxZoom,
+            'map_show_nation_names' => (bool) ($decoded['map_show_nation_names'] ?? false),
+            'map_popup_fields' => array_key_exists('map_popup_fields', $decoded)
+                ? $this->normalizeMapPopupFields($decoded['map_popup_fields'], false)
+                : $this->defaultMapPopupFields(),
+            'map_terrain_color_overrides' => $this->normalizeMapTerrainColorOverrides($decoded['map_terrain_color_overrides'] ?? []),
+        ];
+    }
+
+    private function normalizeMapTerrainColorOverrides($raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+
+        $allowedTerrainKeys = [
+            'grassland',
+            'forest',
+            'mountain',
+            'desert',
+            'tundra',
+            'magic_grassland',
+            'water',
+        ];
+        $allowed = array_fill_keys($allowedTerrainKeys, true);
+
+        $out = [];
+        foreach ($raw as $key => $value) {
+            $terrainKey = strtolower(trim((string) $key));
+            if ($terrainKey === '' || !isset($allowed[$terrainKey])) {
+                continue;
+            }
+            $color = strtoupper(trim((string) $value));
+            if (!preg_match('/^#[0-9A-F]{6}$/', $color)) {
+                continue;
+            }
+            $out[$terrainKey] = $color;
+        }
+
+        return $out;
+    }
+
+    private function defaultMapPopupFields(): array
+    {
+        return ['alliance', 'races', 'color', 'owned_terrain_pixels'];
+    }
+
+    private function availableMapPopupFields(): array
+    {
+        return [
+            'alliance',
+            'leader_name',
+            'about_text',
+            'color',
+            'owned_terrain_pixels',
+            'total_army_rating',
+            'units_count',
+            'buildings_count',
+            'races',
+        ];
+    }
+
+    private function normalizeMapPopupFields($raw, bool $fallbackDefault = true): array
+    {
+        $allowed = array_fill_keys($this->availableMapPopupFields(), true);
+        $list = is_array($raw) ? $raw : [];
+        $out = [];
+        foreach ($list as $item) {
+            $key = strtolower(trim((string) $item));
+            if ($key === '' || !isset($allowed[$key]) || in_array($key, $out, true)) {
+                continue;
+            }
+            $out[] = $key;
+        }
+
+        if (!empty($out)) {
+            return $out;
+        }
+
+        return $fallbackDefault ? $this->defaultMapPopupFields() : [];
     }
 
     private function saveMapSettingsRaw(array $payload): bool
@@ -2648,8 +3279,19 @@ class AdminController extends Controller
             return;
         }
 
-        if (in_array($key, ['cow', 'wood', 'ore', 'food'], true)) {
-            $delta['base'][$key] = ($delta['base'][$key] ?? 0) + $value;
+        if (str_starts_with($key, 'currencies:')) {
+            $currencyKey = substr($key, 11);
+            if ($currencyKey !== '') {
+                $delta['currencies'][$currencyKey] = ($delta['currencies'][$currencyKey] ?? 0) + $value;
+            }
+            return;
+        }
+
+        if (!str_contains($key, ':')) {
+            $name = trim($key);
+            if ($name !== '') {
+                $delta['base'][$name] = ($delta['base'][$name] ?? 0) + $value;
+            }
         }
     }
 
@@ -2704,6 +3346,148 @@ class AdminController extends Controller
         }
 
         return $out;
+    }
+
+    private function normalizeStructureProductionMap(array $production): array
+    {
+        $normalized = [];
+
+        foreach ($production as $levelKey => $resourceMap) {
+            $level = max(1, (int) $levelKey);
+            if (!is_array($resourceMap)) {
+                continue;
+            }
+
+            $bucket = [];
+            foreach ($resourceMap as $resourceKey => $value) {
+                $canonical = $this->canonicalResourceToken((string) $resourceKey);
+                if ($canonical === '') {
+                    continue;
+                }
+
+                $amount = (float) $value;
+                if ($amount == 0.0) {
+                    continue;
+                }
+
+                $bucket[$canonical] = $amount;
+            }
+
+            ksort($bucket);
+            $normalized[(string) $level] = $bucket;
+        }
+
+        uksort($normalized, static fn ($a, $b) => (int) $a <=> (int) $b);
+
+        return $normalized;
+    }
+
+    private function syncStructureShopLevels(string $familyCode, string $displayName, int $maxLevel, array $normalizedProduction): int
+    {
+        $buildCategoryId = DB::table('shop_categories')->where('code', 'build')->value('id');
+        if (!$buildCategoryId) {
+            return 0;
+        }
+
+        $shopHasDescriptionText = Schema::hasColumn('shop_items', 'description_text');
+        $shopHasMaintenanceJson = Schema::hasColumn('shop_items', 'maintenance_json');
+        $shopHasYearlyEffectJson = Schema::hasColumn('shop_items', 'yearly_effect_json');
+        $shopHasRequirementJson = Schema::hasColumn('shop_items', 'requirement_json');
+        $shopHasVisibilityJson = Schema::hasColumn('shop_items', 'visibility_json');
+        $shopHasCreatedAt = Schema::hasColumn('shop_items', 'created_at');
+        $shopHasUpdatedAt = Schema::hasColumn('shop_items', 'updated_at');
+        $now = now();
+
+        $syncedLevels = 0;
+        for ($level = 1; $level <= max(1, $maxLevel); $level++) {
+            $shopCode = 'struct_' . $familyCode . '_l' . $level;
+            $yearly = json_encode($normalizedProduction[(string) $level] ?? new \stdClass());
+
+            $existing = DB::table('shop_items')->where('code', $shopCode)->first();
+            if ($existing) {
+                $updatePayload = [
+                    'display_name' => $displayName . ' (L' . $level . ')',
+                ];
+                if ($shopHasYearlyEffectJson) {
+                    $updatePayload['yearly_effect_json'] = $yearly;
+                }
+                if ($shopHasUpdatedAt) {
+                    $updatePayload['updated_at'] = $now;
+                }
+
+                DB::table('shop_items')->where('id', $existing->id)->update($updatePayload);
+                $syncedLevels++;
+                continue;
+            }
+
+            $insertPayload = [
+                'category_id' => (int) $buildCategoryId,
+                'code' => $shopCode,
+                'display_name' => $displayName . ' (L' . $level . ')',
+                'cost_json' => json_encode(new \stdClass()),
+                'effect_json' => json_encode(new \stdClass()),
+                'is_active' => 1,
+            ];
+            if ($shopHasDescriptionText) {
+                $insertPayload['description_text'] = $level === 1
+                    ? 'Adds one level 1 ' . $displayName . ' structure.'
+                    : 'Upgrades one ' . $displayName . ' structure to level ' . $level . '.';
+            }
+            if ($shopHasMaintenanceJson) {
+                $insertPayload['maintenance_json'] = null;
+            }
+            if ($shopHasYearlyEffectJson) {
+                $insertPayload['yearly_effect_json'] = $yearly;
+            }
+            if ($shopHasRequirementJson) {
+                $insertPayload['requirement_json'] = null;
+            }
+            if ($shopHasVisibilityJson) {
+                $insertPayload['visibility_json'] = null;
+            }
+            if ($shopHasCreatedAt) {
+                $insertPayload['created_at'] = $now;
+            }
+            if ($shopHasUpdatedAt) {
+                $insertPayload['updated_at'] = $now;
+            }
+
+            DB::table('shop_items')->insert($insertPayload);
+            $syncedLevels++;
+        }
+
+        return $syncedLevels;
+    }
+
+    private function canonicalResourceToken(string $key): string
+    {
+        $trimmed = trim($key);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        if (!str_contains($trimmed, ':')) {
+            return 'base:' . $trimmed;
+        }
+
+        [$rawType, $rawName] = explode(':', $trimmed, 2);
+        $type = strtolower(trim($rawType));
+        $name = trim($rawName);
+        if ($name === '') {
+            return '';
+        }
+
+        if ($type === 'base') {
+            return 'base:' . $name;
+        }
+        if ($type === 'advanced') {
+            return 'advanced:' . $name;
+        }
+        if ($type === 'currencies') {
+            return 'currencies:' . $name;
+        }
+
+        return '';
     }
 
     private function buildCombatSnapshotForNation(int $nationId): array
@@ -2766,6 +3550,7 @@ class AdminController extends Controller
                     ? $instanceMap[$instanceIndex]
                     : [];
                 $effectiveOverride = array_merge($sharedOverride, $instanceOverride);
+                $effectiveCustomName = trim((string) ($effectiveOverride['custom_name'] ?? $row->custom_name ?? ''));
 
                 $effectiveStats = array_merge($baseStats, $effectiveOverride);
                 $ratingBreakdown = $this->buildCombatRatingBreakdown($effectiveStats);
@@ -2785,7 +3570,7 @@ class AdminController extends Controller
                     'unit_catalog_id' => $row->unit_catalog_id !== null ? (int) $row->unit_catalog_id : null,
                     'code' => (string) ($row->code ?? ''),
                     'display_name' => (string) ($row->display_name ?? 'Unit'),
-                    'custom_name' => $row->custom_name,
+                    'custom_name' => $effectiveCustomName,
                     'class_name' => (string) ($row->class_name ?? ''),
                     'effective_class_name' => $effectiveClassName,
                     'is_commander' => (bool) ($row->is_commander ?? false),
@@ -2841,7 +3626,7 @@ class AdminController extends Controller
         return (float) ($this->buildCombatRatingBreakdown($stats)['rating'] ?? 0);
     }
 
-    private function buildCombatRatingBreakdown(array $stats): array
+    private function buildCombatRatingBreakdown(array $stats, ?string $formulaExpressionOverride = null): array
     {
         $cfg = $this->loadCombatRatingConfigRaw();
 
@@ -2853,18 +3638,24 @@ class AdminController extends Controller
         $rng = is_numeric($stats['RNG'] ?? null) ? (float) $stats['RNG'] : 0.0;
         $act = is_numeric($stats['ACT'] ?? null) ? (float) $stats['ACT'] : 0.0;
 
-        $components = [
-            'ATK' => $atk * (float) $cfg['atk'],
-            'DEF' => $def * (float) $cfg['def'],
-            'DMG' => $dmg * (float) $cfg['dmg'],
-            'HP' => $hp * (float) $cfg['hp'],
-            'MVT' => $mvt * (float) $cfg['mvt'],
-            'RNG' => $rng * (float) $cfg['rng'],
-            'ACT' => $act * (float) $cfg['act'],
+        $formulaExpression = trim((string) ($formulaExpressionOverride ?? ($cfg['formula_expression'] ?? $this->defaultCombatRatingFormulaExpression())));
+        if ($formulaExpression === '') {
+            $formulaExpression = $this->defaultCombatRatingFormulaExpression();
+        }
+
+        $inputs = [
+            'ATK' => $atk,
+            'DEF' => $def,
+            'DMG' => $dmg,
+            'HP' => $hp,
+            'MVT' => $mvt,
+            'RNG' => $rng,
+            'ACT' => $act,
         ];
-        $score = array_sum($components);
-        $divisor = max(0.01, (float) ($cfg['divisor'] ?? 10.0));
-        $formulaRating = round($score / $divisor, 2);
+
+        $eval = $this->evaluateCombatFormulaExpression($formulaExpression, $inputs);
+        $rawResult = (float) ($eval['value'] ?? 0.0);
+        $formulaRating = (float) floor($rawResult);
 
         $overrideRating = null;
         foreach (['rating', 'RATING', 'Rating'] as $key) {
@@ -2876,27 +3667,12 @@ class AdminController extends Controller
 
         return [
             'source' => $overrideRating !== null ? 'override' : 'formula',
-            'inputs' => [
-                'ATK' => $atk,
-                'DEF' => $def,
-                'DMG' => $dmg,
-                'HP' => $hp,
-                'MVT' => $mvt,
-                'RNG' => $rng,
-                'ACT' => $act,
-            ],
-            'weights' => [
-                'ATK' => (float) $cfg['atk'],
-                'DEF' => (float) $cfg['def'],
-                'DMG' => (float) $cfg['dmg'],
-                'HP' => (float) $cfg['hp'],
-                'MVT' => (float) $cfg['mvt'],
-                'RNG' => (float) $cfg['rng'],
-                'ACT' => (float) $cfg['act'],
-            ],
-            'components' => array_map(static fn ($v) => round((float) $v, 2), $components),
-            'score' => round($score, 2),
-            'divisor' => $divisor,
+            'inputs' => $inputs,
+            'formula_expression' => $formulaExpression,
+            'normalized_expression' => (string) ($eval['normalized_expression'] ?? $formulaExpression),
+            'evaluated_expression' => (string) ($eval['evaluated_expression'] ?? ''),
+            'raw_result' => round($rawResult, 4),
+            'rounding_mode' => 'floor',
             'formula_rating' => $formulaRating,
             'rating' => $overrideRating ?? $formulaRating,
         ];
@@ -2910,14 +3686,8 @@ class AdminController extends Controller
     private function loadCombatRatingConfigRaw(): array
     {
         $defaults = [
-            'atk' => 2.0,
-            'def' => 1.5,
-            'dmg' => 3.0,
-            'hp' => 2.0,
-            'mvt' => 1.0,
-            'rng' => 1.0,
-            'act' => 1.0,
-            'divisor' => 10.0,
+            'formula_expression' => $this->defaultCombatRatingFormulaExpression(),
+            'rounding_mode' => 'floor',
         ];
 
         $path = $this->combatRatingConfigPath();
@@ -2931,14 +3701,270 @@ class AdminController extends Controller
         }
 
         $out = $defaults;
-        foreach (array_keys($defaults) as $key) {
-            if (is_numeric($decoded[$key] ?? null)) {
-                $out[$key] = (float) $decoded[$key];
-            }
+        if (is_string($decoded['formula_expression'] ?? null) && trim((string) $decoded['formula_expression']) !== '') {
+            $out['formula_expression'] = trim((string) $decoded['formula_expression']);
         }
-        $out['divisor'] = max(0.01, (float) $out['divisor']);
+        if (is_string($decoded['rounding_mode'] ?? null) && strtolower((string) $decoded['rounding_mode']) === 'floor') {
+            $out['rounding_mode'] = 'floor';
+        }
+
+        // Backward compatibility: if old weight config exists, keep old expression behavior until admin saves new formula.
+        if (!isset($decoded['formula_expression']) && isset($decoded['atk'], $decoded['def'], $decoded['dmg'], $decoded['hp'], $decoded['mvt'], $decoded['rng'], $decoded['act'], $decoded['divisor'])) {
+            $atk = (float) $decoded['atk'];
+            $def = (float) $decoded['def'];
+            $dmg = (float) $decoded['dmg'];
+            $hp = (float) $decoded['hp'];
+            $mvt = (float) $decoded['mvt'];
+            $rng = (float) $decoded['rng'];
+            $act = (float) $decoded['act'];
+            $divisor = max(0.01, (float) $decoded['divisor']);
+            $out['formula_expression'] = "((ATK*{$atk}) + (DEF*{$def}) + (DMG*{$dmg}) + (HP*{$hp}) + (MVT*{$mvt}) + (RNG*{$rng}) + (ACT*{$act})) / {$divisor}";
+        }
 
         return $out;
+    }
+
+    private function defaultCombatRatingFormulaExpression(): string
+    {
+        return 'HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)';
+    }
+
+    private function evaluateCombatFormulaExpression(string $expression, array $variables): array
+    {
+        $allowedVariables = ['ATK', 'DEF', 'DMG', 'HP', 'MVT', 'RNG', 'ACT'];
+        $tokenized = $this->tokenizeCombatFormula($expression);
+        $normalizedTokens = [];
+        $prevType = null;
+
+        foreach ($tokenized as $token) {
+            $type = $token['type'];
+            if (($prevType === 'number' || $prevType === 'var' || $prevType === 'rparen')
+                && ($type === 'number' || $type === 'var' || $type === 'lparen')) {
+                $normalizedTokens[] = ['type' => 'op', 'value' => '*'];
+            }
+
+            if ($type === 'op' && $token['value'] === '-' && ($prevType === null || $prevType === 'op' || $prevType === 'lparen')) {
+                $normalizedTokens[] = ['type' => 'number', 'value' => 0.0];
+            }
+
+            $normalizedTokens[] = $token;
+            $prevType = $type;
+        }
+
+        $precedence = ['+' => 1, '-' => 1, '*' => 2, '/' => 2, '^' => 3];
+        $rightAssociative = ['^' => true];
+        $output = [];
+        $ops = [];
+
+        foreach ($normalizedTokens as $token) {
+            if ($token['type'] === 'number' || $token['type'] === 'var') {
+                $output[] = $token;
+                continue;
+            }
+
+            if ($token['type'] === 'op') {
+                while (!empty($ops)) {
+                    $top = end($ops);
+                    if (($top['type'] ?? '') !== 'op') {
+                        break;
+                    }
+                    $topOp = (string) $top['value'];
+                    $curOp = (string) $token['value'];
+                    $curPrec = $precedence[$curOp] ?? 0;
+                    $topPrec = $precedence[$topOp] ?? 0;
+                    $isRight = (bool) ($rightAssociative[$curOp] ?? false);
+                    if (($isRight && $curPrec < $topPrec) || (!$isRight && $curPrec <= $topPrec)) {
+                        $output[] = array_pop($ops);
+                        continue;
+                    }
+                    break;
+                }
+                $ops[] = $token;
+                continue;
+            }
+
+            if ($token['type'] === 'lparen') {
+                $ops[] = $token;
+                continue;
+            }
+
+            if ($token['type'] === 'rparen') {
+                $matched = false;
+                while (!empty($ops)) {
+                    $top = array_pop($ops);
+                    if (($top['type'] ?? '') === 'lparen') {
+                        $matched = true;
+                        break;
+                    }
+                    $output[] = $top;
+                }
+                if (!$matched) {
+                    throw new \InvalidArgumentException('Unmatched closing parenthesis.');
+                }
+            }
+        }
+
+        while (!empty($ops)) {
+            $top = array_pop($ops);
+            if (($top['type'] ?? '') === 'lparen' || ($top['type'] ?? '') === 'rparen') {
+                throw new \InvalidArgumentException('Unmatched opening parenthesis.');
+            }
+            $output[] = $top;
+        }
+
+        $stack = [];
+        foreach ($output as $token) {
+            if ($token['type'] === 'number') {
+                $stack[] = (float) $token['value'];
+                continue;
+            }
+            if ($token['type'] === 'var') {
+                $name = strtoupper((string) $token['value']);
+                if (!in_array($name, $allowedVariables, true)) {
+                    throw new \InvalidArgumentException('Unsupported variable: ' . $name);
+                }
+                $stack[] = is_numeric($variables[$name] ?? null) ? (float) $variables[$name] : 0.0;
+                continue;
+            }
+            if ($token['type'] !== 'op') {
+                continue;
+            }
+            if (count($stack) < 2) {
+                throw new \InvalidArgumentException('Invalid expression structure.');
+            }
+            $b = (float) array_pop($stack);
+            $a = (float) array_pop($stack);
+            $op = (string) $token['value'];
+            if ($op === '+') {
+                $stack[] = $a + $b;
+            } elseif ($op === '-') {
+                $stack[] = $a - $b;
+            } elseif ($op === '*') {
+                $stack[] = $a * $b;
+            } elseif ($op === '/') {
+                if (abs($b) < 0.0000001) {
+                    throw new \InvalidArgumentException('Division by zero is not allowed.');
+                }
+                $stack[] = $a / $b;
+            } elseif ($op === '^') {
+                $stack[] = pow($a, $b);
+            } else {
+                throw new \InvalidArgumentException('Unsupported operator: ' . $op);
+            }
+        }
+
+        if (count($stack) !== 1) {
+            throw new \InvalidArgumentException('Invalid formula evaluation result.');
+        }
+
+        $formatNum = static fn (float $n): string => rtrim(rtrim(number_format($n, 4, '.', ''), '0'), '.');
+        $normalizedExpression = '';
+        $evaluatedExpression = '';
+        foreach ($normalizedTokens as $token) {
+            if ($token['type'] === 'number') {
+                $part = $formatNum((float) $token['value']);
+                $normalizedExpression .= $part;
+                $evaluatedExpression .= $part;
+                continue;
+            }
+            if ($token['type'] === 'var') {
+                $name = strtoupper((string) $token['value']);
+                $normalizedExpression .= $name;
+                $evaluatedExpression .= $formatNum(is_numeric($variables[$name] ?? null) ? (float) $variables[$name] : 0.0);
+                continue;
+            }
+            if ($token['type'] === 'op' || $token['type'] === 'lparen' || $token['type'] === 'rparen') {
+                $normalizedExpression .= (string) $token['value'];
+                $evaluatedExpression .= (string) $token['value'];
+            }
+        }
+
+        return [
+            'value' => (float) $stack[0],
+            'normalized_expression' => $normalizedExpression,
+            'evaluated_expression' => $evaluatedExpression,
+        ];
+    }
+
+    private function tokenizeCombatFormula(string $expression): array
+    {
+        $src = trim($expression);
+        if ($src === '') {
+            throw new \InvalidArgumentException('Formula is empty.');
+        }
+
+        $tokens = [];
+        $len = strlen($src);
+        $i = 0;
+        while ($i < $len) {
+            $ch = $src[$i];
+            if (ctype_space($ch)) {
+                $i++;
+                continue;
+            }
+            if (ctype_digit($ch) || $ch === '.') {
+                $start = $i;
+                $dotCount = $ch === '.' ? 1 : 0;
+                $i++;
+                while ($i < $len) {
+                    $c = $src[$i];
+                    if ($c === '.') {
+                        $dotCount++;
+                        if ($dotCount > 1) {
+                            break;
+                        }
+                        $i++;
+                        continue;
+                    }
+                    if (!ctype_digit($c)) {
+                        break;
+                    }
+                    $i++;
+                }
+                $numRaw = substr($src, $start, $i - $start);
+                if (!is_numeric($numRaw)) {
+                    throw new \InvalidArgumentException('Invalid number token: ' . $numRaw);
+                }
+                $tokens[] = ['type' => 'number', 'value' => (float) $numRaw];
+                continue;
+            }
+            if (ctype_alpha($ch) || $ch === '_') {
+                $start = $i;
+                $i++;
+                while ($i < $len) {
+                    $c = $src[$i];
+                    if (!(ctype_alnum($c) || $c === '_')) {
+                        break;
+                    }
+                    $i++;
+                }
+                $tokens[] = ['type' => 'var', 'value' => strtoupper(substr($src, $start, $i - $start))];
+                continue;
+            }
+            if (in_array($ch, ['+', '-', '*', '/', '^'], true)) {
+                $tokens[] = ['type' => 'op', 'value' => $ch];
+                $i++;
+                continue;
+            }
+            if ($ch === '(') {
+                $tokens[] = ['type' => 'lparen', 'value' => '('];
+                $i++;
+                continue;
+            }
+            if ($ch === ')') {
+                $tokens[] = ['type' => 'rparen', 'value' => ')'];
+                $i++;
+                continue;
+            }
+
+            throw new \InvalidArgumentException('Invalid character in formula: ' . $ch);
+        }
+
+        if (empty($tokens)) {
+            throw new \InvalidArgumentException('Formula is empty.');
+        }
+
+        return $tokens;
     }
 
     private function saveCombatRatingConfigRaw(array $payload): bool

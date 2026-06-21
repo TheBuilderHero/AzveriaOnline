@@ -85,9 +85,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/combat/units/{nationUnitId}/stats', [AdminController::class, 'updateCombatUnitStats']);
         Route::get('/combat/rating-config', [AdminController::class, 'combatRatingConfig']);
         Route::put('/combat/rating-config', [AdminController::class, 'updateCombatRatingConfig']);
+        Route::post('/combat/rating-config/preview', [AdminController::class, 'previewCombatRatingConfig']);
         Route::post('/users', [AdminController::class, 'createManagedAccount']);
         Route::delete('/users/{userId}', [AdminController::class, 'deleteManagedAccount']);
         Route::post('/nations', [AdminController::class, 'createPlaceholderNation']);
+        Route::delete('/nations/{nationId}', [AdminController::class, 'deletePlaceholderNation']);
         Route::put('/nations/{nationId}', [AdminController::class, 'updateNation']);
         Route::post('/nations/{nationId}/units', [AdminController::class, 'addUnitToNation']);
         Route::delete('/nations/{nationId}/units/{nationUnitId}', [AdminController::class, 'removeUnitFromNation']);
@@ -98,6 +100,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/nations/{nationId}/research-unlocks', [AdminController::class, 'resetNationResearchUnlocks']);
         Route::get('/unit-catalog', [AdminController::class, 'unitCatalog']);
         Route::get('/building-catalog', [AdminController::class, 'buildingCatalog']);
+        Route::get('/structures', [AdminController::class, 'structures']);
+        Route::post('/structures', [AdminController::class, 'createStructure']);
+        Route::patch('/structures/{structureId}', [AdminController::class, 'updateStructure']);
+        Route::delete('/structures/{structureId}', [AdminController::class, 'deleteStructure']);
         Route::get('/new-account-defaults', [AdminController::class, 'newAccountDefaults']);
         Route::patch('/new-account-defaults', [AdminController::class, 'updateNewAccountDefaults']);
         Route::patch('/users/{userId}/password', [AuthController::class, 'adminResetPassword']);

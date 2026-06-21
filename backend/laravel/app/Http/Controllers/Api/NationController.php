@@ -37,32 +37,13 @@ class NationController extends Controller
 
         $viewerUserId = (int) $viewer->id;
         $rows = collect($page->items());
-        $subjectUserIds = $rows
-            ->map(fn ($row) => (int) ($row->owner_user_id ?? 0))
-            ->filter(fn (int $id) => $id > 0 && $id !== $viewerUserId)
-            ->unique()
-            ->values();
 
-        $rulesBySubject = [];
-        if ($subjectUserIds->isNotEmpty()) {
-            $ruleRows = DB::table('player_visibility_rules')
-                ->where('viewer_user_id', $viewerUserId)
-                ->whereIn('subject_user_id', $subjectUserIds)
-                ->get();
-
-            foreach ($ruleRows as $rule) {
-                $subjectId = (int) $rule->subject_user_id;
-                $fieldKey = (string) $rule->field_key;
-                $rulesBySubject[$subjectId][$fieldKey] = (bool) $rule->is_allowed;
-            }
-        }
-
-        $rows = $rows->map(function ($row) use ($viewerUserId, $rulesBySubject) {
+        $rows = $rows->map(function ($row) use ($viewerUserId) {
             $subjectUserId = (int) ($row->owner_user_id ?? 0);
             $visibility = $this->defaultVisibilityRules();
 
             if ($subjectUserId > 0 && $subjectUserId !== $viewerUserId) {
-                foreach (($rulesBySubject[$subjectUserId] ?? []) as $field => $allowed) {
+                foreach ($this->resolveVisibilityForPair($viewerUserId, $subjectUserId) as $field => $allowed) {
                     $visibility[$field] = (bool) $allowed;
                 }
 
@@ -110,7 +91,10 @@ class NationController extends Controller
         $buildings = DB::table('nation_buildings as nb')
             ->join('building_catalog as bc', 'nb.building_catalog_id', '=', 'bc.id')
             ->where('nb.nation_id', $nationId)
-            ->select('nb.*', 'bc.display_name', 'bc.code')
+            ->select('nb.*', 'bc.display_name', 'bc.code', 'bc.max_level')
+            ->orderBy('bc.display_name')
+            ->orderBy('nb.level')
+            ->orderBy('nb.id')
             ->get();
 
         $armyRating = $this->computeArmyRatingFromUnits($units);
@@ -122,7 +106,7 @@ class NationController extends Controller
             $viewerUserId = (int) $viewer->id;
             $subjectUserId = (int) ($nation->owner_user_id ?? 0);
             if ($subjectUserId > 0 && $viewerUserId !== $subjectUserId) {
-                foreach ($this->rulesForPair($viewerUserId, $subjectUserId) as $field => $allowed) {
+                foreach ($this->resolveVisibilityForPair($viewerUserId, $subjectUserId) as $field => $allowed) {
                     $visibility[$field] = (bool) $allowed;
                 }
 
@@ -278,9 +262,27 @@ class NationController extends Controller
         return $out;
     }
 
-    private function rulesForPair(int $viewerUserId, int $subjectUserId): array
+    private function resolveVisibilityForPair(int $viewerUserId, int $subjectUserId): array
     {
-        $out = [];
+        $out = $this->defaultVisibilityRules();
+
+        $defaults = $this->loadVisibilityDefaultsRaw();
+        foreach ((array) ($defaults['global'] ?? []) as $field => $allowed) {
+            if (array_key_exists($field, $out)) {
+                $out[$field] = (bool) $allowed;
+            }
+        }
+        foreach ((array) ($defaults['viewer'][(string) $viewerUserId] ?? []) as $field => $allowed) {
+            if (array_key_exists($field, $out)) {
+                $out[$field] = (bool) $allowed;
+            }
+        }
+        foreach ((array) ($defaults['subject'][(string) $subjectUserId] ?? []) as $field => $allowed) {
+            if (array_key_exists($field, $out)) {
+                $out[$field] = (bool) $allowed;
+            }
+        }
+
         $rows = DB::table('player_visibility_rules')
             ->where('viewer_user_id', $viewerUserId)
             ->where('subject_user_id', $subjectUserId)
@@ -291,5 +293,29 @@ class NationController extends Controller
         }
 
         return $out;
+    }
+
+    private function visibilityDefaultsPath(): string
+    {
+        return storage_path('app/visibility_defaults.json');
+    }
+
+    private function loadVisibilityDefaultsRaw(): array
+    {
+        $path = $this->visibilityDefaultsPath();
+        if (!File::exists($path)) {
+            return ['global' => [], 'viewer' => [], 'subject' => []];
+        }
+
+        $decoded = json_decode((string) File::get($path), true);
+        if (!is_array($decoded)) {
+            return ['global' => [], 'viewer' => [], 'subject' => []];
+        }
+
+        return [
+            'global' => is_array($decoded['global'] ?? null) ? $decoded['global'] : [],
+            'viewer' => is_array($decoded['viewer'] ?? null) ? $decoded['viewer'] : [],
+            'subject' => is_array($decoded['subject'] ?? null) ? $decoded['subject'] : [],
+        ];
     }
 }

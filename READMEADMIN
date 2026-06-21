@@ -75,8 +75,8 @@ This document defines admin-only behavior in the Azveria Online web app.
 | Add per-unit admin notes | Unit card -> Admin Note | Enter notes and Save Unit | Note is saved to that specific unit instance only |
 | Force a specific unit rating | Unit card -> Rating | Enter explicit rating, then Save Unit | Final rating uses override instead of formula |
 | Return to formula-driven rating | Unit card -> Rating | Clear Rating field, then Save Unit | Final rating reverts to formula output |
-| Rebalance globally | Combat -> Rating Formula | Adjust coefficients/divisor and Save Formula | All non-overridden unit ratings recalculate |
-| Verify rating math | Unit card -> Army Rating Breakdown | Expand breakdown details | See inputs, weights, components, score, divisor, and final rating source |
+| Rebalance globally | Combat -> Rating Formula | Edit equation, preview results, then Apply Formula | All non-overridden unit ratings recalculate |
+| Verify rating math | Unit card -> Army Rating Breakdown | Expand breakdown details | See inputs, expression, evaluated value, rounding, and final rating source |
 | Moderate battle orders | Orders list | Set pending/approved/denied and add note | Player order status and review note are persisted |
 | Control intel sharing | Nation Editor -> Nation Visibility Matrix | Toggle Army Rating visibility per viewer/subject | Army rating shown or hidden in Other Nations |
 
@@ -115,59 +115,52 @@ Behavior details:
 - Effective class/status/race/terrain are treated as combat metadata and saved as unit overrides.
 
 #### Army Rating Formula (Admin-Configurable)
-The combat tab includes a **Rating Formula (Admin)** panel with editable coefficients:
-- `ATK`, `DEF`, `DMG`, `HP`, `MVT`, `RNG`, `ACT`
-- `Divisor`
+The combat tab now includes an editable **equation field** for rating math.
 
-Formula:
+Default formula:
 
 ```
-score =
-	(ATK * atk_weight) +
-	(DEF * def_weight) +
-	(DMG * dmg_weight) +
-	(HP  * hp_weight)  +
-	(MVT * mvt_weight) +
-	(RNG * rng_weight) +
-	(ACT * act_weight)
-
-formula_rating = score / divisor
-final_rating = override_rating (if present) else formula_rating
+HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)
 ```
 
-Default weights:
-- `ATK: 2.0`
-- `DEF: 1.5`
-- `DMG: 3.0`
-- `HP: 2.0`
-- `MVT: 1.0`
-- `RNG: 1.0`
-- `ACT: 1.0`
-- `divisor: 10.0`
+Final rating behavior:
+- Evaluate the formula result.
+- Round down the final formula value with `floor(...)`.
+- If a unit has a manual rating override, override still wins as final rating.
+
+Supported formula syntax:
+- Variables: `ATK`, `DEF`, `DMG`, `HP`, `MVT`, `RNG`, `ACT`
+- Operators: `+`, `-`, `*`, `/`, `(`, `)`
+- Implicit multiplication is supported:
+	- `ACT(ATK+DMG)`
+	- `(ATK+DEF)(MVT+RNG)`
+
+Admin safety/apply flow:
+1. Edit formula in the equation field.
+2. Use **Preview Formula** before applying.
+3. Apply formula with a 3-step confirmation flow.
+4. Final step requires typing: `APPLY RATING FORMULA`.
+
+Preview options available in Combat:
+- Preview using a selected existing unit instance (real unit stats).
+- Preview using manually entered stat values.
 
 #### Army Rating Breakdown
 Each unit card includes an **Army Rating Breakdown** section showing:
 - Raw stat inputs
-- Coefficients (weights)
-- Per-stat contribution
-- Aggregate score
-- Divisor
+- Formula string used
+- Normalized/evaluated expression
+- Raw formula result
+- Rounding mode (`floor`)
 - Formula rating
 - Final rating (and whether override was applied)
 
 Example breakdown:
 - Inputs: `ATK=12`, `DEF=8`, `DMG=10`, `HP=15`, `MVT=5`, `RNG=3`, `ACT=2`
-- Weights: defaults above
-- Score:
-	- `12*2.0 = 24`
-	- `8*1.5 = 12`
-	- `10*3.0 = 30`
-	- `15*2.0 = 30`
-	- `5*1.0 = 5`
-	- `3*1.0 = 3`
-	- `2*1.0 = 2`
-	- Total score = `106`
-- Formula rating = `106 / 10 = 10.6`
+- Formula: `HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)`
+- Evaluated: `15*8 + (12+8)*(5+3) + 2*(12*10)`
+- Raw result: `520`
+- Formula rating: `floor(520) = 520`
 
 #### Total Army Rating
 Total army rating is shown:
@@ -202,8 +195,8 @@ If disabled for a viewer->subject pair:
 6. (Optional) set explicit rating override.
 7. Click **Save Unit**.
 8. Expand Army Rating Breakdown to verify math.
-9. Adjust formula weights in right panel if game balance requires.
-10. Save formula and re-check unit/army ratings.
+9. Edit formula equation in right panel and run Preview.
+10. Apply formula with 3-step confirmation and re-check unit/army ratings.
 11. Review player combat orders and set status + note.
 
 #### Data Storage Notes

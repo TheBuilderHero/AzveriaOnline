@@ -219,6 +219,36 @@
         border-radius: 10px;
         padding: 10px;
         background: var(--panel);
+        min-width: 0;
+      }
+      .combat-formula-panel {
+        min-width: 0;
+        overflow: hidden;
+      }
+      .combat-formula-panel .res-kv {
+        align-items: flex-start;
+      }
+      .combat-formula-panel .res-kv span:first-child {
+        flex: 0 0 auto;
+      }
+      .combat-formula-panel .res-kv span:last-child {
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        min-width: 0;
+      }
+      .combat-formula-panel textarea,
+      .combat-formula-panel input,
+      .combat-formula-panel select {
+        max-width: 100%;
+      }
+      .combat-formula-preview-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+        gap: 6px;
+      }
+      .combat-formula-preview-stats label {
+        min-width: 0;
       }
       .combat-order-item {
         border: 1px solid #d7dee7;
@@ -623,6 +653,21 @@
     .map-editor-toolbar { display:flex; gap:8px; align-items:center; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px; }
     .map-editor-header { display:flex; justify-content:flex-start; gap:10px; align-items:flex-start; flex-wrap:wrap; margin-bottom:10px; }
     .map-small-label { font-size:12px; color:var(--muted); }
+    .map-popup-order-list { display:grid; gap:6px; }
+    .map-popup-order-row {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:6px 8px;
+      border:1px solid #d7dee7;
+      border-radius:7px;
+      background:var(--panel);
+      cursor:grab;
+    }
+    .map-popup-order-row.dragging { opacity:0.55; border-style:dashed; }
+    .map-popup-order-label { flex:1; min-width:0; font-size:12px; }
+    .map-popup-order-grip { font-size:13px; color:var(--muted); user-select:none; }
     .map-status-message {
       color: var(--text);
       font-size: 12px;
@@ -802,7 +847,32 @@ const api = async (url, opts = {}) => {
   }
 };
 
-let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal', map_zoom_sensitivity: 1, map_max_zoom_pct: 180, alliance_color_overrides: {}, political_nation_color_overrides: {} };
+const DEFAULT_MAP_POPUP_FIELDS = ['alliance', 'races', 'color', 'owned_terrain_pixels'];
+const MAP_POPUP_FIELD_DEFS = [
+  { key: 'alliance', label: 'Alliance' },
+  { key: 'leader_name', label: 'Leader Name' },
+  { key: 'about_text', label: 'About Text' },
+  { key: 'races', label: 'Races' },
+  { key: 'color', label: 'Nation Color Swatch' },
+  { key: 'owned_terrain_pixels', label: 'Owned Terrain (pixels)' },
+  { key: 'total_army_rating', label: 'Total Army Rating' },
+  { key: 'units_count', label: 'Total Units' },
+  { key: 'buildings_count', label: 'Total Buildings' },
+];
+const normalizeMapPopupFieldsClient = (raw, fallbackDefault = true) => {
+  const allowed = new Set(MAP_POPUP_FIELD_DEFS.map(f => f.key));
+  const input = Array.isArray(raw) ? raw : [];
+  const out = [];
+  input.forEach((item) => {
+    const key = String(item || '').trim().toLowerCase();
+    if (!key || !allowed.has(key) || out.includes(key)) return;
+    out.push(key);
+  });
+  if (out.length) return out;
+  return fallbackDefault ? DEFAULT_MAP_POPUP_FIELDS.slice() : [];
+};
+
+let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal', map_zoom_sensitivity: 1, map_max_zoom_pct: 180, map_show_nation_names: false, map_popup_fields: DEFAULT_MAP_POPUP_FIELDS.slice(), map_terrain_color_overrides: {}, terrain_color_overrides: {}, alliance_color_overrides: {}, political_nation_color_overrides: {} };
 let ws = null;
 let wsAuthToken = null;
 let wsAuthTokenExpiresAt = 0;
@@ -892,7 +962,7 @@ function installGlobalDeveloperErrorHandlers() {
 }
 
 const playerMenu = ['Player', 'Announcements', 'Information', 'Map', 'Combat', 'Chat', 'Other Nations', 'Shop', 'Settings'];
-const adminMenu = ['Announcements', 'Nation Editor', 'Notifications', 'Information', 'Resource Management', 'Account Management', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
+const adminMenu = ['Announcements', 'Nation Editor', 'Notifications', 'Information', 'Resource Management', 'Structure Editor', 'Account Management', 'Time Tracker', 'Map', 'Combat', 'Chat', 'Shop', 'Settings'];
 
 const goofyAudio = new Audio('https://actions.google.com/sounds/v1/cartoon/boing.ogg');
 goofyAudio.preload = 'auto';
@@ -1125,13 +1195,7 @@ async function loadResources() {
   const res = await api('/api/me/resources', { silentLog: true });
   if (!res || !res.ok) return;
   const r = await res.json();
-  const base = r.base || {};
-  const defaultChips = [
-    { type: 'base', name: 'cow', icon: '🐄', label: 'Cow', val: base.cow },
-    { type: 'base', name: 'wood', icon: '🌳', label: 'Wood', val: base.wood },
-    { type: 'base', name: 'ore', icon: '⛏', label: 'Ore', val: base.ore },
-    { type: 'base', name: 'food', icon: '🍞', label: 'Food', val: base.food },
-  ];
+  const base = (r && typeof r.base === 'object' && r.base) ? r.base : {};
   // Resolve icons from resource definitions, tolerating old payload name/label formats.
   const getResourceIcon = (type, name, label = '') => {
     const normalizedType = String(type || '').trim().toLowerCase();
@@ -1157,8 +1221,30 @@ async function loadResources() {
     }
 
     if (normalizedType === 'advanced') return '⚙';
-    return ({ cow: '🐄', wood: '🌳', ore: '⛏', food: '🍞' }[normalizedName] || '•');
+    return '•';
   };
+
+  const buildDefaultChipsFromDynamicDefs = () => {
+    const out = [];
+    const defs = window.resourceDefs || {};
+    const baseGroups = defs.base || {};
+    Object.values(baseGroups).forEach(arr => {
+      (arr || []).forEach(def => {
+        const name = String(def?.name || '').trim();
+        if (!name) return;
+        out.push({
+          type: 'base',
+          name,
+          icon: getResourceIcon('base', name, def?.display_name || name),
+          label: String(def?.display_name || name),
+          val: toFiniteNumber(base[name], 0),
+        });
+      });
+    });
+    return out.slice(0, 6);
+  };
+
+  const defaultChips = buildDefaultChipsFromDynamicDefs();
   const chips = Array.isArray(r.topbar_display) && r.topbar_display.length > 0
     ? r.topbar_display.map(item => ({
       type: item.type || 'base',
@@ -1168,25 +1254,21 @@ async function loadResources() {
       val: toFiniteNumber(item.value, 0),
     }))
     : defaultChips;
-  resourcesBar.innerHTML = chips.map(c =>
+
+  const visibleChips = chips.filter(c => toFiniteNumber(c?.val, 0) !== 0);
+
+  if (!visibleChips.length) {
+    resourcesBar.innerHTML = '';
+    return;
+  }
+
+  resourcesBar.innerHTML = visibleChips.map(c =>
     `<div class="chip" title="${c.label}: ${fmtNum(c.val)}">${c.icon} <span class="chip-label">${c.label}</span>${fmtNum(c.val, { abbrev: true })}</div>`
   ).join('');
 }
 
-// Legacy fallback labels for older payloads. Dynamic definitions are the primary source.
-const LEGACY_RESOURCE_LABELS = {
-  cow:'Cow', wood:'Wood', ore:'Ore', food:'Food',
-  ref_M:'Metal', ref_RM:'Radioactive Metal', ref_FS:'Fovium Steel', ref_URM:'Uranium',
-  ref_AD:'Aderite', ref_AM:'Antimatter', ref_DM:'Dark Matter', ref_DE:'Dark Energy',
-  ref_H:'Hardwood', ref_TW:'Toxic Waste', ref_CB:'Carbon Battery', ref_MYC:'Mycelium',
-  ref_SM:'Shroomium', ref_CFB:'Carbon Fiber', ref_BST:'Bulistium', ref_CGM:'Chaos Gem',
-  ref_GBR:'Granola Bars', ref_CHB:'Chocolate Bar', ref_SR:'Sushi Rolls', ref_ZZ:'Zaza',
-  ref_PZA:'Pizza', ref_IC:'Ice Cream', ref_WSH:'Whale Sushi', ref_SD:'StarDust', ref_NS:'Neutron StarDust',
-  ref_K:'K', ref_RK:'RK', ref_DP:'DP',
-  cur_GB:'Gobbo Bucks', cur_P:'Psycoin', cur_G:'Gold', cur_S:'Silver', cur_B:'Bronze',
-  cur_X:'codebuX', cur_CD:'Credits', cur_FD:'Fairy Dust', cur_cheese:'Cheese',
-  cur_SP:'SPores', cur_R:'Rupees', cur_MK:'MarKs',
-};
+// Keep label resolution dynamic via resource definitions; fallback is generic title-case.
+const LEGACY_RESOURCE_LABELS = {};
 let DYNAMIC_RESOURCE_LABELS = {};
 
 function toTitleCase(value) {
@@ -1205,13 +1287,11 @@ function canonicalResourceKey(rawKey) {
     const name = String(rawName || '').trim();
     if (!name) return '';
     if (type === 'base') return `base:${name}`;
-    if (type === 'advanced' || type === 'refined') return `advanced:${name}`;
-    if (type === 'currency' || type === 'curr' || type === 'currencies') return `currencies:${name}`;
+    if (type === 'advanced') return `advanced:${name}`;
+    if (type === 'currencies') return `currencies:${name}`;
     return '';
   }
 
-  if (key.startsWith('ref_')) return `advanced:${key.substring(4)}`;
-  if (key.startsWith('cur_')) return `currencies:${key.substring(4)}`;
   return `base:${key}`;
 }
 
@@ -1226,11 +1306,6 @@ function setDynamicResourceLabels(defs) {
         const display = String(def?.display_name || name).trim() || name;
         const canonical = `${type}:${name}`;
         labels[canonical] = display;
-        if (type === 'base') {
-          labels[name] = display;
-        } else {
-          labels[`ref_${name}`] = display;
-        }
       });
     });
   });
@@ -1332,6 +1407,7 @@ async function loadSection(name) {
     if (name === 'Notifications') return await loadNotifications();
     if (name === 'Information') return await loadGameInformationRules();
     if (name === 'Resource Management') return await loadResourceManagement();
+    if (name === 'Structure Editor') return await loadStructureEditor();
     if (name === 'About') return await loadAboutPage();
     if (name === 'Developer Options') return await loadDeveloperOptionsPage();
   // Admin Resource Management UI
@@ -1944,7 +2020,37 @@ async function loadSection(name) {
           form.parentElement.remove();
           return;
         }
-        if (!window.confirm('Delete this resource?')) return;
+        const resourceType = String(form.querySelector('[name="type"]')?.value || 'base').trim().toLowerCase();
+        const resourceName = String(form.querySelector('[name="name"]')?.value || '').trim();
+        const verifyToken = `${resourceType}:${resourceName}`;
+
+        if (!resourceName) {
+          msg.textContent = 'Resource name is required before deletion.';
+          return;
+        }
+
+        const firstConfirm = window.confirm(`Delete resource "${verifyToken}"? This cannot be undone.`);
+        if (!firstConfirm) {
+          msg.textContent = 'Delete cancelled at confirmation 1.';
+          return;
+        }
+
+        const secondConfirm = window.confirm('Second confirmation: this can affect defaults, costs, and editors where this resource is used. Continue?');
+        if (!secondConfirm) {
+          msg.textContent = 'Delete cancelled at confirmation 2.';
+          return;
+        }
+
+        const typed = window.prompt(`Final confirmation: type the resource key exactly to delete: ${verifyToken}`, '');
+        if (typed === null) {
+          msg.textContent = 'Delete cancelled at confirmation 3.';
+          return;
+        }
+        if (String(typed).trim() !== verifyToken) {
+          msg.textContent = 'Resource key mismatch. Deletion aborted.';
+          return;
+        }
+
         delBtn.disabled = true;
         msg.textContent = 'Deleting…';
         try {
@@ -1959,6 +2065,410 @@ async function loadSection(name) {
           delBtn.disabled = false;
         }
       };
+    });
+  }
+
+  async function loadStructureEditor() {
+    view.innerHTML = `<div class="card"><h2>Structure Editor</h2><div id="structureEditorPanel"><div class="muted">Loading…</div></div></div>`;
+    try {
+        const [structuresRes, resourceDefsRes] = await Promise.all([
+        api('/api/admin/structures'),
+          api('/api/resources'),
+      ]);
+      if (!structuresRes || !structuresRes.ok) throw new Error('Failed to load structures.');
+        if (resourceDefsRes && resourceDefsRes.ok) {
+          const defs = await resourceDefsRes.json();
+          window.resourceDefs = defs;
+          setDynamicResourceLabels(defs);
+        }
+      const structures = await structuresRes.json();
+      renderStructureEditor(structures);
+    } catch (e) {
+      const panel = document.getElementById('structureEditorPanel');
+      if (panel) panel.innerHTML = `<div class="danger">${escapeHtml(e.message || 'Failed to load structure editor.')}</div>`;
+    }
+  }
+
+  function renderStructureEditor(structures) {
+    const panel = document.getElementById('structureEditorPanel');
+    if (!panel) return;
+
+    const rows = Array.isArray(structures) ? structures : [];
+
+    const resourceCatalog = [];
+    const seenResourceKeys = new Set();
+    const addResourceOption = (key, groupLabel = 'Existing / Other') => {
+      const canonical = canonicalResourceKey(key);
+      if (!canonical || seenResourceKeys.has(canonical)) return;
+      seenResourceKeys.add(canonical);
+      resourceCatalog.push({
+        key: canonical,
+        label: labelKey(canonical),
+        group: String(groupLabel || 'Existing / Other'),
+      });
+    };
+
+    ['base', 'advanced'].forEach(type => {
+      const groups = window.resourceDefs?.[type] || {};
+      Object.entries(groups).forEach(([groupName, defs]) => {
+        (defs || []).forEach(def => {
+          const name = String(def?.name || '').trim();
+          if (!name) return;
+          if (type === 'base' && String(groupName || '').toLowerCase().includes('currenc')) {
+            addResourceOption(`currencies:${name}`, `Currencies - ${groupName}`);
+            return;
+          }
+          addResourceOption(`${type}:${name}`, `${type === 'base' ? 'Base' : 'Advanced'} - ${groupName}`);
+        });
+      });
+    });
+
+    rows.forEach((row) => {
+      const production = (row.yearly_production_json && typeof row.yearly_production_json === 'object')
+        ? row.yearly_production_json
+        : {};
+      Object.values(production).forEach((mapObj) => {
+        if (!mapObj || typeof mapObj !== 'object' || Array.isArray(mapObj)) return;
+        Object.keys(mapObj).forEach(k => addResourceOption(k, 'Existing / Other'));
+      });
+    });
+
+    resourceCatalog.sort((a, b) => {
+      const groupCmp = a.group.localeCompare(b.group);
+      if (groupCmp !== 0) return groupCmp;
+      return a.label.localeCompare(b.label);
+    });
+
+    const resourceSelectOptionsMarkup = (selectedKey = '', filterTerm = '') => {
+      const canonicalSelected = canonicalResourceKey(selectedKey) || String(selectedKey || '').trim();
+      if (canonicalSelected && !seenResourceKeys.has(canonicalSelected)) {
+        seenResourceKeys.add(canonicalSelected);
+        resourceCatalog.push({
+          key: canonicalSelected,
+          label: labelKey(canonicalSelected),
+          group: 'Existing / Other',
+        });
+      }
+      const needle = String(filterTerm || '').trim().toLowerCase();
+      const grouped = {};
+      resourceCatalog.forEach(entry => {
+        const matches = !needle
+          || entry.label.toLowerCase().includes(needle)
+          || entry.key.toLowerCase().includes(needle)
+          || entry.group.toLowerCase().includes(needle)
+          || entry.key === canonicalSelected;
+        if (!matches) return;
+        if (!grouped[entry.group]) grouped[entry.group] = [];
+        grouped[entry.group].push(entry);
+      });
+
+      return Object.entries(grouped)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([group, options]) => `<optgroup label="${escapeHtml(group)}">${options.map(entry => `<option value="${escapeHtml(entry.key)}" ${entry.key === canonicalSelected ? 'selected' : ''}>${escapeHtml(entry.label)}</option>`).join('')}</optgroup>`)
+        .join('');
+    };
+
+    const productionRowMarkup = (resourceKey, amount, filterTerm = '') => {
+      const safeAmount = Number.isFinite(Number(amount)) ? Number(amount) : 0;
+      return `
+        <div class="row struct-prod-row" style="align-items:center;gap:6px;margin-top:4px;">
+          <select class="struct-prod-key" style="flex:1;">${resourceSelectOptionsMarkup(resourceKey, filterTerm)}</select>
+          <input class="struct-prod-val" type="number" step="0.01" style="width:110px;" value="${safeAmount}">
+          <button type="button" class="primary struct-prod-remove" style="background:#8a1a1a;padding:4px 10px;">Remove</button>
+        </div>
+      `;
+    };
+
+    const levelEditorMarkup = (structureId, level, mapObj) => {
+      const entries = Object.entries(mapObj || {});
+      const rowsMarkup = entries.length
+        ? entries.map(([k, v]) => productionRowMarkup(k, v)).join('')
+        : productionRowMarkup('', 0);
+      return `
+        <div class="struct-level-editor" data-structure-id="${structureId}" data-level="${level}" style="margin-top:8px;border:1px solid var(--border);border-radius:8px;padding:8px;">
+          <div class="row" style="justify-content:space-between;align-items:center;">
+            <strong style="font-size:13px;">Level ${level}</strong>
+            <button type="button" class="primary struct-prod-add" data-structure-id="${structureId}" data-level="${level}" style="padding:4px 10px;">+ Add Resource</button>
+          </div>
+          <div class="struct-prod-rows" id="struct-prod-rows-${structureId}-${level}">
+            ${rowsMarkup}
+          </div>
+        </div>
+      `;
+    };
+
+    const levelEditorsMarkup = (structureId, maxLevel, productionMap) => {
+      const chunks = [];
+      for (let level = 1; level <= maxLevel; level++) {
+        const levelMap = (productionMap && typeof productionMap === 'object') ? (productionMap[String(level)] || {}) : {};
+        chunks.push(levelEditorMarkup(structureId, level, levelMap));
+      }
+      return chunks.join('');
+    };
+
+    const structureCardsHtml = rows.map((row) => {
+      const maxLevel = Math.max(1, Number(row.max_level || 1));
+      const production = (row.yearly_production_json && typeof row.yearly_production_json === 'object')
+        ? row.yearly_production_json
+        : {};
+
+      return `
+        <div class="resource-def-card" style="margin-bottom:10px;">
+          <div class="resource-def-grid">
+            <label>Code <input value="${escapeHtml(String(row.code || ''))}" disabled></label>
+            <label>Name <input id="struct-name-${row.id}" value="${escapeHtml(String(row.display_name || ''))}"></label>
+            <label>Level Capacity <input id="struct-max-${row.id}" type="number" min="1" max="100" value="${maxLevel}"></label>
+            <label>List Order <input id="struct-order-${row.id}" type="number" min="0" value="${Number(row.list_order || 0)}"></label>
+          </div>
+          <details style="margin-top:6px;">
+            <summary>Per Level Yearly Resource Production</summary>
+            <div class="row" style="margin-top:8px;gap:8px;align-items:center;">
+              <input id="struct-resource-filter-${row.id}" class="struct-resource-filter" data-id="${row.id}" type="search" placeholder="Filter resources by name/type/group" style="flex:1;min-width:260px;">
+              <button type="button" class="primary struct-levels-apply" data-id="${row.id}">Apply Level Capacity</button>
+              <span class="muted" style="font-size:12px;">Use this after changing Level Capacity so you can edit production for added levels.</span>
+            </div>
+            <div id="struct-levels-${row.id}">
+              ${levelEditorsMarkup(row.id, maxLevel, production)}
+            </div>
+          </details>
+          <div class="row" style="margin-top:8px;">
+            <button class="primary saveStructureBtn" data-id="${row.id}">Save</button>
+            <button class="primary deleteStructureBtn" data-id="${row.id}" data-code="${escapeHtml(String(row.code || ''))}" style="background:#8a1a1a;">Delete Structure</button>
+            <span class="muted" id="struct-msg-${row.id}"></span>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    panel.innerHTML = `
+      <div class="resource-def-card" style="margin-bottom:12px;border:1px solid color-mix(in srgb, var(--accent) 35%, var(--border));">
+        <h3 style="margin:0 0 8px 0;">Add Structure</h3>
+        <div class="resource-def-grid">
+          <label>Code <input id="new-struct-code" placeholder="example: sawmill"></label>
+          <label>Name <input id="new-struct-name" placeholder="example: Sawmill"></label>
+          <label>Level Capacity <input id="new-struct-max" type="number" min="1" max="100" value="1"></label>
+          <label>List Order <input id="new-struct-order" type="number" min="0" value="0"></label>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button class="primary" id="createStructureBtn">Create Structure</button>
+          <span class="muted" id="createStructureMsg"></span>
+        </div>
+      </div>
+      ${rows.length ? structureCardsHtml : '<div class="muted">No structures found yet. Create one above.</div>'}
+    `;
+
+    const collectProductionMapFromEditor = (structureId) => {
+      const out = {};
+      panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"]`).forEach(levelEditor => {
+        const level = Math.max(1, Number(levelEditor.getAttribute('data-level') || 1));
+        const bucket = {};
+        levelEditor.querySelectorAll('.struct-prod-row').forEach(prodRow => {
+          const keyRaw = String(prodRow.querySelector('.struct-prod-key')?.value || '');
+          const key = canonicalResourceKey(keyRaw);
+          const amount = Number(prodRow.querySelector('.struct-prod-val')?.value || 0);
+          if (!key || !Number.isFinite(amount) || amount === 0) return;
+          bucket[key] = amount;
+        });
+        if (Object.keys(bucket).length > 0) {
+          out[String(level)] = bucket;
+        }
+      });
+      return out;
+    };
+
+    const rebuildLevelEditorsForStructure = (structureId, maxLevel) => {
+      const container = document.getElementById(`struct-levels-${structureId}`);
+      if (!container) return;
+      const existing = collectProductionMapFromEditor(structureId);
+      container.innerHTML = levelEditorsMarkup(structureId, maxLevel, existing);
+      const filterInput = document.getElementById(`struct-resource-filter-${structureId}`);
+      const filterValue = String(filterInput?.value || '');
+      if (filterValue) {
+        applyStructureResourceFilter(structureId, filterValue);
+      }
+    };
+
+    const applyStructureResourceFilter = (structureId, filterTerm) => {
+      panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"] .struct-prod-key`).forEach(select => {
+        const selected = String(select.value || '');
+        select.innerHTML = resourceSelectOptionsMarkup(selected, filterTerm);
+        if (selected) {
+          select.value = selected;
+        }
+      });
+    };
+
+    panel.onclick = (event) => {
+      const removeBtn = event.target.closest('.struct-prod-remove');
+      if (removeBtn) {
+        removeBtn.closest('.struct-prod-row')?.remove();
+        return;
+      }
+
+      const addBtn = event.target.closest('.struct-prod-add');
+      if (addBtn) {
+        const structureId = Number(addBtn.getAttribute('data-structure-id') || 0);
+        const level = Number(addBtn.getAttribute('data-level') || 0);
+        if (!structureId || !level) return;
+        const rowsContainer = document.getElementById(`struct-prod-rows-${structureId}-${level}`);
+        if (!rowsContainer) return;
+        const filterTerm = String(document.getElementById(`struct-resource-filter-${structureId}`)?.value || '');
+        rowsContainer.insertAdjacentHTML('beforeend', productionRowMarkup('', 0, filterTerm));
+        return;
+      }
+
+      const applyBtn = event.target.closest('.struct-levels-apply');
+      if (applyBtn) {
+        const structureId = Number(applyBtn.getAttribute('data-id') || 0);
+        if (!structureId) return;
+        const maxLevelInput = document.getElementById(`struct-max-${structureId}`);
+        const maxLevel = Math.max(1, Math.min(100, Number(maxLevelInput?.value || 1)));
+        if (maxLevelInput) {
+          maxLevelInput.value = String(maxLevel);
+        }
+        rebuildLevelEditorsForStructure(structureId, maxLevel);
+      }
+    };
+
+    panel.querySelectorAll('.struct-resource-filter').forEach(input => {
+      input.addEventListener('input', () => {
+        const structureId = Number(input.getAttribute('data-id') || 0);
+        if (!structureId) return;
+        applyStructureResourceFilter(structureId, String(input.value || ''));
+      });
+    });
+
+    const createStructureBtn = document.getElementById('createStructureBtn');
+    if (createStructureBtn) {
+      createStructureBtn.addEventListener('click', async () => {
+        const msgEl = document.getElementById('createStructureMsg');
+        const code = String(document.getElementById('new-struct-code')?.value || '').trim();
+        const name = String(document.getElementById('new-struct-name')?.value || '').trim();
+        const maxLevel = Math.max(1, Math.min(100, Number(document.getElementById('new-struct-max')?.value || 1)));
+        const listOrder = Math.max(0, Number(document.getElementById('new-struct-order')?.value || 0));
+
+        if (!code) {
+          if (msgEl) msgEl.textContent = 'Code is required.';
+          return;
+        }
+        if (!name) {
+          if (msgEl) msgEl.textContent = 'Name is required.';
+          return;
+        }
+
+        createStructureBtn.disabled = true;
+        if (msgEl) msgEl.textContent = 'Creating…';
+        const res = await api('/api/admin/structures', {
+          method: 'POST',
+          body: JSON.stringify({
+            code,
+            display_name: name,
+            max_level: maxLevel,
+            list_order: listOrder,
+            yearly_production_json: {},
+          }),
+        });
+
+        if (!res || !res.ok) {
+          if (msgEl) msgEl.textContent = await readErrorMessage(res, 'Failed to create structure.');
+          createStructureBtn.disabled = false;
+          return;
+        }
+
+        if (msgEl) msgEl.textContent = 'Created.';
+        await loadStructureEditor();
+        barkIfEnabled();
+      });
+    }
+
+    panel.querySelectorAll('.saveStructureBtn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = Number(btn.dataset.id || 0);
+        if (!id) return;
+
+        const msgEl = document.getElementById(`struct-msg-${id}`);
+        const name = String(document.getElementById(`struct-name-${id}`)?.value || '').trim();
+        const maxLevel = Math.max(1, Number(document.getElementById(`struct-max-${id}`)?.value || 1));
+        const listOrder = Math.max(0, Number(document.getElementById(`struct-order-${id}`)?.value || 0));
+        const yearlyProduction = collectProductionMapFromEditor(id);
+
+        if (!name) {
+          if (msgEl) msgEl.textContent = 'Name is required.';
+          return;
+        }
+
+        btn.disabled = true;
+        if (msgEl) msgEl.textContent = 'Saving…';
+        const res = await api(`/api/admin/structures/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            display_name: name,
+            max_level: maxLevel,
+            list_order: listOrder,
+            yearly_production_json: yearlyProduction,
+          }),
+        });
+
+        if (!res || !res.ok) {
+          if (msgEl) msgEl.textContent = await readErrorMessage(res, 'Failed to save structure.');
+          btn.disabled = false;
+          return;
+        }
+
+        if (msgEl) msgEl.textContent = 'Saved.';
+        await loadStructureEditor();
+        barkIfEnabled();
+      });
+    });
+
+    panel.querySelectorAll('.deleteStructureBtn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = Number(btn.dataset.id || 0);
+        const code = String(btn.dataset.code || '').trim();
+        if (!id || !code) return;
+
+        const msgEl = document.getElementById(`struct-msg-${id}`);
+
+        const firstConfirm = window.confirm(`Delete structure "${code}"? This cannot be undone.`);
+        if (!firstConfirm) {
+          if (msgEl) msgEl.textContent = 'Deletion cancelled at confirmation 1.';
+          return;
+        }
+
+        const secondConfirm = window.confirm('Second confirmation: this removes the structure from catalog and related shop levels. Continue?');
+        if (!secondConfirm) {
+          if (msgEl) msgEl.textContent = 'Deletion cancelled at confirmation 2.';
+          return;
+        }
+
+        const typed = window.prompt(`Final confirmation: type the structure code exactly to delete: ${code}`, '');
+        if (typed === null) {
+          if (msgEl) msgEl.textContent = 'Deletion cancelled at confirmation 3.';
+          return;
+        }
+
+        if (String(typed).trim() !== code) {
+          if (msgEl) msgEl.textContent = 'Code mismatch. Structure was not deleted.';
+          return;
+        }
+
+        btn.disabled = true;
+        if (msgEl) msgEl.textContent = 'Deleting…';
+        const res = await api(`/api/admin/structures/${id}`, {
+          method: 'DELETE',
+          body: JSON.stringify({ confirm_code: code }),
+        });
+
+        if (!res || !res.ok) {
+          if (msgEl) msgEl.textContent = await readErrorMessage(res, 'Failed to delete structure.');
+          btn.disabled = false;
+          return;
+        }
+
+        if (msgEl) msgEl.textContent = 'Deleted.';
+        await loadStructureEditor();
+        barkIfEnabled();
+      });
     });
   }
   } catch (error) {
@@ -1998,7 +2508,18 @@ async function loadPlayer() {
   // Helper to render resource groups
   function renderResourceGroups(type, values) {
     const groups = resourceDefs[type] || {};
-    return Object.entries(groups).map(([group, defs]) => {
+    const categoryHtml = Object.entries(groups).map(([group, defs]) => {
+      const nonZeroRows = (defs || [])
+        .map(def => {
+          const val = toFiniteNumber(values?.[def.name], 0);
+          if (val === 0) return '';
+          return `<div class="res-kv"><span>${escapeHtml(def.display_name)}</span><span>${fmtNum(val)}</span></div>`;
+        })
+        .filter(Boolean)
+        .join('');
+
+      if (!nonZeroRows) return '';
+
       const openDefault = (
         (type === 'base' && (group === 'Currencies' || group === 'Common')) ||
         (type === 'advanced' && (group === 'Uncommon' || group === 'Rare'))
@@ -2006,14 +2527,16 @@ async function loadPlayer() {
       return `<details style="margin-top:6px;"${openDefault ? ' open' : ''}>
         <summary>${group}</summary>
         <div class="res-panel">
-          ${defs.length === 0 ? '<div class="muted">none</div>' : defs.map(def => {
-            const val = values?.[def.name] ?? 0;
-            return `<div class="res-kv"><span>${escapeHtml(def.display_name)}</span><span>${fmtNum(val)}</span></div>`;
-          }).join('')}
+          ${nonZeroRows}
         </div>
       </details>`;
-    }).join('');
+    }).filter(Boolean).join('');
+
+    return categoryHtml;
   }
+
+  const baseResourcesHtml = renderResourceGroups('base', res.base || {});
+  const advancedResourcesHtml = renderResourceGroups('advanced', res.advanced || {});
 
   // Helper to render income groups
   function renderIncomeGroups() {
@@ -2066,15 +2589,15 @@ async function loadPlayer() {
           <input id="allianceField" value="${data.nation.alliance_name || ''}">
           <p><strong>Terrain (sq miles):</strong> ${terrainRows}</p>
 
-          <details style="margin-top:12px;">
+          ${baseResourcesHtml ? `<details style="margin-top:12px;">
             <summary>Base Resources</summary>
-            ${renderResourceGroups('base', res.base || {})}
-          </details>
+            ${baseResourcesHtml}
+          </details>` : ''}
 
-          <details style="margin-top:8px;">
+          ${advancedResourcesHtml ? `<details style="margin-top:8px;">
             <summary>Advanced Resources</summary>
-            ${renderResourceGroups('advanced', res.advanced || {})}
-          </details>
+            ${advancedResourcesHtml}
+          </details>` : ''}
 
           <details style="margin-top:8px;" open>
             <summary>Income</summary>
@@ -2153,18 +2676,22 @@ async function loadCombat() {
       return '<div class="muted">No rating breakdown.</div>';
     }
     const inputs = breakdown.inputs || {};
-    const weights = breakdown.weights || {};
-    const components = breakdown.components || {};
+    const formulaExpression = String(breakdown.formula_expression || '');
+    const normalizedExpression = String(breakdown.normalized_expression || formulaExpression);
+    const evaluatedExpression = String(breakdown.evaluated_expression || '');
     return `
-      <div class="res-kv"><span>ATK</span><span>${fmtNum(inputs.ATK || 0)} x ${fmtNum(weights.ATK || 0)} = ${fmtNum(components.ATK || 0)}</span></div>
-      <div class="res-kv"><span>DEF</span><span>${fmtNum(inputs.DEF || 0)} x ${fmtNum(weights.DEF || 0)} = ${fmtNum(components.DEF || 0)}</span></div>
-      <div class="res-kv"><span>DMG</span><span>${fmtNum(inputs.DMG || 0)} x ${fmtNum(weights.DMG || 0)} = ${fmtNum(components.DMG || 0)}</span></div>
-      <div class="res-kv"><span>HP</span><span>${fmtNum(inputs.HP || 0)} x ${fmtNum(weights.HP || 0)} = ${fmtNum(components.HP || 0)}</span></div>
-      <div class="res-kv"><span>MVT</span><span>${fmtNum(inputs.MVT || 0)} x ${fmtNum(weights.MVT || 0)} = ${fmtNum(components.MVT || 0)}</span></div>
-      <div class="res-kv"><span>RNG</span><span>${fmtNum(inputs.RNG || 0)} x ${fmtNum(weights.RNG || 0)} = ${fmtNum(components.RNG || 0)}</span></div>
-      <div class="res-kv"><span>ACT</span><span>${fmtNum(inputs.ACT || 0)} x ${fmtNum(weights.ACT || 0)} = ${fmtNum(components.ACT || 0)}</span></div>
-      <div class="res-kv"><span>Score</span><span>${fmtNum(breakdown.score || 0)}</span></div>
-      <div class="res-kv"><span>Divisor</span><span>${fmtNum(breakdown.divisor || 10)}</span></div>
+      <div class="res-kv"><span>ATK</span><span>${fmtNum(inputs.ATK || 0)}</span></div>
+      <div class="res-kv"><span>DEF</span><span>${fmtNum(inputs.DEF || 0)}</span></div>
+      <div class="res-kv"><span>DMG</span><span>${fmtNum(inputs.DMG || 0)}</span></div>
+      <div class="res-kv"><span>HP</span><span>${fmtNum(inputs.HP || 0)}</span></div>
+      <div class="res-kv"><span>MVT</span><span>${fmtNum(inputs.MVT || 0)}</span></div>
+      <div class="res-kv"><span>RNG</span><span>${fmtNum(inputs.RNG || 0)}</span></div>
+      <div class="res-kv"><span>ACT</span><span>${fmtNum(inputs.ACT || 0)}</span></div>
+      <div class="res-kv"><span>Formula</span><span>${escapeHtml(formulaExpression || '-')}</span></div>
+      <div class="res-kv"><span>Normalized</span><span>${escapeHtml(normalizedExpression || '-')}</span></div>
+      <div class="res-kv"><span>Evaluated</span><span>${escapeHtml(evaluatedExpression || '-')}</span></div>
+      <div class="res-kv"><span>Raw Result</span><span>${fmtNum(breakdown.raw_result || 0)}</span></div>
+      <div class="res-kv"><span>Rounding</span><span>${escapeHtml(String(breakdown.rounding_mode || 'floor'))} (round down)</span></div>
       <div class="res-kv"><span>Formula Rating</span><span>${fmtNum(breakdown.formula_rating || 0)}</span></div>
       <div class="res-kv"><span>Final Rating</span><span>${fmtNum(breakdown.rating || 0)}${breakdown.source === 'override' ? ' (override)' : ''}</span></div>
     `;
@@ -2173,36 +2700,25 @@ async function loadCombat() {
   const renderRatingHelpBubble = (cfg, options = {}) => {
     const config = cfg || {};
     const isAdminView = Boolean(options.isAdmin);
-    const atk = Number(config.atk ?? 2);
-    const def = Number(config.def ?? 1.5);
-    const dmg = Number(config.dmg ?? 3);
-    const hp = Number(config.hp ?? 2);
-    const mvt = Number(config.mvt ?? 1);
-    const rng = Number(config.rng ?? 1);
-    const act = Number(config.act ?? 1);
-    const divisor = Number(config.divisor ?? 10);
+    const formulaExpression = String(config.formula_expression || config.default_formula || 'HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)');
 
     return `
       <details style="margin-top:8px;">
         <summary title="Help" style="cursor:pointer;display:flex;align-items:center;gap:8px;">
           <span style="display:inline-flex;width:18px;height:18px;border-radius:999px;align-items:center;justify-content:center;background:#35577e;color:#fff;font-weight:700;font-size:12px;">?</span>
-          <span><strong>${isAdminView ? 'How Rating Formula Fields Work' : 'How Army Rating Is Calculated'}</strong></span>
+          <span><strong>${isAdminView ? 'How Formula Equation Editing Works' : 'How Army Rating Is Calculated'}</strong></span>
         </summary>
         <div class="res-panel" style="margin-top:6px;">
           <div class="muted" style="margin-bottom:6px;">
-            Each stat field is a <strong>weight</strong>. Higher weight means that stat contributes more to final unit rating.
+            Ratings use a configurable <strong>equation</strong> with stat variables. The final formula value is <strong>rounded down</strong> using floor.
           </div>
-          <div class="res-kv"><span>ATK</span><span>Attack importance (${fmtNum(atk)})</span></div>
-          <div class="res-kv"><span>DEF</span><span>Defense importance (${fmtNum(def)})</span></div>
-          <div class="res-kv"><span>DMG</span><span>Damage output importance (${fmtNum(dmg)})</span></div>
-          <div class="res-kv"><span>HP</span><span>Durability importance (${fmtNum(hp)})</span></div>
-          <div class="res-kv"><span>MVT</span><span>Movement value importance (${fmtNum(mvt)})</span></div>
-          <div class="res-kv"><span>RNG</span><span>Range value importance (${fmtNum(rng)})</span></div>
-          <div class="res-kv"><span>ACT</span><span>Action economy importance (${fmtNum(act)})</span></div>
-          <div class="res-kv"><span>Divisor</span><span>Scales rating down/up after score sum (${fmtNum(divisor)})</span></div>
-          <div style="margin-top:8px;font-size:12px;white-space:pre-wrap;">Score = (ATK x ${fmtNum(atk)}) + (DEF x ${fmtNum(def)}) + (DMG x ${fmtNum(dmg)}) + (HP x ${fmtNum(hp)}) + (MVT x ${fmtNum(mvt)}) + (RNG x ${fmtNum(rng)}) + (ACT x ${fmtNum(act)})\nFormula Rating = Score / ${fmtNum(divisor)}\nFinal Rating = override rating (if set) or formula rating</div>
+          <div class="res-kv"><span>Variables</span><span>ATK, DEF, DMG, HP, MVT, RNG, ACT</span></div>
+          <div class="res-kv"><span>Operators</span><span>+, -, *, /, parentheses ( )</span></div>
+          <div class="res-kv"><span>Implicit Multiply</span><span>Allowed: ACT(ATK+DMG), (ATK+DEF)(MVT+RNG)</span></div>
+          <div class="res-kv"><span>Current Formula</span><span>${escapeHtml(formulaExpression)}</span></div>
+          <div style="margin-top:8px;font-size:12px;white-space:pre-wrap;">Example default: HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)\nFinal formula rating = floor(formula result)\nFinal rating = override rating (if set) or formula rating</div>
           <div class="muted" style="margin-top:8px;">
-            Tip: increase a weight to make that stat matter more globally; lower the divisor to increase all formula-based ratings.
+            Tip: use the preview tools before applying a new formula. Changes affect all units without explicit rating override.
           </div>
         </div>
       </details>
@@ -2340,7 +2856,7 @@ async function loadCombat() {
     const orders = ordersRes && ordersRes.ok ? await ordersRes.json() : [];
     const ratingConfig = isAdmin && ratingRes && ratingRes.ok
       ? await ratingRes.json()
-      : { atk: 2, def: 1.5, dmg: 3, hp: 2, mvt: 1, rng: 1, act: 1, divisor: 10 };
+      : { formula_expression: 'HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)', available_variables: ['ATK','DEF','DMG','HP','MVT','RNG','ACT'], available_operators: ['+','-','*','/','(',')'] };
     return { snapshot, orders, ratingConfig };
   };
 
@@ -2354,17 +2870,17 @@ async function loadCombat() {
     const totalArmyRating = Number(snapshot?.total_army_rating || 0);
     const sampleBreakdown = [...commanders, ...units].map((u) => u && u.rating_breakdown).find((b) => b && typeof b === 'object');
     const effectiveRatingConfig = isAdmin
-      ? (ratingConfig || { atk: 2, def: 1.5, dmg: 3, hp: 2, mvt: 1, rng: 1, act: 1, divisor: 10 })
-      : {
-          atk: Number(sampleBreakdown?.weights?.ATK ?? 2),
-          def: Number(sampleBreakdown?.weights?.DEF ?? 1.5),
-          dmg: Number(sampleBreakdown?.weights?.DMG ?? 3),
-          hp: Number(sampleBreakdown?.weights?.HP ?? 2),
-          mvt: Number(sampleBreakdown?.weights?.MVT ?? 1),
-          rng: Number(sampleBreakdown?.weights?.RNG ?? 1),
-          act: Number(sampleBreakdown?.weights?.ACT ?? 1),
-          divisor: Number(sampleBreakdown?.divisor ?? 10),
-        };
+      ? (ratingConfig || { formula_expression: 'HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)' })
+      : { formula_expression: String(sampleBreakdown?.formula_expression || 'HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)') };
+
+    const allPreviewUnits = [...commanders, ...units];
+    const ratingVars = Array.isArray(ratingConfig?.allowed_variables) && ratingConfig.allowed_variables.length
+      ? ratingConfig.allowed_variables
+      : ['ATK', 'DEF', 'DMG', 'HP', 'MVT', 'RNG', 'ACT'];
+    const ratingOps = Array.isArray(ratingConfig?.allowed_operators) && ratingConfig.allowed_operators.length
+      ? ratingConfig.allowed_operators
+      : ['+', '-', '*', '/', '(', ')'];
+    const currentFormula = String(ratingConfig?.formula_expression || ratingConfig?.default_formula || 'HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)');
 
     view.innerHTML = `
       <div class="card">
@@ -2386,13 +2902,35 @@ async function loadCombat() {
           <div class="combat-orders">
             ${isAdmin ? `
               <h3 style="margin-top:0;">Rating Formula</h3>
-              <div class="res-panel" style="margin-bottom:8px;">
+              <div class="res-panel combat-formula-panel" style="margin-bottom:8px;">
                 ${renderRatingHelpBubble(effectiveRatingConfig, { isAdmin: true })}
-                <div class="row"><label style="min-width:55px;">ATK</label><input id="combatRatingAtk" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.atk ?? 2))}"><label style="min-width:55px;">DEF</label><input id="combatRatingDef" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.def ?? 1.5))}"></div>
-                <div class="row"><label style="min-width:55px;">DMG</label><input id="combatRatingDmg" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.dmg ?? 3))}"><label style="min-width:55px;">HP</label><input id="combatRatingHp" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.hp ?? 2))}"></div>
-                <div class="row"><label style="min-width:55px;">MVT</label><input id="combatRatingMvt" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.mvt ?? 1))}"><label style="min-width:55px;">RNG</label><input id="combatRatingRng" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.rng ?? 1))}"></div>
-                <div class="row"><label style="min-width:55px;">ACT</label><input id="combatRatingAct" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.act ?? 1))}"><label style="min-width:55px;">/</label><input id="combatRatingDivisor" type="number" step="0.01" value="${escapeHtml(String(ratingConfig?.divisor ?? 10))}"></div>
-                <div class="row"><button class="primary" id="saveCombatRatingConfigBtn" style="background:#2f6a41;">Save Formula</button><span id="combatRatingConfigMsg" class="muted"></span></div>
+                <label style="font-size:12px;display:block;margin-top:6px;">Editable Formula Equation</label>
+                <textarea id="combatRatingFormulaInput" rows="3" style="font-family:Consolas, monospace;">${escapeHtml(currentFormula)}</textarea>
+                <div class="muted" style="font-size:12px;margin-top:6px;">Variables: ${escapeHtml(ratingVars.join(', '))}</div>
+                <div class="muted" style="font-size:12px;">Operators: ${escapeHtml(ratingOps.join(' '))}</div>
+                <div class="muted" style="font-size:12px;">Final calculation behavior: floor(formula result).</div>
+
+                <details style="margin-top:8px;">
+                  <summary>Preview Formula</summary>
+                  <div style="margin-top:8px;display:grid;gap:8px;">
+                    <label style="font-size:12px;">Preview from existing unit instance</label>
+                    <select id="combatRatingPreviewUnitSelect">
+                      <option value="">Select unit instance...</option>
+                      ${allPreviewUnits.map(u => `<option value="${u.id}|${u.instance_index}">${escapeHtml(String(u.custom_name || u.display_name || 'Unit'))} (#${Number(u.instance_index || 1)}) - ${escapeHtml(String(u.status || 'owned'))}</option>`).join('')}
+                    </select>
+                    <div class="muted" style="font-size:12px;">Or enter manual test values:</div>
+                    <div class="combat-formula-preview-stats">
+                      ${ratingVars.map(v => `<label style="font-size:12px;">${escapeHtml(v)}<input id="combatRatingPreview-${escapeHtml(v)}" type="number" step="0.01" value="0"></label>`).join('')}
+                    </div>
+                    <div class="row" style="gap:8px;">
+                      <button class="primary" id="previewCombatRatingFormulaBtn" style="background:#314f72;">Preview</button>
+                      <span class="muted" id="combatRatingPreviewMsg"></span>
+                    </div>
+                    <div id="combatRatingPreviewResult" class="muted"></div>
+                  </div>
+                </details>
+
+                <div class="row" style="margin-top:8px;"><button class="primary" id="saveCombatRatingConfigBtn" style="background:#2f6a41;">Apply Formula</button><span id="combatRatingConfigMsg" class="muted"></span></div>
               </div>
               <h3 style="margin-top:0;">Orders</h3>
               <div class="row" style="margin-bottom:8px;">
@@ -2443,7 +2981,10 @@ async function loadCombat() {
         btn.disabled = true;
         const save = await api('/api/me/units/' + encodeURIComponent(unitId) + '/name', {
           method: 'PATCH',
-          body: JSON.stringify({ custom_name: input.value || '' }),
+          body: JSON.stringify({
+            instance_index: instanceIndex,
+            custom_name: input.value || '',
+          }),
         });
         btn.disabled = false;
         if (!save || !save.ok) {
@@ -2532,15 +3073,35 @@ async function loadCombat() {
     if (saveRatingConfigBtn) {
       saveRatingConfigBtn.onclick = async () => {
         const msg = document.getElementById('combatRatingConfigMsg');
+        const formula_expression = String(document.getElementById('combatRatingFormulaInput')?.value || '').trim();
+        if (!formula_expression) {
+          msg.textContent = 'Formula is required.';
+          return;
+        }
+
+        const confirmOne = window.confirm('Apply this formula as the new global army rating formula?');
+        if (!confirmOne) {
+          msg.textContent = 'Apply cancelled at confirmation 1.';
+          return;
+        }
+        const confirmTwo = window.confirm('Second confirmation: this affects all non-overridden unit ratings across all players. Continue?');
+        if (!confirmTwo) {
+          msg.textContent = 'Apply cancelled at confirmation 2.';
+          return;
+        }
+        const typed = window.prompt('Final confirmation: type exactly APPLY RATING FORMULA', '');
+        if (typed === null) {
+          msg.textContent = 'Apply cancelled at confirmation 3.';
+          return;
+        }
+        if (String(typed).trim() !== 'APPLY RATING FORMULA') {
+          msg.textContent = 'Confirmation phrase mismatch. Formula was not applied.';
+          return;
+        }
+
         const payload = {
-          atk: Number(document.getElementById('combatRatingAtk').value || 0),
-          def: Number(document.getElementById('combatRatingDef').value || 0),
-          dmg: Number(document.getElementById('combatRatingDmg').value || 0),
-          hp: Number(document.getElementById('combatRatingHp').value || 0),
-          mvt: Number(document.getElementById('combatRatingMvt').value || 0),
-          rng: Number(document.getElementById('combatRatingRng').value || 0),
-          act: Number(document.getElementById('combatRatingAct').value || 0),
-          divisor: Number(document.getElementById('combatRatingDivisor').value || 10),
+          formula_expression,
+          apply_confirmation: 'APPLY RATING FORMULA',
         };
         saveRatingConfigBtn.disabled = true;
         const res = await api('/api/admin/combat/rating-config', { method: 'PUT', body: JSON.stringify(payload) });
@@ -2552,6 +3113,78 @@ async function loadCombat() {
         msg.textContent = 'Saved.';
         barkIfEnabled();
         await render();
+      };
+    }
+
+    const previewRatingConfigBtn = document.getElementById('previewCombatRatingFormulaBtn');
+    if (previewRatingConfigBtn) {
+      previewRatingConfigBtn.onclick = async () => {
+        const msg = document.getElementById('combatRatingPreviewMsg');
+        const resultEl = document.getElementById('combatRatingPreviewResult');
+        const formula_expression = String(document.getElementById('combatRatingFormulaInput')?.value || '').trim();
+        if (!formula_expression) {
+          if (msg) msg.textContent = 'Formula is required.';
+          return;
+        }
+
+        const selected = String(document.getElementById('combatRatingPreviewUnitSelect')?.value || '').trim();
+        const payload = { formula_expression, stats: {} };
+
+        if (selected && selected.includes('|')) {
+          const [unitIdRaw, idxRaw] = selected.split('|', 2);
+          const unitId = Number(unitIdRaw || 0);
+          const instanceIndex = Number(idxRaw || 1);
+          const fromSnapshot = allPreviewUnits.find(u => Number(u.id) === unitId && Number(u.instance_index || 1) === instanceIndex);
+          if (fromSnapshot && fromSnapshot.effective_stats && typeof fromSnapshot.effective_stats === 'object') {
+            payload.stats = {
+              ATK: Number(fromSnapshot.effective_stats.ATK || 0),
+              DEF: Number(fromSnapshot.effective_stats.DEF || 0),
+              DMG: Number(fromSnapshot.effective_stats.DMG || 0),
+              HP: Number(fromSnapshot.effective_stats.HP || 0),
+              MVT: Number(fromSnapshot.effective_stats.MVT || 0),
+              RNG: Number(fromSnapshot.effective_stats.RNG || 0),
+              ACT: Number(fromSnapshot.effective_stats.ACT || 0),
+            };
+          }
+        }
+
+        if (!Object.keys(payload.stats).length) {
+          payload.stats = {
+            ATK: Number(document.getElementById('combatRatingPreview-ATK')?.value || 0),
+            DEF: Number(document.getElementById('combatRatingPreview-DEF')?.value || 0),
+            DMG: Number(document.getElementById('combatRatingPreview-DMG')?.value || 0),
+            HP: Number(document.getElementById('combatRatingPreview-HP')?.value || 0),
+            MVT: Number(document.getElementById('combatRatingPreview-MVT')?.value || 0),
+            RNG: Number(document.getElementById('combatRatingPreview-RNG')?.value || 0),
+            ACT: Number(document.getElementById('combatRatingPreview-ACT')?.value || 0),
+          };
+        }
+
+        previewRatingConfigBtn.disabled = true;
+        if (msg) msg.textContent = 'Previewing...';
+        const res = await api('/api/admin/combat/rating-config/preview', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        previewRatingConfigBtn.disabled = false;
+
+        if (!res || !res.ok) {
+          if (msg) msg.textContent = await readErrorMessage(res, 'Formula preview failed.');
+          if (resultEl) resultEl.textContent = '';
+          return;
+        }
+
+        const preview = await parseJsonResponse(res, {});
+        const breakdown = preview?.breakdown || {};
+        if (msg) msg.textContent = 'Preview ready.';
+        if (resultEl) {
+          resultEl.innerHTML = `
+            <div class="res-kv"><span>Formula</span><span>${escapeHtml(String(breakdown.formula_expression || formula_expression))}</span></div>
+            <div class="res-kv"><span>Evaluated</span><span>${escapeHtml(String(breakdown.evaluated_expression || '-'))}</span></div>
+            <div class="res-kv"><span>Raw Result</span><span>${fmtNum(Number(breakdown.raw_result || 0))}</span></div>
+            <div class="res-kv"><span>Formula Rating</span><span>${fmtNum(Number(breakdown.formula_rating || 0))}</span></div>
+          `;
+        }
       };
     }
 
@@ -2749,6 +3382,7 @@ async function loadMap() {
   let editorBackgroundOpacity = clamp(toFiniteNumber(sessionStorage.getItem(editorBgOpacitySessionKey), 45), 0, 100) / 100;
   let terrainGrid = new Uint8Array(mapWidth * mapHeight);
   let ownerGrid = new Int32Array(mapWidth * mapHeight);
+  const nationPopupDetailCache = new Map();
 
   const politicalNationMap = new Map();
   const seedPoliticalNationMap = (meta = []) => {
@@ -2927,9 +3561,32 @@ async function loadMap() {
     requestAnimationFrame(() => { renderScheduled = false; render(); });
   };
   let politicalNeedsPostPaintBorderUpdate = false;
-  let colorOverrides = (activeEditorState.terrain_color_overrides && typeof activeEditorState.terrain_color_overrides === 'object')
-    ? { ...activeEditorState.terrain_color_overrides }
+  const normalizeTerrainColorOverridesClient = (raw) => {
+    if (!raw || typeof raw !== 'object') return {};
+    const allowed = new Set(TERRAIN_KEYS);
+    const out = {};
+    Object.entries(raw).forEach(([k, v]) => {
+      const key = String(k || '').trim().toLowerCase();
+      const color = String(v || '').trim();
+      if (!key || !allowed.has(key)) return;
+      if (/^#[0-9A-Fa-f]{6}$/.test(color)) out[key] = color;
+    });
+    return out;
+  };
+  const legacyTerrainColorOverrides = (activeEditorState.terrain_color_overrides && typeof activeEditorState.terrain_color_overrides === 'object')
+    ? normalizeTerrainColorOverridesClient(activeEditorState.terrain_color_overrides)
     : {};
+  let adminTerrainColorOverrides = normalizeTerrainColorOverridesClient(settings.map_terrain_color_overrides || {});
+  let userTerrainColorOverrides = user.role === 'admin'
+    ? {}
+    : normalizeTerrainColorOverridesClient(settings.terrain_color_overrides || {});
+  if (Object.keys(adminTerrainColorOverrides).length === 0 && Object.keys(userTerrainColorOverrides).length === 0 && Object.keys(legacyTerrainColorOverrides).length > 0) {
+    adminTerrainColorOverrides = { ...legacyTerrainColorOverrides };
+  }
+  let colorOverrides = { ...adminTerrainColorOverrides, ...userTerrainColorOverrides };
+  const syncTerrainColorOverrides = () => {
+    colorOverrides = { ...adminTerrainColorOverrides, ...userTerrainColorOverrides };
+  };
   let selectedNationId = 0;
   let labelCache = [];
   let lastPaintPoint = null;
@@ -3076,12 +3733,21 @@ async function loadMap() {
 
   const terrainColorControlsHtml = () => {
     const palette = getPalette();
+    const sourceLabel = (key) => {
+      if (Object.prototype.hasOwnProperty.call(userTerrainColorOverrides, key)) {
+        return 'Source: Personal override';
+      }
+      if (Object.prototype.hasOwnProperty.call(adminTerrainColorOverrides, key)) {
+        return 'Source: Global admin default';
+      }
+      return 'Source: Theme default';
+    };
     return `
       <details open>
         <summary>Terrain Colors</summary>
         ${TERRAIN_KEYS.map(key => `
           <div class="terrain-color-row">
-            <label style="font-size:12px;">${labelTerrainKey(key)}</label>
+            <label style="font-size:12px;">${labelTerrainKey(key)}<div class="map-small-label">${sourceLabel(key)}</div></label>
             <input type="color" class="terrainColorInput" data-key="${key}" value="${palette[key].startsWith('#') ? palette[key] : '#cccccc'}">
           </div>
         `).join('')}
@@ -3097,7 +3763,14 @@ async function loadMap() {
   const bindTerrainColorInputs = (root = document) => {
     root.querySelectorAll('.terrainColorInput').forEach(input => {
       input.addEventListener('input', () => {
-        colorOverrides[input.dataset.key] = input.value;
+        const key = String(input.dataset.key || '').trim().toLowerCase();
+        if (!key || !/^#[0-9A-Fa-f]{6}$/.test(String(input.value || ''))) return;
+        if (user.role === 'admin') {
+          adminTerrainColorOverrides[key] = input.value;
+        } else {
+          userTerrainColorOverrides[key] = input.value;
+        }
+        syncTerrainColorOverrides();
         terrainLayerDirty = true;
         waterLayerDirty = true;
         render();
@@ -3110,10 +3783,17 @@ async function loadMap() {
 
     if (resetColorsBtn) {
       resetColorsBtn.onclick = () => {
-        colorOverrides = {};
+        if (user.role === 'admin') {
+          adminTerrainColorOverrides = {};
+        } else {
+          userTerrainColorOverrides = {};
+        }
+        syncTerrainColorOverrides();
         terrainLayerDirty = true;
         waterLayerDirty = true;
-        if (colorMsgEl) colorMsgEl.textContent = 'Colors reset to defaults. Click Save Colors to persist.';
+        if (colorMsgEl) colorMsgEl.textContent = user.role === 'admin'
+          ? 'Global terrain colors reset. Click Save Colors to persist for all players.'
+          : 'Your terrain color overrides were reset. Click Save Colors to persist.';
         renderSidebar();
         render();
       };
@@ -3129,11 +3809,21 @@ async function loadMap() {
         setMapBusy(true, 'Saving terrain colors...');
 
         try {
-          const saveRes = await api('/api/admin/maps/editor-state', {
-            method: 'POST',
-            timeout: 120000,
-            body: JSON.stringify(buildEditorStatePayload()),
-          });
+          const saveRes = user.role === 'admin'
+            ? await api('/api/admin/map-settings', {
+                method: 'PATCH',
+                timeout: 120000,
+                body: JSON.stringify({
+                  map_terrain_color_overrides: normalizeTerrainColorOverridesClient(adminTerrainColorOverrides),
+                }),
+              })
+            : await api('/api/me/settings', {
+                method: 'PATCH',
+                timeout: 120000,
+                body: JSON.stringify({
+                  terrain_color_overrides: normalizeTerrainColorOverridesClient(userTerrainColorOverrides),
+                }),
+              });
 
           if (!saveRes || !saveRes.ok) {
             const msg = await readErrorMessage(saveRes, 'Failed to save terrain colors.');
@@ -3142,9 +3832,15 @@ async function loadMap() {
             return;
           }
 
+          if (user.role === 'admin') {
+            settings.map_terrain_color_overrides = normalizeTerrainColorOverridesClient(adminTerrainColorOverrides);
+          } else {
+            settings.terrain_color_overrides = normalizeTerrainColorOverridesClient(userTerrainColorOverrides);
+          }
+
           updateMapPayloadIndicator(true);
-          setMapStatus('Terrain colors saved.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
-          if (colorMsgEl) colorMsgEl.textContent = 'Terrain colors saved.';
+          setMapStatus(user.role === 'admin' ? 'Global terrain colors saved.' : 'Your terrain color overrides saved.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
+          if (colorMsgEl) colorMsgEl.textContent = user.role === 'admin' ? 'Global terrain colors saved.' : 'Your terrain color overrides saved.';
         } catch (error) {
           const message = error?.message || 'Failed to save terrain colors.';
           setMapStatus(message, { state: 'error' });
@@ -3931,14 +4627,33 @@ async function loadMap() {
 
     ctx.restore();
 
-    if (mapType === 'political' || mapType === 'alliance' || mode === 'political-editor') {
+    const showNationLabels = !!settings.map_show_nation_names;
+    if (showNationLabels && (mapType === 'political' || mapType === 'alliance' || mode === 'political-editor')) {
       drawPoliticalLabels(viewW, viewH);
     }
 
     updateMapPayloadIndicator();
   };
 
-  const setNationInfo = (nationId) => {
+  const fetchNationPopupDetail = async (nationId) => {
+    const id = Number(nationId || 0);
+    if (!id) return null;
+    if (nationPopupDetailCache.has(id)) {
+      return nationPopupDetailCache.get(id);
+    }
+    const res = await api('/api/nations/' + encodeURIComponent(id));
+    if (!res || !res.ok) {
+      return null;
+    }
+    const detail = await parseJsonResponse(res, null);
+    if (detail && typeof detail === 'object') {
+      nationPopupDetailCache.set(id, detail);
+      return detail;
+    }
+    return null;
+  };
+
+  const setNationInfo = async (nationId) => {
     selectedNationId = Number(nationId || 0);
     if (!selectedNationId) {
       mapNationInfo.style.display = 'none';
@@ -3946,23 +4661,64 @@ async function loadMap() {
       return;
     }
     const n = getNationById(selectedNationId);
+    const detail = await fetchNationPopupDetail(selectedNationId);
+    const visibility = (detail?.visibility && typeof detail.visibility === 'object')
+      ? detail.visibility
+      : (n?.visibility && typeof n.visibility === 'object')
+        ? n.visibility
+        : {};
     const pixels = nationPixelCount(selectedNationId);
-    const canViewAlliance = (n?.visibility?.alliance_name !== false);
-    const canViewTerrain = (n?.visibility?.terrain !== false);
+    const canViewAlliance = (visibility.alliance_name !== false);
+    const canViewLeader = (visibility.leader_name !== false);
+    const canViewAbout = (visibility.about_text !== false);
+    const canViewTerrain = (visibility.terrain !== false);
+    const canViewArmyRating = (visibility.army_rating !== false);
+    const canViewUnits = (visibility.units !== false);
+    const canViewBuildings = (visibility.buildings !== false);
     const races = user.role === 'admin' ? ((n?.races || []).join(', ') || '-') : '-';
+    const popupFields = normalizeMapPopupFieldsClient(settings?.map_popup_fields, false);
+    const nationModel = detail?.nation && typeof detail.nation === 'object' ? detail.nation : n;
+    const units = Array.isArray(detail?.units) ? detail.units : [];
+    const buildings = Array.isArray(detail?.buildings) ? detail.buildings : [];
+    const armyRating = detail?.army_rating;
     const nationColor = (mapType === 'alliance')
       ? ((n?.alliance_name ? mapAllianceColor(n.alliance_name) : '#7d7d7d'))
       : mapNationColor(selectedNationId);
+    const infoRows = [];
+    if (popupFields.includes('alliance')) {
+      infoRows.push(`<div class="map-small-label" style="margin-top:4px;">Alliance: ${canViewAlliance ? esc(nationModel?.alliance_name || '-') : 'Hidden by visibility rules'}</div>`);
+    }
+    if (popupFields.includes('leader_name')) {
+      infoRows.push(`<div class="map-small-label">Leader: ${canViewLeader ? esc(nationModel?.leader_name || '-') : 'Hidden by visibility rules'}</div>`);
+    }
+    if (popupFields.includes('about_text')) {
+      infoRows.push(`<div class="map-small-label">About: ${canViewAbout ? esc(nationModel?.about_text || '-') : 'Hidden by visibility rules'}</div>`);
+    }
+    if (popupFields.includes('races')) {
+      infoRows.push(`<div class="map-small-label">Races: ${user.role === 'admin' ? esc(races) : 'Hidden by visibility rules'}</div>`);
+    }
+    if (popupFields.includes('color')) {
+      infoRows.push(`<div class="map-small-label">Color: <span aria-label="Nation color swatch" style="display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,0.4);vertical-align:middle;background:${nationColor};"></span></div>`);
+    }
+    if (popupFields.includes('owned_terrain_pixels')) {
+      infoRows.push(`<div class="map-small-label">Owned Terrain (pixels): ${canViewTerrain ? fmtNum(pixels) : 'Hidden by visibility rules'}</div>`);
+    }
+    if (popupFields.includes('total_army_rating')) {
+      infoRows.push(`<div class="map-small-label">Total Army Rating: ${canViewArmyRating ? fmtNum(armyRating ?? 0) : 'Hidden by visibility rules'}</div>`);
+    }
+    if (popupFields.includes('units_count')) {
+      infoRows.push(`<div class="map-small-label">Total Units: ${canViewUnits ? fmtNum((units || []).reduce((sum, row) => sum + Math.max(0, Number(row?.qty || 0)), 0)) : 'Hidden by visibility rules'}</div>`);
+    }
+    if (popupFields.includes('buildings_count')) {
+      infoRows.push(`<div class="map-small-label">Total Buildings: ${canViewBuildings ? fmtNum((buildings || []).length) : 'Hidden by visibility rules'}</div>`);
+    }
     mapNationInfo.style.display = 'block';
     mapNationInfo.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
-        <strong>${esc(n?.name || `Nation ${selectedNationId}`)}</strong>
+        <strong>${esc(nationModel?.name || n?.name || `Nation ${selectedNationId}`)}</strong>
         <button class="primary" id="closeNationInfoBtn" style="padding:2px 8px;">X</button>
       </div>
-      <div class="map-small-label" style="margin-top:4px;">Alliance: ${canViewAlliance ? esc(n?.alliance_name || '-') : 'Hidden by visibility rules'}</div>
-      <div class="map-small-label">Races: ${esc(races)}</div>
-      <div class="map-small-label">Color: <span aria-label="Nation color swatch" style="display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,0.4);vertical-align:middle;background:${nationColor};"></span></div>
-      <div class="map-small-label">Owned Terrain (pixels): ${canViewTerrain ? fmtNum(pixels) : 'Hidden by visibility rules'}</div>
+      ${infoRows.join('') || '<div class="map-small-label" style="margin-top:4px;">No popup fields selected by admin.</div>'}
     `;
     document.getElementById('closeNationInfoBtn').onclick = () => setNationInfo(0);
   };
@@ -4583,9 +5339,6 @@ async function loadMap() {
     terrainStrokes = cloneStrokeArray(imported.terrain_strokes, [{ tool: 'fill', terrain: 'water', x: 0, y: 0 }]);
     politicalStrokes = cloneStrokeArray(imported.political_strokes, []);
     politicalNationMeta = deepCloneJson(Array.isArray(imported.political_nations) ? imported.political_nations : [], []);
-    colorOverrides = (imported.terrain_color_overrides && typeof imported.terrain_color_overrides === 'object')
-      ? { ...imported.terrain_color_overrides }
-      : {};
 
     seedPoliticalNationMap(politicalNationMeta);
     terrainGrid = new Uint8Array(mapWidth * mapHeight);
@@ -4845,6 +5598,27 @@ async function loadMap() {
         </div>
         <div class="setting-group" style="margin-top:8px;">
           <label><input type="checkbox" id="terrainFilterToggle" ${terrainFilterEnabled ? 'checked' : ''}> Terrain filter overlay</label>
+          <label><input type="checkbox" id="mapShowNationNamesToggle" ${settings.map_show_nation_names !== false ? 'checked' : ''}> Show nation names on map</label>
+        </div>
+        <div class="setting-group" style="margin-top:8px;">
+          <h3 style="margin-top:0;">Popup Options</h3>
+          <div class="map-small-label">Configure fields shown when clicking a nation on the map.</div>
+          ${user.role === 'admin' ? `
+            <div class="res-panel" style="margin-top:6px;">
+              <div class="map-small-label" style="margin-bottom:6px;">Drag to reorder. Checked rows appear in the popup in this order.</div>
+              <div id="mapPopupOrderList" class="map-popup-order-list">
+                ${MAP_POPUP_FIELD_DEFS.map(f => `
+                  <div class="map-popup-order-row" data-key="${f.key}" draggable="true">
+                    <label class="map-popup-order-label"><input type="checkbox" class="mapPopupFieldCheckbox" value="${f.key}"> ${esc(f.label)}</label>
+                    <span class="map-popup-order-grip" aria-hidden="true">::</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <button class="primary" id="saveMapPopupFieldsBtn">Save Popup Fields</button>
+            </div>
+          ` : '<div class="muted" style="margin-top:6px;">Popup field configuration is managed by admin.</div>'}
         </div>
         <h3 style="margin-top:10px;">Terrain Sq Miles</h3>
         <label style="font-size:13px;">View Nation</label>
@@ -4914,6 +5688,118 @@ async function loadMap() {
         terrainFilterEnabled = !!e.target.checked;
         render();
       };
+      const mapShowNationNamesToggle = document.getElementById('mapShowNationNamesToggle');
+      if (mapShowNationNamesToggle) {
+        mapShowNationNamesToggle.onchange = async (e) => {
+          const enabled = !!e.target.checked;
+          const previous = settings.map_show_nation_names !== false;
+          settings.map_show_nation_names = enabled;
+          render();
+          const saveRes = await api('/api/me/settings', {
+            method: 'PATCH',
+            body: JSON.stringify({ map_show_nation_names: enabled }),
+          });
+          if (!saveRes || !saveRes.ok) {
+            settings.map_show_nation_names = previous;
+            e.target.checked = previous;
+            mapStatusMsg.textContent = 'Failed to save map label visibility.';
+            render();
+            return;
+          }
+          mapStatusMsg.textContent = enabled
+            ? 'Nation names enabled for your account.'
+            : 'Nation names hidden for your account.';
+        };
+      }
+      if (user.role === 'admin') {
+        const popupFieldInputs = Array.from(mapSidePanel.querySelectorAll('.mapPopupFieldCheckbox'));
+        const selectedFieldsOrdered = normalizeMapPopupFieldsClient(settings.map_popup_fields, false);
+        const selectedFields = new Set(selectedFieldsOrdered);
+        popupFieldInputs.forEach((checkbox) => {
+          const key = String(checkbox.value || '').trim().toLowerCase();
+          checkbox.checked = selectedFields.has(key);
+        });
+
+        const popupOrderList = document.getElementById('mapPopupOrderList');
+        if (popupOrderList) {
+          const fieldOrder = MAP_POPUP_FIELD_DEFS.map(f => f.key);
+          const orderedKeys = [
+            ...selectedFieldsOrdered.filter((k) => fieldOrder.includes(k)),
+            ...fieldOrder.filter((k) => !selectedFields.has(k)),
+          ];
+
+          orderedKeys.forEach((key) => {
+            const row = popupOrderList.querySelector(`.map-popup-order-row[data-key="${key}"]`);
+            if (row) popupOrderList.appendChild(row);
+          });
+
+          let draggingRow = null;
+          popupOrderList.querySelectorAll('.map-popup-order-row').forEach((row) => {
+            row.addEventListener('dragstart', () => {
+              draggingRow = row;
+              row.classList.add('dragging');
+            });
+            row.addEventListener('dragend', () => {
+              row.classList.remove('dragging');
+              draggingRow = null;
+            });
+            row.addEventListener('dragover', (event) => {
+              event.preventDefault();
+            });
+            row.addEventListener('drop', (event) => {
+              event.preventDefault();
+              if (!draggingRow || draggingRow === row) return;
+              const rows = Array.from(popupOrderList.querySelectorAll('.map-popup-order-row'));
+              const dragIndex = rows.indexOf(draggingRow);
+              const dropIndex = rows.indexOf(row);
+              if (dragIndex < 0 || dropIndex < 0) return;
+              if (dragIndex < dropIndex) {
+                popupOrderList.insertBefore(draggingRow, row.nextSibling);
+              } else {
+                popupOrderList.insertBefore(draggingRow, row);
+              }
+            });
+          });
+        }
+
+        const saveMapPopupFieldsBtn = document.getElementById('saveMapPopupFieldsBtn');
+        if (saveMapPopupFieldsBtn) {
+          saveMapPopupFieldsBtn.onclick = async () => {
+            const orderedRows = Array.from((document.getElementById('mapPopupOrderList') || mapSidePanel).querySelectorAll('.map-popup-order-row'));
+            const fallbackChecked = popupFieldInputs
+              .filter((checkbox) => checkbox.checked)
+              .map((checkbox) => String(checkbox.value || '').trim().toLowerCase());
+            const checkedInOrder = orderedRows.length
+              ? orderedRows
+                  .map((row) => {
+                    const key = String(row.dataset.key || '').trim().toLowerCase();
+                    const checkbox = row.querySelector('.mapPopupFieldCheckbox');
+                    return checkbox && checkbox.checked ? key : '';
+                  })
+                  .filter(Boolean)
+              : fallbackChecked;
+            const mapPopupFields = normalizeMapPopupFieldsClient(
+              checkedInOrder,
+              false
+            );
+            const saveRes = await api('/api/admin/map-settings', {
+              method: 'PATCH',
+              body: JSON.stringify({
+                map_popup_fields: mapPopupFields,
+              }),
+            });
+            if (!saveRes || !saveRes.ok) {
+              mapStatusMsg.textContent = 'Failed to save nation popup fields.';
+              return;
+            }
+            settings.map_popup_fields = mapPopupFields;
+            mapStatusMsg.textContent = 'Nation popup fields saved.';
+            if (selectedNationId > 0) {
+              setNationInfo(selectedNationId);
+            }
+          };
+        }
+      }
       bindTerrainColorInputs(mapSidePanel);
 
       if (mapType === 'alliance') {
@@ -5884,8 +6770,14 @@ async function loadMap() {
       const firstWarning = window.confirm('This will permanently reset the entire map, clear all map layers, and reset all nation terrain map values. Continue?');
       if (!firstWarning) return;
 
-      const phrase = window.prompt('Type exactly: confirm reset of map');
-      if ((phrase || '').trim() !== 'confirm reset of map') {
+      const secondWarning = window.confirm('Second confirmation: map drawing layers, editor state, and terrain allocations are reset for all nations. Continue?');
+      if (!secondWarning) {
+        setMapStatus('Map reset cancelled at confirmation 2.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
+        return;
+      }
+
+      const phrase = window.prompt('Final confirmation: type exactly RESET MAP');
+      if ((phrase || '').trim() !== 'RESET MAP') {
         setMapStatus('Map reset cancelled: confirmation text did not match.', { clearAfterMs: MAP_STATUS_WARN_MS, state: 'error' });
         return;
       }
@@ -6191,7 +7083,7 @@ async function loadOtherNations() {
     const payload = await parseJsonResponse(res, []);
     const list = extractList(payload);
     const box = document.getElementById('nationList');
-    box.innerHTML = list.map(n => `<button class="primary nationBtn" data-id="${n.id}" style="display:block; width:100%; margin-bottom:8px;">${escapeHtml(n.name)} (${escapeHtml(n.player_name || 'Unassigned')})</button>`).join('');
+    box.innerHTML = list.map(n => `<button class="primary nationBtn" data-id="${n.id}" style="display:block; width:100%; margin-bottom:8px;">${escapeHtml(n.name)}</button>`).join('');
     document.querySelectorAll('.nationBtn').forEach(btn => btn.onclick = async () => {
       const detailRes = await api('/api/nations/' + btn.dataset.id);
       if (!detailRes?.ok) {
@@ -6206,19 +7098,26 @@ async function loadOtherNations() {
       const resources = d.resources || {};
       const extra = safeJsonParse(resources.extra_json, {}) || {};
       const advanced = resources.advanced || extra.advanced || extra.refined || {};
-      const base = resources.base || {
-        cow: resources.cow,
-        wood: resources.wood,
-        ore: resources.ore,
-        food: resources.food,
+      const base = {
+        ...(extra.base || {}),
+        ...(resources.base || {}),
       };
+      Object.values(resourceDefs.base || {}).forEach(defs => {
+        (defs || []).forEach(def => {
+          const key = String(def?.name || '').trim();
+          if (!key || Object.prototype.hasOwnProperty.call(base, key)) return;
+          if (resources[key] !== undefined && resources[key] !== null) {
+            base[key] = Number(resources[key] || 0);
+          }
+        });
+      });
       const currencies = extra.currencies || {};
       const terrainSqMiles = normalizeTerrainSquareMiles(d.terrain?.square_miles_json || {});
       const terrainTotal = Math.max(1, Object.values(terrainSqMiles).reduce((sum, value) => sum + toFiniteNumber(value, 0), 0));
       const sections = [];
 
       const renderSection = (title, body) => `
-        <details open style="margin-top:10px;">
+        <details style="margin-top:10px;">
           <summary>${escapeHtml(title)}</summary>
           <div class="res-panel" style="margin-top:6px;">${body}</div>
         </details>
@@ -6242,17 +7141,23 @@ async function loadOtherNations() {
       if (visibility.resources_base && base) {
         const groups = resourceDefs.base || {};
         const html = Object.entries(groups).map(([group, defs]) => {
-          return `<details style="margin-top:6px;" open>
+          const rows = (defs || []).map(def => {
+            const val = toFiniteNumber(base?.[def.name], 0);
+            if (val === 0) return '';
+            return `<div class="res-kv"><span>${escapeHtml(def.display_name)}</span><span>${fmtNum(val)}</span></div>`;
+          }).filter(Boolean).join('');
+          if (!rows) return '';
+
+          return `<details style="margin-top:6px;">
             <summary>${group}</summary>
             <div class="res-panel">
-              ${defs.length === 0 ? '<div class="muted">none</div>' : defs.map(def => {
-                const val = base?.[def.name] ?? 0;
-                return `<div class="res-kv"><span>${escapeHtml(def.display_name)}</span><span>${fmtNum(val)}</span></div>`;
-              }).join('')}
+              ${rows}
             </div>
           </details>`;
-        }).join('');
-        sections.push(renderSection('Base Resources', html));
+        }).filter(Boolean).join('');
+        if (html) {
+          sections.push(renderSection('Base Resources', html));
+        }
       }
 
       // Advanced Resources
@@ -6260,17 +7165,23 @@ async function loadOtherNations() {
       if (canViewAdvanced && advanced) {
         const groups = resourceDefs.advanced || {};
         const html = Object.entries(groups).map(([group, defs]) => {
-          return `<details style="margin-top:6px;" open>
+          const rows = (defs || []).map(def => {
+            const val = toFiniteNumber(advanced?.[def.name], 0);
+            if (val === 0) return '';
+            return `<div class="res-kv"><span>${escapeHtml(def.display_name)}</span><span>${fmtNum(val)}</span></div>`;
+          }).filter(Boolean).join('');
+          if (!rows) return '';
+
+          return `<details style="margin-top:6px;">
             <summary>${group}</summary>
             <div class="res-panel">
-              ${defs.length === 0 ? '<div class="muted">none</div>' : defs.map(def => {
-                const val = advanced?.[def.name] ?? 0;
-                return `<div class="res-kv"><span>${escapeHtml(def.display_name)}</span><span>${fmtNum(val)}</span></div>`;
-              }).join('')}
+              ${rows}
             </div>
           </details>`;
-        }).join('');
-        sections.push(renderSection('Advanced Resources', html));
+        }).filter(Boolean).join('');
+        if (html) {
+          sections.push(renderSection('Advanced Resources', html));
+        }
       }
 
       if (visibility.resources_currencies) {
@@ -6278,7 +7189,9 @@ async function loadOtherNations() {
           .filter(([, value]) => toFiniteNumber(value, 0) !== 0)
           .map(([key, value]) => `<div class="res-kv"><span>${escapeHtml(labelKey(`currencies:${key}`))}</span><span>${fmtNum(value)}</span></div>`)
           .join('');
-        sections.push(renderSection('Currencies', currencyHtml || '<div class="muted">No currency data visible.</div>'));
+        if (currencyHtml) {
+          sections.push(renderSection('Currencies', currencyHtml));
+        }
       }
 
       if (visibility.terrain && d.terrain) {
@@ -6310,7 +7223,7 @@ async function loadOtherNations() {
       }
 
       document.getElementById('nationDetail').innerHTML = `
-        <div><strong>${escapeHtml(d.nation?.name || 'Unknown Nation')}</strong> (${escapeHtml(d.nation?.player_name || 'Unassigned')})</div>
+        <div><strong>${escapeHtml(d.nation?.name || 'Unknown Nation')}</strong></div>
         <div class="muted" style="margin-top:4px;">Visible data is controlled by the player visibility matrix.</div>
         ${sections.join('') || '<div class="muted" style="margin-top:10px;">No other nation details are currently visible.</div>'}
       `;
@@ -6376,6 +7289,11 @@ async function loadShop() {
     return (buildingCounts[requiredKey] || 0) > 0;
   };
 
+  const researchCodeOptions = allItems
+    .filter(item => String(item.category_code || '') === 'research' && String(item.code || '').trim() !== '')
+    .map(item => `<option value="${escapeHtml(String(item.code || ''))}">${escapeHtml(String(item.display_name || item.code || ''))}</option>`)
+    .join('');
+
   view.innerHTML = `
     <div class="card">
       <h2>Shop</h2>
@@ -6394,22 +7312,42 @@ async function loadShop() {
             </datalist>
             <label style="font-size:12px;">Name</label><input id="newShopName" placeholder="Display name">
             <label style="font-size:12px;">Description / Effects</label><textarea id="newShopDescription" rows="4"></textarea>
-            <label style="font-size:12px;">Cost JSON</label><textarea id="newShopCost" rows="3">{}</textarea>
+            <label style="font-size:12px;">Research Code (Research category)</label>
+            <input id="newShopResearchCode" list="shopResearchCodeList" placeholder="example: metallurgy_1">
+            <datalist id="shopResearchCodeList">${researchCodeOptions}</datalist>
+
+            <label style="font-size:12px;">Cost</label>
+            <div id="newShopCostRows"></div>
+            <div class="row" style="margin:4px 0 8px;"><button class="primary" type="button" id="newShopCostAdd">+ Add Cost Row</button></div>
+
+            <label style="font-size:12px;">Yearly Production</label>
+            <div id="newShopYearlyRows"></div>
+            <div class="row" style="margin:4px 0 8px;"><button class="primary" type="button" id="newShopYearlyAdd">+ Add Yearly Row</button></div>
+
+            <label style="font-size:12px;">Yearly Maintenance</label>
+            <div id="newShopMaintenanceRows"></div>
+            <div class="row" style="margin:4px 0 8px;"><button class="primary" type="button" id="newShopMaintenanceAdd">+ Add Maintenance Row</button></div>
+
+            <label style="font-size:12px;">Immediate Resource Effect</label>
+            <div id="newShopEffectRows"></div>
+            <div class="row" style="margin:4px 0 8px;"><button class="primary" type="button" id="newShopEffectAdd">+ Add Effect Row</button></div>
+
+            <label style="font-size:12px;">Recruit Unit Code (optional)</label>
+            <input id="newShopUnitCode" placeholder="example: infantry">
+            <label style="font-size:12px;">Recruit Quantity</label>
+            <input id="newShopUnitQty" type="number" min="1" value="1" placeholder="1">
+
             <label style="font-size:12px;">Structure Requirement (Craft/Recruit)</label>
             <input id="newShopReqBuildingCode" placeholder="Building code (example: refinery)">
             <input id="newShopReqBuildingLevel" type="number" min="1" value="1" placeholder="Building level">
             <label style="font-size:12px;">Research Requirement (Build)</label>
-            <input id="newShopReqResearchCodes" placeholder="Comma-separated research codes">
+            <input id="newShopReqResearchCodes" list="shopResearchCodeList" placeholder="Comma-separated research codes">
             <label style="font-size:12px;">Research Requirement Type (Research)</label>
             <select id="newShopReqType">
               <option value="none">None</option>
               <option value="structure">Structure</option>
               <option value="research">Research</option>
-              <option value="resource">Resource</option>
             </select>
-            <label style="font-size:12px;">Research Requirement Resource JSON</label>
-            <textarea id="newShopReqResources" rows="3">{}</textarea>
-            <label style="font-size:12px;">Product (Purchase Effect JSON)</label><textarea id="newShopProduct" rows="4">{}</textarea>
             <div class="row"><button class="primary" id="createShopItemBtn" style="width:100%;">Create Item</button></div>
             <span class="muted" id="createShopItemMsg"></span>` : ''}
         </div>
@@ -6457,24 +7395,39 @@ async function loadShop() {
     const seen = new Set();
     ['base', 'advanced'].forEach(type => {
       const groups = shopDefs?.[type] || {};
-      Object.values(groups).forEach(arr => {
+      Object.entries(groups).forEach(([groupName, arr]) => {
         (arr || []).forEach(def => {
           const name = String(def?.name || '').trim();
           if (!name) return;
-          const key = `${type}:${name}`;
+          const key = (type === 'base' && String(groupName || '').toLowerCase().includes('currenc'))
+            ? `currencies:${name}`
+            : `${type}:${name}`;
           if (seen.has(key)) return;
           seen.add(key);
           out.push(key);
         });
       });
     });
+
+    // Keep currently stored resource keys selectable, even if definitions changed.
+    allItems.forEach(item => {
+      const payloads = [item.cost_json, item.maintenance_json, item.yearly_effect_json, item.effect_json];
+      payloads.forEach(raw => {
+        const decoded = safeJsonParse(raw, {});
+        if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) return;
+        Object.keys(decoded).forEach((k) => {
+          const canonical = canonicalResourceKey(k);
+          if (!canonical || seen.has(canonical)) return;
+          seen.add(canonical);
+          out.push(canonical);
+        });
+      });
+    });
+
     return out;
   };
 
   const ALL_COST_KEYS = buildShopResourceKeys();
-  if (ALL_COST_KEYS.length === 0) {
-    ALL_COST_KEYS.push('base:cow', 'base:wood', 'base:ore', 'base:food');
-  }
 
   const ensureCostKeyOption = (key) => {
     const normalized = canonicalResourceKey(key) || String(key || '').trim();
@@ -6573,6 +7526,31 @@ async function loadShop() {
     });
     return obj;
   }
+
+  const appendCreateRow = (containerId, defaultValue = 1) => {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'row dyn-row';
+    row.style.cssText = 'align-items:center;gap:4px;margin-bottom:4px;';
+    row.innerHTML = `
+      <select class="dyn-key" style="flex:1;padding:4px;">${resourceOptionsMarkup()}</select>
+      <input type="number" class="dyn-val" value="${Number(defaultValue) || 1}" style="width:80px;padding:4px;">
+      <button type="button" class="danger" onclick="this.closest('.dyn-row').remove()" style="background:none;border:none;cursor:pointer;font-size:16px;padding:0;">✕</button>`;
+    container.appendChild(row);
+  };
+
+  const readCreateRows = (containerId) => {
+    const rows = document.querySelectorAll(`#${containerId} .dyn-row`);
+    const out = {};
+    rows.forEach(row => {
+      const key = canonicalResourceKey(String(row.querySelector('.dyn-key')?.value || ''));
+      const value = Number(row.querySelector('.dyn-val')?.value || 0);
+      if (!key || !Number.isFinite(value) || value === 0) return;
+      out[key] = value;
+    });
+    return out;
+  };
 
   const requirementFromItem = (item) => {
     const req = safeJsonParse(item.requirement_json, {});
@@ -6697,6 +7675,7 @@ async function loadShop() {
             <div style="display:flex;align-items:center;gap:8px;">
               <strong>${i.display_name}</strong>
               <span class="muted" style="font-size:12px;">${i.category_code}</span>
+              <span class="muted" style="font-size:12px;">${escapeHtml(String(i.code || ''))}</span>
               <span class="muted" style="font-size:11px;">#${i.id}</span>
             </div>
             <div class="muted" style="font-size:12px;margin-top:4px;">${i.description_text || 'No description/effects text.'}</div>
@@ -6710,6 +7689,8 @@ async function loadShop() {
                 <textarea id="desc-${i.id}" rows="4">${i.description_text || ''}</textarea>
                 <label style="font-size:12px;margin-top:8px;display:block;">Name</label>
                 <input id="name-${i.id}" value="${escapeHtml(i.display_name || '')}">
+                <label style="font-size:12px;margin-top:8px;display:block;">Code</label>
+                <input id="code-${i.id}" value="${escapeHtml(i.code || '')}" ${String(i.category_code || '') === 'research' ? 'list="shopResearchCodeList"' : ''}>
                 ${requirementEditorMarkup(i, requirementObj)}
                 <label style="font-size:12px;margin-top:8px;display:block;">Product (Purchase Effect JSON)</label>
                 <textarea id="effect-${i.id}" rows="4">${JSON.stringify(effectObj || {}, null, 2)}</textarea>
@@ -6736,6 +7717,7 @@ async function loadShop() {
         return `
           <div class="card">
             <div><strong>${i.display_name}</strong></div>
+            ${String(i.category_code || '') === 'research' ? `<div class="muted" style="font-size:11px;">Code: ${escapeHtml(String(i.code || ''))}</div>` : ''}
             <div class="muted" style="font-size:12px;">${i.description_text || ''}</div>
             <div class="muted" style="font-size:13px;">Cost: ${formatCost(costObj)}</div>
             ${Object.keys(maintenanceObj).length ? `<div class="muted" style="font-size:12px;">Yearly maintenance: ${formatCost(maintenanceObj)}</div>` : ''}
@@ -6776,6 +7758,7 @@ async function loadShop() {
       }
       const item = allItems.find(row => Number(row.id) === id);
       const display_name = String(document.getElementById(`name-${id}`)?.value || '').trim();
+      const code = String(document.getElementById(`code-${id}`)?.value || '').trim();
       const requirement_json = item ? readRequirementFromEditors(item) : {};
       const cost_json = readCostRows(id);
       const description_text = document.getElementById(`desc-${id}`).value;
@@ -6786,7 +7769,7 @@ async function loadShop() {
       } catch {
         effect_json = {};
       }
-      const r = await api(`/api/admin/shop/items/${id}`, { method: 'PUT', body: JSON.stringify({ display_name, cost_json, effect_json, requirement_json, description_text, visibility_json }) });
+      const r = await api(`/api/admin/shop/items/${id}`, { method: 'PUT', body: JSON.stringify({ code, display_name, cost_json, effect_json, requirement_json, description_text, visibility_json }) });
       const msgEl = document.getElementById(`edit-msg-${id}`);
       if (msgEl) msgEl.textContent = r.ok ? 'Saved' : 'Failed';
       if (r.ok) {
@@ -6800,17 +7783,57 @@ async function loadShop() {
 
     document.querySelectorAll('.deleteItem').forEach(btn => btn.onclick = async () => {
       const id = Number(btn.dataset.id);
+      const msgEl = document.getElementById(`edit-msg-${id}`);
+      const item = allItems.find(row => Number(row.id) === id) || {};
+      const itemCode = String(document.getElementById(`code-${id}`)?.value || item.code || '').trim();
+      const itemName = String(document.getElementById(`name-${id}`)?.value || item.display_name || '').trim();
+      const verifyCode = itemCode || `item-${id}`;
+      const label = itemName || verifyCode;
+
+      const firstConfirm = window.confirm(`Delete shop item "${label}"? This cannot be undone.`);
+      if (!firstConfirm) {
+        if (msgEl) msgEl.textContent = 'Delete cancelled at confirmation 1.';
+        return;
+      }
+
+      const secondConfirm = window.confirm('Second confirmation: this removes the item from shop listings and related unlock/edit workflows. Continue?');
+      if (!secondConfirm) {
+        if (msgEl) msgEl.textContent = 'Delete cancelled at confirmation 2.';
+        return;
+      }
+
+      const typed = window.prompt(`Final confirmation: type the shop item code exactly to delete: ${verifyCode}`, '');
+      if (typed === null) {
+        if (msgEl) msgEl.textContent = 'Delete cancelled at confirmation 3.';
+        return;
+      }
+      if (String(typed).trim() !== verifyCode) {
+        if (msgEl) msgEl.textContent = 'Code mismatch. Item was not deleted.';
+        return;
+      }
+
+      if (msgEl) msgEl.textContent = 'Deleting...';
       const r = await api(`/api/admin/shop/items/${id}`, { method: 'DELETE' });
       if (r.ok) {
-        const index = allItems.findIndex(item => item.id === id);
+        const index = allItems.findIndex(itemRow => itemRow.id === id);
         if (index >= 0) allItems.splice(index, 1);
         renderItems(category);
+      } else if (msgEl) {
+        msgEl.textContent = await readErrorMessage(r, 'Delete failed.');
       }
       barkIfEnabled();
     });
   };
 
   document.querySelectorAll('.catBtn').forEach(btn => btn.onclick = () => renderItems(btn.dataset.code));
+
+  if (isAdmin) {
+    appendCreateRow('newShopCostRows', 1);
+    document.getElementById('newShopCostAdd')?.addEventListener('click', () => appendCreateRow('newShopCostRows', 1));
+    document.getElementById('newShopYearlyAdd')?.addEventListener('click', () => appendCreateRow('newShopYearlyRows', 1));
+    document.getElementById('newShopMaintenanceAdd')?.addEventListener('click', () => appendCreateRow('newShopMaintenanceRows', 1));
+    document.getElementById('newShopEffectAdd')?.addEventListener('click', () => appendCreateRow('newShopEffectRows', 1));
+  }
 
   document.getElementById('newShopTemplateSearch')?.addEventListener('input', (event) => {
     const term = (event.target.value || '').trim().toLowerCase();
@@ -6820,26 +7843,39 @@ async function loadShop() {
     if (!template) return;
     document.getElementById('newShopName').value = template.name || '';
     document.getElementById('newShopDescription').value = template.description_text || '';
-    document.getElementById('newShopProduct').value = JSON.stringify(template.effect_json || {}, null, 2);
+    const effectObj = (template.effect_json && typeof template.effect_json === 'object') ? template.effect_json : {};
+    document.getElementById('newShopUnitCode').value = String(effectObj.unit_code || '');
+    document.getElementById('newShopUnitQty').value = Number(effectObj.qty || 1) || 1;
+
+    const effectRows = document.getElementById('newShopEffectRows');
+    if (effectRows) effectRows.innerHTML = '';
+    Object.entries(effectObj || {}).forEach(([key, value]) => {
+      if (!Number.isFinite(Number(value))) return;
+      appendCreateRow('newShopEffectRows', Number(value));
+      const added = document.querySelector('#newShopEffectRows .dyn-row:last-child');
+      if (!added) return;
+      const select = added.querySelector('.dyn-key');
+      const input = added.querySelector('.dyn-val');
+      if (select) select.value = ensureCostKeyOption(String(key));
+      if (input) input.value = Number(value);
+    });
   });
 
   document.getElementById('createShopItemBtn')?.addEventListener('click', async () => {
-    let effect_json = {};
-    try {
-      effect_json = safeJsonParse(document.getElementById('newShopProduct').value, {});
-      if (!effect_json || typeof effect_json !== 'object') effect_json = {};
-    } catch {
-      effect_json = {};
-    }
-    let cost_json = {};
-    try {
-      cost_json = safeJsonParse(document.getElementById('newShopCost').value, {});
-      if (!cost_json || typeof cost_json !== 'object') cost_json = {};
-    } catch {
-      cost_json = {};
+    const cost_json = readCreateRows('newShopCostRows');
+    const yearly_effect_json = readCreateRows('newShopYearlyRows');
+    const maintenance_json = readCreateRows('newShopMaintenanceRows');
+    const effect_json = readCreateRows('newShopEffectRows');
+
+    const unitCode = String(document.getElementById('newShopUnitCode')?.value || '').trim();
+    const unitQty = Math.max(1, Number(document.getElementById('newShopUnitQty')?.value || 1));
+    if (unitCode) {
+      effect_json.unit_code = unitCode;
+      effect_json.qty = unitQty;
     }
 
     const selectedCategoryCode = cats.find(c => Number(c.id) === Number(document.getElementById('newShopCategory').value))?.code || '';
+    const inputCode = String(document.getElementById('newShopResearchCode')?.value || '').trim();
     let requirement_json = {};
     if (selectedCategoryCode === 'craft' || selectedCategoryCode === 'recruit') {
       const code = String(document.getElementById('newShopReqBuildingCode')?.value || '').trim();
@@ -6863,20 +7899,18 @@ async function loadShop() {
           .map(v => v.trim())
           .filter(Boolean);
         requirement_json = codes.length ? { type: 'research', codes, mode: 'all' } : {};
-      } else if (reqType === 'resource') {
-        const resources = safeJsonParse(String(document.getElementById('newShopReqResources')?.value || '{}'), {});
-        requirement_json = (resources && typeof resources === 'object' && !Array.isArray(resources))
-          ? { type: 'resource', resources }
-          : {};
       }
     }
 
     const payload = {
       category_id: Number(document.getElementById('newShopCategory').value),
+      code: inputCode || undefined,
       display_name: document.getElementById('newShopName').value.trim(),
       description_text: document.getElementById('newShopDescription').value,
       effect_json,
       cost_json,
+      yearly_effect_json,
+      maintenance_json,
       requirement_json,
     };
     const r = await api('/api/admin/shop/items', { method: 'POST', body: JSON.stringify(payload) });
@@ -7419,10 +8453,30 @@ async function loadNewAccounts() {
       document.getElementById('deletePlayerMsg').textContent = 'Type PURGE PLAYER DATA to confirm purge mode.';
       return;
     }
+
     const prompt = purgePlayerData
       ? `Delete ${expectedName} forever and purge related map/player data artifacts across the app?`
       : `Delete ${expectedName} forever? This also removes the player's nation data.`;
     if (!window.confirm(prompt)) {
+      document.getElementById('deletePlayerMsg').textContent = 'Delete cancelled at confirmation 1.';
+      return;
+    }
+
+    const secondPrompt = purgePlayerData
+      ? 'Second confirmation: this permanently deletes the player account and purge mode removes related app artifacts. Continue?'
+      : 'Second confirmation: this permanently deletes the player account and related nation/account data. Continue?';
+    if (!window.confirm(secondPrompt)) {
+      document.getElementById('deletePlayerMsg').textContent = 'Delete cancelled at confirmation 2.';
+      return;
+    }
+
+    const typed = window.prompt(`Final confirmation: type the username exactly to delete: ${expectedName}`, '');
+    if (typed === null) {
+      document.getElementById('deletePlayerMsg').textContent = 'Delete cancelled at confirmation 3.';
+      return;
+    }
+    if (String(typed).trim() !== expectedName) {
+      document.getElementById('deletePlayerMsg').textContent = 'Username mismatch. Delete cancelled.';
       return;
     }
 
@@ -7471,6 +8525,7 @@ async function loadSettings() {
         <h3 style="margin:0 0 8px 0;">Admin Global Map Settings</h3>
         <label for="mapMaxZoomGlobal">Global Max Zoom Percent (all players)</label>
         <input id="mapMaxZoomGlobal" type="number" min="100" max="300" step="1" value="180">
+        <label style="margin-top:8px;"><input id="mapShowNationNamesGlobal" type="checkbox"> Show nation names on map labels</label>
       </div>
       ` : ''}
       <div class="setting-group">
@@ -7498,9 +8553,13 @@ async function loadSettings() {
     zoomSensitivityLabel.textContent = `${Math.round(nextPct)}%`;
   };
   const adminMapMaxZoomInput = user.role === 'admin' ? document.getElementById('mapMaxZoomGlobal') : null;
+  const adminMapShowNationNamesInput = user.role === 'admin' ? document.getElementById('mapShowNationNamesGlobal') : null;
   if (adminMapMaxZoomInput) {
     const globalMaxZoom = clampPct(toFiniteNumber(settings.map_max_zoom_pct, 180), 100, 300);
     adminMapMaxZoomInput.value = String(Math.round(globalMaxZoom));
+  }
+  if (adminMapShowNationNamesInput) {
+    adminMapShowNationNamesInput.checked = settings.map_show_nation_names !== false;
   }
 
   document.getElementById('saveSettings').onclick = async () => {
@@ -7520,12 +8579,14 @@ async function loadSettings() {
       if (adminMapMaxZoomInput) {
         const adminPayload = {
           map_max_zoom_pct: Math.round(clampPct(toFiniteNumber(adminMapMaxZoomInput.value, 180), 100, 300)),
+          map_show_nation_names: !!adminMapShowNationNamesInput?.checked,
         };
         const adminRes = await api('/api/admin/map-settings', { method: 'PATCH', body: JSON.stringify(adminPayload) });
         if (!adminRes?.ok) {
           throw new Error(await readErrorMessage(adminRes, 'Global map settings could not be saved.'));
         }
         settings.map_max_zoom_pct = adminPayload.map_max_zoom_pct;
+        settings.map_show_nation_names = adminPayload.map_show_nation_names;
       }
       settings = { ...settings, ...payload };
       setTheme(settings.theme);
@@ -7671,6 +8732,14 @@ async function loadAllNations() {
             <h4 class="alln-panel-title">Create Placeholder Nation</h4>
             <input id="newPlaceholder" placeholder="New placeholder nation name">
             <button class="primary" id="createPlaceholder" style="margin-top:8px; width:100%;">Create Placeholder Nation</button>
+            <hr style="margin:10px 0;">
+            <h4 class="alln-panel-title">Remove Placeholder Nation</h4>
+            <select id="removePlaceholderSelect" style="margin-top:4px; width:100%;">
+              <option value="">Select placeholder nation...</option>
+              ${(nations || []).filter(n => Number(n.is_placeholder || 0) === 1).map(n => `<option value="${n.id}" data-name="${escapeHtml(String(n.name || ''))}">${escapeHtml(String(n.name || ('Nation #' + n.id)))}</option>`).join('')}
+            </select>
+            <button class="primary" id="removePlaceholder" style="margin-top:8px; width:100%; background:#8a1a1a;">Remove Placeholder Nation</button>
+            <span class="muted" id="removePlaceholderMsg" style="display:block;margin-top:6px;"></span>
           </div>
         </div>
       </div>
@@ -7689,8 +8758,11 @@ async function loadAllNations() {
           </div>
           <button class="primary" id="loadVisibilityRulesBtn">Load Rules</button>
         </div>
+        <div class="muted" style="margin-top:8px;">
+          Using All applies only the single field you change. It does not overwrite other fields, preventing accidental wipe of custom pair-by-pair rules.
+        </div>
         <div id="visRuleGrid" class="list" style="margin-top:8px;max-height:260px;">Select nations to load rules.</div>
-        <div class="row"><button class="primary" id="saveVisibilityRulesBtn">Save Visibility Rules</button><span class="muted" id="saveVisibilityMsg"></span></div>
+        <div class="row"><button class="primary" id="saveVisibilityRulesBtn">Save Pair Overrides</button><span class="muted" id="saveVisibilityMsg"></span></div>
       </div>
     </div>
   `;
@@ -7701,16 +8773,55 @@ async function loadAllNations() {
   const visViewer = document.getElementById('visViewerNation');
   const visSubject = document.getElementById('visSubjectNation');
   const nationOptions = (nations || []).map(n => `<option value="${n.owner_user_id}">${n.name}</option>`).join('');
-  visViewer.innerHTML = `<option value="">Select viewer nation</option>${nationOptions}`;
-  visSubject.innerHTML = `<option value="">Select subject nation</option>${nationOptions}`;
+  visViewer.innerHTML = `<option value="">Select viewer nation</option><option value="all">All nations (viewer)</option>${nationOptions}`;
+  visSubject.innerHTML = `<option value="">Select subject nation</option><option value="all">All nations (subject)</option>${nationOptions}`;
 
+  let currentVisRuleMap = {};
   const renderVisGrid = (ruleMap = {}) => {
+    currentVisRuleMap = { ...ruleMap };
     document.getElementById('visRuleGrid').innerHTML = visFields.map(field => `
-      <label class="vis-rule-row">
+      <div class="vis-rule-row">
         <span>${field.label}</span>
-        <input type="checkbox" class="vis-rule-box" data-key="${field.key}" ${ruleMap[field.key] !== false ? 'checked' : ''}>
-      </label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="checkbox" class="vis-rule-box" data-key="${field.key}" ${ruleMap[field.key] !== false ? 'checked' : ''}>
+          <button class="primary vis-apply-one" data-key="${field.key}" style="background:#314f72;padding:4px 8px;">Apply Field</button>
+        </div>
+      </div>
     `).join('') || '<div class="muted">No visibility fields configured.</div>';
+
+    document.querySelectorAll('.vis-apply-one').forEach(btn => {
+      btn.onclick = async () => {
+        const key = String(btn.dataset.key || '');
+        if (!key) return;
+        const viewer = String(visViewer.value || '').trim();
+        const subject = String(visSubject.value || '').trim();
+        if (!viewer || !subject) {
+          document.getElementById('saveVisibilityMsg').textContent = 'Select both viewer and subject first.';
+          return;
+        }
+        if (viewer !== 'all' && subject !== 'all' && viewer === subject) {
+          document.getElementById('saveVisibilityMsg').textContent = 'Viewer and subject must be different nations.';
+          return;
+        }
+        const box = document.querySelector(`.vis-rule-box[data-key="${key}"]`);
+        const isAllowed = !!box?.checked;
+        const res = await api('/api/admin/visibility/rules', {
+          method: 'PUT',
+          body: JSON.stringify({
+            viewer_user_id: viewer,
+            subject_user_id: subject,
+            field_key: key,
+            is_allowed: isAllowed,
+          }),
+        });
+        document.getElementById('saveVisibilityMsg').textContent = res && res.ok
+          ? 'Single field updated. Other fields were left unchanged.'
+          : 'Failed to update field.';
+        if (res && res.ok) {
+          currentVisRuleMap[key] = isAllowed;
+        }
+      };
+    });
   };
   renderVisGrid();
 
@@ -7719,13 +8830,13 @@ async function loadAllNations() {
     const subjectValue = visSubject.value;
 
     Array.from(visViewer.options).forEach(option => {
-      option.disabled = option.value !== '' && option.value === subjectValue;
+      option.disabled = option.value !== '' && option.value !== 'all' && option.value === subjectValue;
     });
     Array.from(visSubject.options).forEach(option => {
-      option.disabled = option.value !== '' && option.value === viewerValue;
+      option.disabled = option.value !== '' && option.value !== 'all' && option.value === viewerValue;
     });
 
-    if (viewerValue !== '' && viewerValue === subjectValue) {
+    if (viewerValue !== '' && subjectValue !== '' && viewerValue !== 'all' && subjectValue !== 'all' && viewerValue === subjectValue) {
       if (changedField === 'viewer') {
         visSubject.value = '';
       } else if (changedField === 'subject') {
@@ -7740,10 +8851,14 @@ async function loadAllNations() {
   syncVisibilitySelectors();
 
   document.getElementById('loadVisibilityRulesBtn').onclick = async () => {
-    const viewer = Number(visViewer.value || 0);
-    const subject = Number(visSubject.value || 0);
+    const viewer = String(visViewer.value || '').trim();
+    const subject = String(visSubject.value || '').trim();
     if (!viewer || !subject) {
       document.getElementById('saveVisibilityMsg').textContent = 'Select both viewer and subject first.';
+      return;
+    }
+    if (viewer !== 'all' && subject !== 'all' && Number(viewer) === Number(subject)) {
+      document.getElementById('saveVisibilityMsg').textContent = 'Viewer and subject must be different nations.';
       return;
     }
     const res = await api(`/api/admin/visibility/rules?viewer_user_id=${viewer}&subject_user_id=${subject}`);
@@ -7759,13 +8874,17 @@ async function loadAllNations() {
   };
 
   document.getElementById('saveVisibilityRulesBtn').onclick = async () => {
-    const viewer = Number(visViewer.value || 0);
-    const subject = Number(visSubject.value || 0);
+    const viewer = String(visViewer.value || '').trim();
+    const subject = String(visSubject.value || '').trim();
     if (!viewer || !subject) {
       document.getElementById('saveVisibilityMsg').textContent = 'Select both viewer and subject first.';
       return;
     }
-    if (viewer === subject) {
+    if (viewer === 'all' || subject === 'all') {
+      document.getElementById('saveVisibilityMsg').textContent = 'Use Apply Field when either selector is All. This updates only one field and keeps all other settings untouched.';
+      return;
+    }
+    if (Number(viewer) === Number(subject)) {
       document.getElementById('saveVisibilityMsg').textContent = 'Viewer and subject must be different nations.';
       return;
     }
@@ -7795,13 +8914,18 @@ async function loadAllNations() {
     const resourceDefs = resourceDefsRes && resourceDefsRes.ok ? await resourceDefsRes.json() : { base: {}, advanced: {} };
     const extra = safeJsonParse(d.resources?.extra_json, {}) || {};
     const baseRes = {
-      cow: Number(d.resources?.cow || 0),
-      wood: Number(d.resources?.wood || 0),
-      ore: Number(d.resources?.ore || 0),
-      food: Number(d.resources?.food || 0),
       ...(extra.base || {}),
       ...(d.resources?.base || {}),
     };
+    Object.values(resourceDefs.base || {}).forEach(defs => {
+      (defs || []).forEach(def => {
+        const key = String(def?.name || '').trim();
+        if (!key || Object.prototype.hasOwnProperty.call(baseRes, key)) return;
+        if (d.resources?.[key] !== undefined && d.resources?.[key] !== null) {
+          baseRes[key] = Number(d.resources[key] || 0);
+        }
+      });
+    });
     const advancedRes = d.resources?.advanced || extra.advanced || extra.refined || {};
 
     // Canonical dynamic income rows: [{type:'base'|'advanced', name:'resource_name', amount:number}]
@@ -7816,24 +8940,13 @@ async function loadAllNations() {
     } else {
       const incomeMap = d.resources?.income || extra.income || {};
       Object.entries(incomeMap).forEach(([key, value]) => {
-        if (key.includes(':')) {
-          const [rawType, rawName] = key.split(':', 2);
-          const type = rawType === 'advanced' ? 'advanced' : 'base';
-          const name = String(rawName || '').trim();
-          if (!name) return;
-          initialIncomeRows.push({ type, name, amount: Number(value || 0) });
-          return;
-        }
-        if (key.startsWith('ref_')) {
-          const name = key.substring(4);
-          if (!name) return;
-          initialIncomeRows.push({ type: 'advanced', name, amount: Number(value || 0) });
-          return;
-        }
-        if (key.startsWith('cur_')) {
-          return;
-        }
-        initialIncomeRows.push({ type: 'base', name: key, amount: Number(value || 0) });
+        const canonical = canonicalResourceKey(key);
+        if (!canonical || canonical.startsWith('currencies:')) return;
+        const [rawType, rawName] = canonical.split(':', 2);
+        const type = rawType === 'advanced' ? 'advanced' : 'base';
+        const name = String(rawName || '').trim();
+        if (!name) return;
+        initialIncomeRows.push({ type, name, amount: Number(value || 0) });
       });
     }
 
@@ -7858,9 +8971,7 @@ async function loadAllNations() {
       if (!resourceName) return;
       const key = `base|${resourceName}`;
       if (seenIncomeRows.has(key)) return;
-      const defaultAmount = !hasConfiguredIncome
-        ? (resourceName === 'cow' ? 30 : (resourceName === 'wood' || resourceName === 'ore' || resourceName === 'food' ? 3 : 0))
-        : 0;
+      const defaultAmount = 0;
       seenIncomeRows.add(key);
       initialIncomeRows.push({ type: 'base', name: resourceName, amount: defaultAmount });
     });
@@ -8217,6 +9328,61 @@ async function loadAllNations() {
   document.getElementById('createPlaceholder').onclick = async () => {
     const name = document.getElementById('newPlaceholder').value;
     await api('/api/admin/nations', { method: 'POST', body: JSON.stringify({ name }) });
+    loadAllNations();
+    barkIfEnabled();
+  };
+
+  document.getElementById('removePlaceholder').onclick = async () => {
+    const selectEl = document.getElementById('removePlaceholderSelect');
+    const msgEl = document.getElementById('removePlaceholderMsg');
+    const nationId = Number(selectEl?.value || 0);
+    const selectedOption = selectEl?.selectedOptions?.[0] || null;
+    const nationName = String(selectedOption?.dataset?.name || selectedOption?.textContent || '').trim();
+
+    if (!nationId || !nationName) {
+      if (msgEl) msgEl.textContent = 'Select a placeholder nation first.';
+      return;
+    }
+
+    const firstConfirm = window.confirm(`Delete placeholder nation "${nationName}"? This cannot be undone.`);
+    if (!firstConfirm) {
+      if (msgEl) msgEl.textContent = 'Deletion cancelled at confirmation 1.';
+      return;
+    }
+
+    const secondConfirm = window.confirm('Second confirmation: this permanently deletes the placeholder nation and its related nation data. Continue?');
+    if (!secondConfirm) {
+      if (msgEl) msgEl.textContent = 'Deletion cancelled at confirmation 2.';
+      return;
+    }
+
+    const typed = window.prompt(`Final confirmation: type the nation name exactly to delete: ${nationName}`, '');
+    if (typed === null) {
+      if (msgEl) msgEl.textContent = 'Deletion cancelled at confirmation 3.';
+      return;
+    }
+
+    if (String(typed).trim() !== nationName) {
+      if (msgEl) msgEl.textContent = 'Name mismatch. Placeholder nation was not deleted.';
+      return;
+    }
+
+    const removeBtn = document.getElementById('removePlaceholder');
+    if (removeBtn) removeBtn.disabled = true;
+    if (msgEl) msgEl.textContent = 'Deleting…';
+
+    const res = await api('/api/admin/nations/' + nationId, {
+      method: 'DELETE',
+      body: JSON.stringify({ confirm_name: nationName }),
+    });
+
+    if (!res || !res.ok) {
+      if (msgEl) msgEl.textContent = await readErrorMessage(res, 'Failed to delete placeholder nation.');
+      if (removeBtn) removeBtn.disabled = false;
+      return;
+    }
+
+    if (msgEl) msgEl.textContent = 'Placeholder nation deleted.';
     loadAllNations();
     barkIfEnabled();
   };

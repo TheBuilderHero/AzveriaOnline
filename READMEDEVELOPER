@@ -233,6 +233,53 @@ docker compose exec app php artisan cache:clear
 
 ## 7) Accounts, Stats, Terrain, and Nation Data
 
+## 7.1) Combat Rating Formula Engine
+
+Combat rating config moved from weight/divisor fields to an equation model.
+
+Config storage file:
+
+- `backend/laravel/storage/app/combat_rating_config.json`
+
+Primary fields:
+
+- `formula_expression` (string)
+- `rounding_mode` (currently `floor`)
+- `updated_at`
+- `updated_by_user_id`
+
+Default expression:
+
+```
+HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)
+```
+
+Allowed variable tokens:
+
+- `ATK`, `DEF`, `DMG`, `HP`, `MVT`, `RNG`, `ACT`
+
+Allowed operators:
+
+- `+`, `-`, `*`, `/`, `^`, `(`, `)`
+
+The evaluator supports implicit multiplication such as `ACT(ATK+DMG)` and `(ATK+DEF)(MVT+RNG)`.
+
+Final formula rating always uses floor rounding:
+
+```
+formula_rating = floor(raw_formula_result)
+```
+
+Admin API endpoints:
+
+- `GET /api/admin/combat/rating-config`
+- `PUT /api/admin/combat/rating-config`
+- `POST /api/admin/combat/rating-config/preview`
+
+Apply protection:
+
+- `PUT /api/admin/combat/rating-config` requires confirmation text `APPLY RATING FORMULA`.
+
 ### New-account defaults storage
 
 Runtime-modified defaults are written to:
