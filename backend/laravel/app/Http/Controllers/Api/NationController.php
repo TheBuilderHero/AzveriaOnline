@@ -7,6 +7,7 @@ use App\Models\Nation;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 
 class NationController extends Controller
 {
@@ -88,14 +89,23 @@ class NationController extends Controller
             ->where('nu.nation_id', $nationId)
             ->select('nu.*', 'uc.display_name', 'uc.class_name', 'uc.base_stats_json')
             ->get();
-        $buildings = DB::table('nation_buildings as nb')
+        $buildingsQuery = DB::table('nation_buildings as nb')
             ->join('building_catalog as bc', 'nb.building_catalog_id', '=', 'bc.id')
             ->where('nb.nation_id', $nationId)
             ->select('nb.*', 'bc.display_name', 'bc.code', 'bc.max_level')
             ->orderBy('bc.display_name')
             ->orderBy('nb.level')
-            ->orderBy('nb.id')
-            ->get();
+            ->orderBy('nb.id');
+        if (Schema::hasColumn('building_catalog', 'yearly_production_json')) {
+            $buildingsQuery->addSelect('bc.yearly_production_json');
+        }
+        if (Schema::hasColumn('building_catalog', 'yearly_maintenance_json')) {
+            $buildingsQuery->addSelect('bc.yearly_maintenance_json');
+        }
+        if (Schema::hasColumn('building_catalog', 'terrain_requirement_json')) {
+            $buildingsQuery->addSelect('bc.terrain_requirement_json');
+        }
+        $buildings = $buildingsQuery->get();
 
         $armyRating = $this->computeArmyRatingFromUnits($units);
 

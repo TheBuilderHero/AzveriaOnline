@@ -367,6 +367,7 @@ class AdminController extends Controller
             'level' => ['sometimes', 'integer', 'min:1'],
             'status' => ['sometimes', 'in:built,constructing,upgrading'],
             'qty' => ['sometimes', 'integer', 'min:1', 'max:500'],
+            'terrain_type' => ['nullable', 'string', 'max:50'],
         ]);
 
         $nation = DB::table('nations')->where('id', $nationId)->first();
@@ -374,17 +375,88 @@ class AdminController extends Controller
             return response()->json(['message' => 'Nation not found'], 404);
         }
 
+        $buildingCatalog = DB::table('building_catalog')
+            ->where('id', (int) $data['building_catalog_id'])
+            ->first();
+        if (!$buildingCatalog) {
+            return response()->json(['message' => 'Building catalog entry not found'], 404);
+        }
+
         $qty = (int) ($data['qty'] ?? 1);
+        $level = (int) ($data['level'] ?? 1);
+        $status = (string) ($data['status'] ?? 'built');
+        $selectedTerrainType = strtolower(trim((string) ($data['terrain_type'] ?? '')));
+        if ($selectedTerrainType !== '' && !in_array($selectedTerrainType, $this->terrainKeys(), true)) {
+            return response()->json(['message' => 'Selected terrain type is invalid.'], 422);
+        }
+
+        $hasTerrainType = Schema::hasColumn('nation_buildings', 'terrain_type');
+        $hasTerrainAllocated = Schema::hasColumn('nation_buildings', 'terrain_allocated_square_miles');
+        $hasTerrainRequirement = Schema::hasColumn('building_catalog', 'terrain_requirement_json');
+
+        $terrainAllocations = [];
+        if ($hasTerrainType && $hasTerrainAllocated && $hasTerrainRequirement) {
+            $terrainRequirementMap = $this->normalizeStructureTerrainRequirementMap(
+                json_decode((string) ($buildingCatalog->terrain_requirement_json ?? 'null'), true) ?: []
+            );
+            $terrainAvailability = $this->computeNationTerrainAvailability($nationId);
+            $levelRule = $this->structureTerrainRequirementForLevel($terrainRequirementMap, $level);
+            $levelAllowedTerrain = is_array($levelRule['allowed_terrain'] ?? null)
+                ? array_values(array_filter(array_map(static fn ($v) => strtolower(trim((string) $v)), $levelRule['allowed_terrain'])))
+                : [];
+            $requiresTerrainSelection = count($levelAllowedTerrain) > 1;
+
+            if ($requiresTerrainSelection && $selectedTerrainType === '') {
+                return response()->json([
+                    'message' => 'Select a terrain type before adding this structure. Allowed: ' . implode(', ', $levelAllowedTerrain),
+                ], 422);
+            }
+            if ($selectedTerrainType !== '' && !empty($levelAllowedTerrain) && !in_array($selectedTerrainType, $levelAllowedTerrain, true)) {
+                return response()->json([
+                    'message' => 'Selected terrain is not allowed for this structure level. Allowed: ' . implode(', ', $levelAllowedTerrain),
+                ], 422);
+            }
+
+            for ($i = 0; $i < $qty; $i++) {
+                $allocation = $this->allocateTerrainForStructurePlacement(
+                    $terrainAvailability,
+                    $terrainRequirementMap,
+                    $level,
+                    $selectedTerrainType !== '' ? $selectedTerrainType : null
+                );
+                if ($allocation === null) {
+                    return response()->json([
+                        'message' => $selectedTerrainType !== ''
+                            ? ('Not enough available ' . $selectedTerrainType . ' terrain to place this structure at level ' . $level . '.')
+                            : ('Not enough eligible terrain available to place this structure at level ' . $level . '.'),
+                        'terrain_availability' => $terrainAvailability,
+                    ], 422);
+                }
+                $terrainAllocations[] = $allocation;
+            }
+        }
+
         $payload = [];
         for ($i = 0; $i < $qty; $i++) {
-            $payload[] = [
+            $rowPayload = [
                 'nation_id' => $nationId,
                 'building_catalog_id' => (int) $data['building_catalog_id'],
-                'level' => (int) ($data['level'] ?? 1),
-                'status' => (string) ($data['status'] ?? 'built'),
+                'level' => $level,
+                'status' => $status,
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
+            if ($hasTerrainType) {
+                $rowPayload['terrain_type'] = isset($terrainAllocations[$i])
+                    ? ($terrainAllocations[$i]['terrain_type'] ?? null)
+                    : null;
+            }
+            if ($hasTerrainAllocated) {
+                $rowPayload['terrain_allocated_square_miles'] = isset($terrainAllocations[$i])
+                    ? (float) ($terrainAllocations[$i]['terrain_allocated_square_miles'] ?? 0)
+                    : 0;
+            }
+            $payload[] = $rowPayload;
         }
 
         DB::table('nation_buildings')->insert($payload);
@@ -424,9 +496,14 @@ class AdminController extends Controller
     public function buildingCatalog()
     {
         $hasListOrder = Schema::hasColumn('building_catalog', 'list_order');
+        $hasTerrainRequirement = Schema::hasColumn('building_catalog', 'terrain_requirement_json');
 
         $query = DB::table('building_catalog')
             ->select('id', 'code', 'display_name', 'max_level');
+
+        if ($hasTerrainRequirement) {
+            $query->addSelect('terrain_requirement_json');
+        }
 
         if ($hasListOrder) {
             $query->addSelect('list_order')->orderBy('list_order');
@@ -434,28 +511,50 @@ class AdminController extends Controller
             $query->selectRaw('0 as list_order');
         }
 
-        $rows = $query->orderBy('display_name')->get();
+        $rows = $query->orderBy('display_name')->get()->map(function ($row) use ($hasTerrainRequirement) {
+            if ($hasTerrainRequirement) {
+                $row->terrain_requirement_json = $this->normalizeStructureTerrainRequirementMap(
+                    json_decode((string) ($row->terrain_requirement_json ?? 'null'), true) ?: []
+                );
+            } else {
+                $row->terrain_requirement_json = [];
+            }
+            return $row;
+        });
 
         return response()->json($rows);
     }
 
     public function structures()
     {
-        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json')) {
+        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json') || !Schema::hasColumn('building_catalog', 'yearly_maintenance_json')) {
             return response()->json([
                 'message' => 'Structure editor storage is not initialized yet. Run the latest database migration.',
             ], 422);
         }
 
+        $hasTerrainRequirement = Schema::hasColumn('building_catalog', 'terrain_requirement_json');
+
         $rows = DB::table('building_catalog')
-            ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json')
+            ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json', 'yearly_maintenance_json')
+            ->when($hasTerrainRequirement, function ($q) {
+                $q->addSelect('terrain_requirement_json');
+            })
             ->orderBy('list_order')
             ->orderBy('display_name')
             ->get()
-            ->map(function ($row) {
+            ->map(function ($row) use ($hasTerrainRequirement) {
                 $row->yearly_production_json = $this->normalizeStructureProductionMap(
                     json_decode((string) ($row->yearly_production_json ?? 'null'), true) ?: []
                 );
+                $row->yearly_maintenance_json = $this->normalizeStructureMaintenanceMap(
+                    json_decode((string) ($row->yearly_maintenance_json ?? 'null'), true) ?: []
+                );
+                $row->terrain_requirement_json = $hasTerrainRequirement
+                    ? $this->normalizeStructureTerrainRequirementMap(
+                        json_decode((string) ($row->terrain_requirement_json ?? 'null'), true) ?: []
+                    )
+                    : [];
                 return $row;
             });
 
@@ -464,7 +563,7 @@ class AdminController extends Controller
 
     public function createStructure(Request $request)
     {
-        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json')) {
+        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json') || !Schema::hasColumn('building_catalog', 'yearly_maintenance_json')) {
             return response()->json([
                 'message' => 'Structure editor storage is not initialized yet. Run the latest database migration.',
             ], 422);
@@ -476,7 +575,11 @@ class AdminController extends Controller
             'max_level' => ['required', 'integer', 'min:1', 'max:100'],
             'list_order' => ['sometimes', 'integer', 'min:0', 'max:100000'],
             'yearly_production_json' => ['sometimes', 'array'],
+            'yearly_maintenance_json' => ['sometimes', 'array'],
+            'terrain_requirement_json' => ['sometimes', 'array'],
         ]);
+
+        $hasTerrainRequirement = Schema::hasColumn('building_catalog', 'terrain_requirement_json');
 
         $code = trim(Str::slug((string) ($data['code'] ?? ''), '_'), '_');
         if ($code === '') {
@@ -487,32 +590,52 @@ class AdminController extends Controller
         }
 
         $normalizedProduction = $this->normalizeStructureProductionMap($data['yearly_production_json'] ?? []);
+        $normalizedMaintenance = $this->normalizeStructureMaintenanceMap($data['yearly_maintenance_json'] ?? []);
+        $normalizedTerrainRequirement = $this->normalizeStructureTerrainRequirementMap($data['terrain_requirement_json'] ?? []);
         $now = now();
 
-        $structureId = DB::table('building_catalog')->insertGetId([
+        $insertPayload = [
             'code' => $code,
             'display_name' => trim((string) $data['display_name']),
             'max_level' => (int) $data['max_level'],
             'list_order' => (int) ($data['list_order'] ?? 0),
             'yearly_production_json' => json_encode($normalizedProduction),
+            'yearly_maintenance_json' => json_encode($normalizedMaintenance),
             'created_at' => $now,
             'updated_at' => $now,
-        ]);
+        ];
+        if ($hasTerrainRequirement) {
+            $insertPayload['terrain_requirement_json'] = json_encode($normalizedTerrainRequirement);
+        }
+
+        $structureId = DB::table('building_catalog')->insertGetId($insertPayload);
 
         $syncedLevels = $this->syncStructureShopLevels(
             $code,
             trim((string) $data['display_name']),
             (int) $data['max_level'],
-            $normalizedProduction
+            $normalizedProduction,
+            $normalizedMaintenance
         );
 
         $fresh = DB::table('building_catalog')
-            ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json')
+            ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json', 'yearly_maintenance_json')
+            ->when($hasTerrainRequirement, function ($q) {
+                $q->addSelect('terrain_requirement_json');
+            })
             ->where('id', $structureId)
             ->first();
         $fresh->yearly_production_json = $this->normalizeStructureProductionMap(
             json_decode((string) ($fresh->yearly_production_json ?? 'null'), true) ?: []
         );
+        $fresh->yearly_maintenance_json = $this->normalizeStructureMaintenanceMap(
+            json_decode((string) ($fresh->yearly_maintenance_json ?? 'null'), true) ?: []
+        );
+        $fresh->terrain_requirement_json = $hasTerrainRequirement
+            ? $this->normalizeStructureTerrainRequirementMap(
+                json_decode((string) ($fresh->terrain_requirement_json ?? 'null'), true) ?: []
+            )
+            : [];
 
         return response()->json([
             'message' => 'Structure created',
@@ -523,7 +646,7 @@ class AdminController extends Controller
 
     public function updateStructure(Request $request, int $structureId)
     {
-        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json')) {
+        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json') || !Schema::hasColumn('building_catalog', 'yearly_maintenance_json')) {
             return response()->json([
                 'message' => 'Structure editor storage is not initialized yet. Run the latest database migration.',
             ], 422);
@@ -539,33 +662,57 @@ class AdminController extends Controller
             'max_level' => ['required', 'integer', 'min:1', 'max:100'],
             'list_order' => ['sometimes', 'integer', 'min:0', 'max:100000'],
             'yearly_production_json' => ['sometimes', 'array'],
+            'yearly_maintenance_json' => ['sometimes', 'array'],
+            'terrain_requirement_json' => ['sometimes', 'array'],
         ]);
 
-        $normalizedProduction = $this->normalizeStructureProductionMap($data['yearly_production_json'] ?? []);
+        $hasTerrainRequirement = Schema::hasColumn('building_catalog', 'terrain_requirement_json');
 
-        DB::table('building_catalog')->where('id', $structureId)->update([
+        $normalizedProduction = $this->normalizeStructureProductionMap($data['yearly_production_json'] ?? []);
+        $normalizedMaintenance = $this->normalizeStructureMaintenanceMap($data['yearly_maintenance_json'] ?? []);
+        $normalizedTerrainRequirement = $this->normalizeStructureTerrainRequirementMap($data['terrain_requirement_json'] ?? []);
+
+        $updatePayload = [
             'display_name' => trim((string) $data['display_name']),
             'max_level' => (int) $data['max_level'],
             'list_order' => (int) ($data['list_order'] ?? ($structure->list_order ?? 0)),
             'yearly_production_json' => json_encode($normalizedProduction),
+            'yearly_maintenance_json' => json_encode($normalizedMaintenance),
             'updated_at' => now(),
-        ]);
+        ];
+        if ($hasTerrainRequirement) {
+            $updatePayload['terrain_requirement_json'] = json_encode($normalizedTerrainRequirement);
+        }
+
+        DB::table('building_catalog')->where('id', $structureId)->update($updatePayload);
 
         // Keep structure-level shop production in sync with structure editor updates.
         $syncedLevels = $this->syncStructureShopLevels(
             (string) $structure->code,
             trim((string) $data['display_name']),
             (int) $data['max_level'],
-            $normalizedProduction
+            $normalizedProduction,
+            $normalizedMaintenance
         );
 
         $fresh = DB::table('building_catalog')
-            ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json')
+            ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json', 'yearly_maintenance_json')
+            ->when($hasTerrainRequirement, function ($q) {
+                $q->addSelect('terrain_requirement_json');
+            })
             ->where('id', $structureId)
             ->first();
         $fresh->yearly_production_json = $this->normalizeStructureProductionMap(
             json_decode((string) ($fresh->yearly_production_json ?? 'null'), true) ?: []
         );
+        $fresh->yearly_maintenance_json = $this->normalizeStructureMaintenanceMap(
+            json_decode((string) ($fresh->yearly_maintenance_json ?? 'null'), true) ?: []
+        );
+        $fresh->terrain_requirement_json = $hasTerrainRequirement
+            ? $this->normalizeStructureTerrainRequirementMap(
+                json_decode((string) ($fresh->terrain_requirement_json ?? 'null'), true) ?: []
+            )
+            : [];
 
         return response()->json([
             'message' => 'Structure updated',
@@ -576,7 +723,7 @@ class AdminController extends Controller
 
     public function deleteStructure(Request $request, int $structureId)
     {
-        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json')) {
+        if (!Schema::hasColumn('building_catalog', 'list_order') || !Schema::hasColumn('building_catalog', 'yearly_production_json') || !Schema::hasColumn('building_catalog', 'yearly_maintenance_json')) {
             return response()->json([
                 'message' => 'Structure editor storage is not initialized yet. Run the latest database migration.',
             ], 422);
@@ -3118,10 +3265,12 @@ class AdminController extends Controller
         }
 
         $state = $this->getGameTimeState();
+        $hasStructureYearlyProduction = Schema::hasColumn('building_catalog', 'yearly_production_json');
+        $hasStructureYearlyMaintenance = Schema::hasColumn('building_catalog', 'yearly_maintenance_json');
 
         for ($yearOffset = 1; $yearOffset <= $yearsToProcess; $yearOffset++) {
             $yearNumber = (int) $state->processed_years + $yearOffset;
-            $nations = DB::table('nations')->where('is_placeholder', 0)->get();
+            $nations = DB::table('nations')->get();
             foreach ($nations as $nation) {
                 $resourceRow = DB::table('nation_resources')->where('nation_id', $nation->id)->first();
                 if (!$resourceRow) {
@@ -3142,11 +3291,19 @@ class AdminController extends Controller
                 $assets = DB::table('nation_assets as na')
                     ->join('shop_items as si', 'na.shop_item_id', '=', 'si.id')
                     ->where('na.nation_id', $nation->id)
-                    ->select('na.qty', 'si.display_name', 'si.maintenance_json', 'si.yearly_effect_json')
+                    ->select('na.qty', 'si.code', 'si.display_name', 'si.maintenance_json', 'si.yearly_effect_json')
                     ->get();
 
                 $maintenanceDetails = [];
+                $structureIncomeDetails = [];
+                $structureMaintenanceDetails = [];
                 foreach ($assets as $asset) {
+                    $assetCode = strtolower(trim((string) ($asset->code ?? '')));
+                    if ($assetCode !== '' && str_starts_with($assetCode, 'struct_')) {
+                        // Structure yearly effects are handled by nation_buildings below.
+                        continue;
+                    }
+
                     $yearlyEffect = json_decode($asset->yearly_effect_json ?? 'null', true) ?: [];
                     $maintenance = json_decode($asset->maintenance_json ?? 'null', true) ?: [];
 
@@ -3157,6 +3314,108 @@ class AdminController extends Controller
                         $amount = (float) $value * (int) $asset->qty;
                         $this->applyDeltaValue($delta, $key, -$amount);
                         $maintenanceDetails[] = $asset->display_name . ': ' . $key . ' ' . $amount;
+                    }
+                }
+
+                if ($hasStructureYearlyProduction) {
+                    $shopHasYearlyEffectJson = Schema::hasColumn('shop_items', 'yearly_effect_json');
+                    $shopHasMaintenanceJson = Schema::hasColumn('shop_items', 'maintenance_json');
+                    $structureShopEffectCache = [];
+
+                    $buildingsQuery = DB::table('nation_buildings as nb')
+                        ->join('building_catalog as bc', 'nb.building_catalog_id', '=', 'bc.id')
+                        ->where('nb.nation_id', $nation->id)
+                        ->where('nb.status', 'built')
+                        ->select('nb.level', 'bc.code', 'bc.display_name', 'bc.yearly_production_json');
+                    if ($hasStructureYearlyMaintenance) {
+                        $buildingsQuery->addSelect('bc.yearly_maintenance_json');
+                    }
+                    $buildings = $buildingsQuery->get();
+
+                    foreach ($buildings as $building) {
+                        $level = max(1, (int) ($building->level ?? 1));
+                        $buildingCode = strtolower(trim((string) ($building->code ?? '')));
+                        $productionMap = json_decode((string) ($building->yearly_production_json ?? 'null'), true);
+                        $maintenanceMap = $hasStructureYearlyMaintenance
+                            ? json_decode((string) ($building->yearly_maintenance_json ?? 'null'), true)
+                            : [];
+
+                        $levelMap = is_array($productionMap) ? ($productionMap[(string) $level] ?? null) : null;
+                        if (!is_array($levelMap)) {
+                            $levelMap = [];
+                            foreach ((is_array($productionMap) ? $productionMap : []) as $key => $value) {
+                                if (is_numeric($value)) {
+                                    $levelMap[(string) $key] = (float) $value;
+                                }
+                            }
+                        }
+
+                        $maintenanceLevelMap = [];
+                        if ($hasStructureYearlyMaintenance) {
+                            $maintenanceLevelMap = is_array($maintenanceMap) ? ($maintenanceMap[(string) $level] ?? null) : null;
+                            if (!is_array($maintenanceLevelMap)) {
+                                $maintenanceLevelMap = [];
+                                foreach ((is_array($maintenanceMap) ? $maintenanceMap : []) as $key => $value) {
+                                    if (is_numeric($value)) {
+                                        $maintenanceLevelMap[(string) $key] = (float) $value;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (empty($levelMap) || ($hasStructureYearlyMaintenance && empty($maintenanceLevelMap))) {
+                            $familyCode = $buildingCode;
+                            if ($familyCode !== '' && preg_match('/^struct_(.+)_l\d+$/', $familyCode, $matches)) {
+                                $familyCode = strtolower(trim((string) ($matches[1] ?? '')));
+                            }
+
+                            if ($familyCode !== '' && $shopHasYearlyEffectJson) {
+                                $shopCode = 'struct_' . $familyCode . '_l' . $level;
+                                if (!array_key_exists($shopCode, $structureShopEffectCache)) {
+                                    $shopQuery = DB::table('shop_items')->where('code', $shopCode)->select('yearly_effect_json');
+                                    if ($shopHasMaintenanceJson) {
+                                        $shopQuery->addSelect('maintenance_json');
+                                    }
+                                    $shopEffect = $shopQuery->first();
+                                    $structureShopEffectCache[$shopCode] = [
+                                        'yearly' => is_object($shopEffect)
+                                            ? (json_decode((string) ($shopEffect->yearly_effect_json ?? 'null'), true) ?: [])
+                                            : [],
+                                        'maintenance' => ($shopHasMaintenanceJson && is_object($shopEffect))
+                                            ? (json_decode((string) ($shopEffect->maintenance_json ?? 'null'), true) ?: [])
+                                            : [],
+                                    ];
+                                }
+
+                                $cached = $structureShopEffectCache[$shopCode] ?? ['yearly' => [], 'maintenance' => []];
+                                if (empty($levelMap) && is_array($cached['yearly'] ?? null)) {
+                                    $levelMap = $cached['yearly'];
+                                }
+                                if ($hasStructureYearlyMaintenance && empty($maintenanceLevelMap) && is_array($cached['maintenance'] ?? null)) {
+                                    $maintenanceLevelMap = $cached['maintenance'];
+                                }
+                            }
+                        }
+
+                        foreach ($levelMap as $key => $value) {
+                            $amount = (float) $value;
+                            if ($amount == 0.0) {
+                                continue;
+                            }
+                            $this->applyDeltaValue($delta, (string) $key, $amount);
+                            $structureIncomeDetails[] = (string) ($building->display_name ?? 'Structure') . ' L' . $level . ': ' . (string) $key . ' ' . $amount;
+                        }
+
+                        if ($hasStructureYearlyMaintenance) {
+                            foreach ($maintenanceLevelMap as $key => $value) {
+                                $amount = (float) $value;
+                                if ($amount == 0.0) {
+                                    continue;
+                                }
+                                $this->applyDeltaValue($delta, (string) $key, -$amount);
+                                $structureMaintenanceDetails[] = (string) ($building->display_name ?? 'Structure') . ' L' . $level . ': ' . (string) $key . ' ' . $amount;
+                            }
+                        }
                     }
                 }
 
@@ -3178,15 +3437,17 @@ class AdminController extends Controller
                     }
                 }
 
-                if ($maintenanceDetails || $negativeKeys) {
+                if ($maintenanceDetails || $negativeKeys || $structureIncomeDetails || $structureMaintenanceDetails) {
                     $this->createNotification(
                         'yearly_maintenance',
                         'Year ' . $yearNumber . ' processing for ' . $nation->name,
                         'System processed yearly income and maintenance for nation "' . $nation->name . '".'
-                        . ' Income applied: ' . json_encode(['base' => $delta['base'], 'advanced' => $delta['advanced']])
+                        . ' Income applied: ' . json_encode(['base' => $delta['base'], 'advanced' => $delta['advanced'], 'currencies' => $delta['currencies']])
+                        . '. Structure production details: ' . ($structureIncomeDetails ? implode('; ', $structureIncomeDetails) : 'none')
+                        . '. Structure maintenance details: ' . ($structureMaintenanceDetails ? implode('; ', $structureMaintenanceDetails) : 'none')
                         . '. Maintenance details: ' . ($maintenanceDetails ? implode('; ', $maintenanceDetails) : 'none')
                         . '. Negative balances: ' . ($negativeKeys ? implode(', ', $negativeKeys) : 'none') . '.',
-                        ['nation_id' => $nation->id, 'year' => $yearNumber, 'negative_balances' => $negativeKeys]
+                        ['nation_id' => $nation->id, 'year' => $yearNumber, 'negative_balances' => $negativeKeys, 'structure_income_details' => $structureIncomeDetails, 'structure_maintenance_details' => $structureMaintenanceDetails]
                     );
                 }
             }
@@ -3382,7 +3643,223 @@ class AdminController extends Controller
         return $normalized;
     }
 
-    private function syncStructureShopLevels(string $familyCode, string $displayName, int $maxLevel, array $normalizedProduction): int
+    private function normalizeStructureMaintenanceMap(array $maintenance): array
+    {
+        return $this->normalizeStructureProductionMap($maintenance);
+    }
+
+    private function terrainKeys(): array
+    {
+        return ['grassland', 'mountain', 'freshwater', 'hills', 'desert', 'seafront'];
+    }
+
+    private function normalizeStructureTerrainRequirementMap(array $requirements): array
+    {
+        $normalized = [];
+        $terrainKeySet = array_fill_keys($this->terrainKeys(), true);
+
+        foreach ($requirements as $levelKey => $rawRule) {
+            $level = max(1, (int) $levelKey);
+            if (!is_array($rawRule)) {
+                continue;
+            }
+
+            $required = (float) ($rawRule['required_square_miles'] ?? $rawRule['required'] ?? $rawRule['amount'] ?? 0);
+            if (!is_finite($required) || $required < 0) {
+                $required = 0;
+            }
+
+            $allowedRaw = $rawRule['allowed_terrain'] ?? ($rawRule['terrain_types'] ?? []);
+            $allowed = [];
+            if (is_array($allowedRaw)) {
+                foreach ($allowedRaw as $terrain) {
+                    $key = strtolower(trim((string) $terrain));
+                    if ($key === '' || !isset($terrainKeySet[$key])) {
+                        continue;
+                    }
+                    $allowed[$key] = true;
+                }
+            }
+
+            if ($required <= 0 || empty($allowed)) {
+                continue;
+            }
+
+            $normalized[(string) $level] = [
+                'required_square_miles' => round($required, 2),
+                'allowed_terrain' => array_values(array_keys($allowed)),
+            ];
+        }
+
+        uksort($normalized, static fn ($a, $b) => (int) $a <=> (int) $b);
+
+        return $normalized;
+    }
+
+    private function structureTerrainRequirementForLevel(array $terrainRequirementMap, int $level): array
+    {
+        $rule = $terrainRequirementMap[(string) max(1, $level)] ?? null;
+        if (!is_array($rule)) {
+            return ['required_square_miles' => 0.0, 'allowed_terrain' => []];
+        }
+
+        $required = (float) ($rule['required_square_miles'] ?? 0);
+        $allowed = is_array($rule['allowed_terrain'] ?? null) ? $rule['allowed_terrain'] : [];
+
+        return [
+            'required_square_miles' => max(0.0, $required),
+            'allowed_terrain' => array_values(array_filter(array_map(
+                static fn ($v) => strtolower(trim((string) $v)),
+                $allowed
+            ))),
+        ];
+    }
+
+    private function computeNationTerrainAvailability(int $nationId): array
+    {
+        $totals = array_fill_keys($this->terrainKeys(), 0.0);
+        $used = array_fill_keys($this->terrainKeys(), 0.0);
+
+        $terrainRow = DB::table('nation_terrain_stats')->where('nation_id', $nationId)->first();
+        $squareMiles = [];
+        if ($terrainRow && isset($terrainRow->square_miles_json)) {
+            $squareMiles = json_decode((string) $terrainRow->square_miles_json, true);
+            $squareMiles = is_array($squareMiles) ? $squareMiles : [];
+        }
+
+        foreach ($totals as $terrain => $ignored) {
+            $totals[$terrain] = max(0.0, (float) ($squareMiles[$terrain] ?? 0));
+        }
+
+        if (Schema::hasColumn('nation_buildings', 'terrain_type') && Schema::hasColumn('nation_buildings', 'terrain_allocated_square_miles')) {
+            $available = [];
+            foreach ($totals as $terrain => $total) {
+                $available[$terrain] = max(0.0, $total);
+            }
+
+            $rows = DB::table('nation_buildings as nb')
+                ->leftJoin('building_catalog as bc', 'nb.building_catalog_id', '=', 'bc.id')
+                ->where('nb.nation_id', $nationId)
+                ->whereIn('nb.status', ['built', 'constructing', 'upgrading'])
+                ->select('nb.level', 'nb.terrain_type', 'nb.terrain_allocated_square_miles', 'bc.terrain_requirement_json')
+                ->get();
+
+            $missingAllocationRows = [];
+            foreach ($rows as $row) {
+                $type = strtolower(trim((string) ($row->terrain_type ?? '')));
+                $allocated = max(0.0, (float) ($row->terrain_allocated_square_miles ?? 0));
+                if ($type !== '' && array_key_exists($type, $used) && $allocated > 0) {
+                    $used[$type] += $allocated;
+                    $available[$type] = max(0.0, (float) ($available[$type] ?? 0) - $allocated);
+                    continue;
+                }
+                $missingAllocationRows[] = $row;
+            }
+
+            foreach ($missingAllocationRows as $row) {
+                $terrainRequirementMap = $this->normalizeStructureTerrainRequirementMap(
+                    json_decode((string) ($row->terrain_requirement_json ?? 'null'), true) ?: []
+                );
+                $rule = $this->structureTerrainRequirementForLevel($terrainRequirementMap, (int) ($row->level ?? 1));
+                $required = max(0.0, (float) ($rule['required_square_miles'] ?? 0));
+                $allowed = is_array($rule['allowed_terrain'] ?? null) ? $rule['allowed_terrain'] : [];
+                if ($required <= 0 || empty($allowed)) {
+                    continue;
+                }
+
+                $pick = null;
+                $bestAvailable = -1.0;
+                foreach ($allowed as $terrainType) {
+                    $terrainKey = strtolower(trim((string) $terrainType));
+                    if (!array_key_exists($terrainKey, $available)) {
+                        continue;
+                    }
+                    $candidate = (float) ($available[$terrainKey] ?? 0);
+                    if ($candidate > $bestAvailable) {
+                        $bestAvailable = $candidate;
+                        $pick = $terrainKey;
+                    }
+                }
+
+                if ($pick === null) {
+                    continue;
+                }
+
+                $used[$pick] += $required;
+                $available[$pick] = max(0.0, (float) ($available[$pick] ?? 0) - $required);
+            }
+        }
+
+        $available = [];
+        foreach ($totals as $terrain => $total) {
+            $available[$terrain] = max(0.0, $total - (float) ($used[$terrain] ?? 0));
+        }
+
+        return [
+            'total' => $totals,
+            'used' => $used,
+            'available' => $available,
+        ];
+    }
+
+    private function allocateTerrainForStructurePlacement(array &$terrainAvailability, array $terrainRequirementMap, int $level, ?string $preferredTerrainType = null): ?array
+    {
+        $rule = $this->structureTerrainRequirementForLevel($terrainRequirementMap, $level);
+        $required = (float) ($rule['required_square_miles'] ?? 0);
+        $allowedTerrain = is_array($rule['allowed_terrain'] ?? null) ? $rule['allowed_terrain'] : [];
+
+        if ($required <= 0 || empty($allowedTerrain)) {
+            return [
+                'terrain_type' => null,
+                'terrain_allocated_square_miles' => 0.0,
+            ];
+        }
+
+        $preferred = strtolower(trim((string) ($preferredTerrainType ?? '')));
+        if ($preferred !== '') {
+            if (!in_array($preferred, $allowedTerrain, true)) {
+                return null;
+            }
+            $available = (float) ($terrainAvailability['available'][$preferred] ?? 0.0);
+            if ($available < $required) {
+                return null;
+            }
+            $terrainAvailability['available'][$preferred] = max(0.0, (float) ($terrainAvailability['available'][$preferred] ?? 0) - $required);
+            $terrainAvailability['used'][$preferred] = (float) ($terrainAvailability['used'][$preferred] ?? 0) + $required;
+            return [
+                'terrain_type' => $preferred,
+                'terrain_allocated_square_miles' => round($required, 2),
+            ];
+        }
+
+        $bestType = null;
+        $bestAvailable = -1.0;
+        foreach ($allowedTerrain as $terrainType) {
+            $terrainKey = strtolower(trim((string) $terrainType));
+            $available = (float) ($terrainAvailability['available'][$terrainKey] ?? 0.0);
+            if ($available < $required) {
+                continue;
+            }
+            if ($available > $bestAvailable) {
+                $bestAvailable = $available;
+                $bestType = $terrainKey;
+            }
+        }
+
+        if ($bestType === null) {
+            return null;
+        }
+
+        $terrainAvailability['available'][$bestType] = max(0.0, (float) ($terrainAvailability['available'][$bestType] ?? 0) - $required);
+        $terrainAvailability['used'][$bestType] = (float) ($terrainAvailability['used'][$bestType] ?? 0) + $required;
+
+        return [
+            'terrain_type' => $bestType,
+            'terrain_allocated_square_miles' => round($required, 2),
+        ];
+    }
+
+    private function syncStructureShopLevels(string $familyCode, string $displayName, int $maxLevel, array $normalizedProduction, array $normalizedMaintenance): int
     {
         $buildCategoryId = DB::table('shop_categories')->where('code', 'build')->value('id');
         if (!$buildCategoryId) {
@@ -3402,6 +3879,7 @@ class AdminController extends Controller
         for ($level = 1; $level <= max(1, $maxLevel); $level++) {
             $shopCode = 'struct_' . $familyCode . '_l' . $level;
             $yearly = json_encode($normalizedProduction[(string) $level] ?? new \stdClass());
+            $maintenance = json_encode($normalizedMaintenance[(string) $level] ?? new \stdClass());
 
             $existing = DB::table('shop_items')->where('code', $shopCode)->first();
             if ($existing) {
@@ -3410,6 +3888,9 @@ class AdminController extends Controller
                 ];
                 if ($shopHasYearlyEffectJson) {
                     $updatePayload['yearly_effect_json'] = $yearly;
+                }
+                if ($shopHasMaintenanceJson) {
+                    $updatePayload['maintenance_json'] = $maintenance;
                 }
                 if ($shopHasUpdatedAt) {
                     $updatePayload['updated_at'] = $now;
@@ -3434,7 +3915,7 @@ class AdminController extends Controller
                     : 'Upgrades one ' . $displayName . ' structure to level ' . $level . '.';
             }
             if ($shopHasMaintenanceJson) {
-                $insertPayload['maintenance_json'] = null;
+                $insertPayload['maintenance_json'] = $maintenance;
             }
             if ($shopHasYearlyEffectJson) {
                 $insertPayload['yearly_effect_json'] = $yearly;

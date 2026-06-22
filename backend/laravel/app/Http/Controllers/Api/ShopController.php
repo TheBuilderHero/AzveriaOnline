@@ -56,6 +56,7 @@ class ShopController extends Controller
             if ($code !== '') {
                 $item->category_name = ucfirst($code);
             }
+            $item->terrain_requirement_for_level = $this->structureTerrainRequirementForShopItem($item);
             return $item;
         });
 
@@ -142,6 +143,110 @@ class ShopController extends Controller
                 ->first();
             if (!$upgradableBuilding) {
                 return response()->json(['message' => 'Upgrade unavailable: you need an existing level ' . $requiredLevel . ' structure.'], 422);
+            }
+        }
+
+        $plannedStructurePlacements = [];
+        $plannedStructureUpgrades = [];
+        $selectedTerrainType = strtolower(trim((string) ($data['terrain_type'] ?? '')));
+        if ($selectedTerrainType !== '' && !in_array($selectedTerrainType, $this->terrainKeys(), true)) {
+            return response()->json(['message' => 'Selected terrain type is invalid.'], 422);
+        }
+        $hasBuildingTerrainColumns = Schema::hasColumn('nation_buildings', 'terrain_type')
+            && Schema::hasColumn('nation_buildings', 'terrain_allocated_square_miles');
+        $hasCatalogTerrainRequirement = Schema::hasColumn('building_catalog', 'terrain_requirement_json');
+        if ($structureMeta && $hasBuildingTerrainColumns && $hasCatalogTerrainRequirement) {
+            $buildingCatalog = DB::table('building_catalog')
+                ->where('code', (string) $structureMeta['family'])
+                ->first();
+            if (!$buildingCatalog) {
+                return response()->json(['message' => 'Structure catalog entry is missing for this purchase.'], 422);
+            }
+
+            $terrainRequirementMap = $this->normalizeStructureTerrainRequirementMap(
+                json_decode((string) ($buildingCatalog->terrain_requirement_json ?? 'null'), true) ?: []
+            );
+            $terrainAvailability = $this->computeNationTerrainAvailability((int) $nation->id);
+            $structureLevel = max(1, (int) ($structureMeta['level'] ?? 1));
+            $levelRule = $this->structureTerrainRequirementForLevel($terrainRequirementMap, $structureLevel);
+            $levelAllowedTerrain = is_array($levelRule['allowed_terrain'] ?? null)
+                ? array_values(array_filter(array_map(static fn ($v) => strtolower(trim((string) $v)), $levelRule['allowed_terrain'])))
+                : [];
+            $requiresTerrainSelection = count($levelAllowedTerrain) > 1;
+
+            if ($requiresTerrainSelection && $selectedTerrainType === '') {
+                return response()->json([
+                    'message' => 'Select a terrain type before building this structure. Allowed: ' . implode(', ', $levelAllowedTerrain),
+                ], 422);
+            }
+            if ($selectedTerrainType !== '' && !empty($levelAllowedTerrain) && !in_array($selectedTerrainType, $levelAllowedTerrain, true)) {
+                return response()->json([
+                    'message' => 'Selected terrain is not allowed for this structure level. Allowed: ' . implode(', ', $levelAllowedTerrain),
+                ], 422);
+            }
+
+            if ((int) ($structureMeta['level'] ?? 1) <= 1) {
+                for ($i = 0; $i < $quantity; $i++) {
+                    $allocation = $this->allocateTerrainForStructurePlacement(
+                        $terrainAvailability,
+                        $terrainRequirementMap,
+                        1,
+                        $selectedTerrainType !== '' ? $selectedTerrainType : null
+                    );
+                    if ($allocation === null) {
+                        return response()->json([
+                            'message' => $selectedTerrainType !== ''
+                                ? ('Not enough available ' . $selectedTerrainType . ' terrain to build this structure.')
+                                : 'Not enough eligible terrain available to build this structure.',
+                            'terrain_availability' => $terrainAvailability,
+                        ], 422);
+                    }
+                    $plannedStructurePlacements[] = $allocation;
+                }
+            } else {
+                $requiredLevel = max(1, (int) $structureMeta['level'] - 1);
+                $upgradeRows = DB::table('nation_buildings')
+                    ->where('nation_id', $nation->id)
+                    ->where('building_catalog_id', (int) $buildingCatalog->id)
+                    ->where('level', $requiredLevel)
+                    ->where('status', 'built')
+                    ->orderBy('id')
+                    ->limit($quantity)
+                    ->get();
+
+                if ($upgradeRows->count() < $quantity) {
+                    return response()->json(['message' => 'Upgrade unavailable: you need ' . $quantity . ' existing level ' . $requiredLevel . ' structures.'], 422);
+                }
+
+                foreach ($upgradeRows as $row) {
+                    $oldType = strtolower(trim((string) ($row->terrain_type ?? '')));
+                    $oldAmount = max(0.0, (float) ($row->terrain_allocated_square_miles ?? 0));
+                    if ($oldType !== '' && array_key_exists($oldType, $terrainAvailability['available'])) {
+                        $terrainAvailability['available'][$oldType] = (float) ($terrainAvailability['available'][$oldType] ?? 0) + $oldAmount;
+                        $terrainAvailability['used'][$oldType] = max(0.0, (float) ($terrainAvailability['used'][$oldType] ?? 0) - $oldAmount);
+                    }
+
+                    $allocation = $this->allocateTerrainForStructurePlacement(
+                        $terrainAvailability,
+                        $terrainRequirementMap,
+                        (int) $structureMeta['level'],
+                        $selectedTerrainType !== '' ? $selectedTerrainType : null
+                    );
+                    if ($allocation === null) {
+                        return response()->json([
+                            'message' => $selectedTerrainType !== ''
+                                ? ('Not enough available ' . $selectedTerrainType . ' terrain to upgrade this structure.')
+                                : 'Not enough eligible terrain available to upgrade this structure.',
+                            'terrain_availability' => $terrainAvailability,
+                        ], 422);
+                    }
+
+                    $plannedStructureUpgrades[] = [
+                        'row_id' => (int) $row->id,
+                        'terrain_type' => $allocation['terrain_type'] ?? null,
+                        'terrain_allocated_square_miles' => (float) ($allocation['terrain_allocated_square_miles'] ?? 0),
+                    ];
+                }
             }
         }
 
@@ -384,51 +489,105 @@ class ShopController extends Controller
 
         if ($structureMeta) {
             $catalogId = $this->ensureBuildingCatalog($structureMeta['family']);
+            $hasTerrainType = Schema::hasColumn('nation_buildings', 'terrain_type');
+            $hasTerrainAllocated = Schema::hasColumn('nation_buildings', 'terrain_allocated_square_miles');
             if ($structureMeta['level'] === 1) {
                 for ($i = 0; $i < $quantity; $i++) {
-                    DB::table('nation_buildings')->insert([
+                    $insertPayload = [
                         'nation_id' => $nation->id,
                         'building_catalog_id' => $catalogId,
                         'level' => 1,
                         'status' => 'built',
                         'created_at' => now(),
                         'updated_at' => now(),
-                    ]);
+                    ];
+                    if ($hasTerrainType) {
+                        $insertPayload['terrain_type'] = isset($plannedStructurePlacements[$i])
+                            ? ($plannedStructurePlacements[$i]['terrain_type'] ?? null)
+                            : null;
+                    }
+                    if ($hasTerrainAllocated) {
+                        $insertPayload['terrain_allocated_square_miles'] = isset($plannedStructurePlacements[$i])
+                            ? (float) ($plannedStructurePlacements[$i]['terrain_allocated_square_miles'] ?? 0)
+                            : 0;
+                    }
+                    DB::table('nation_buildings')->insert($insertPayload);
                 }
             } else {
-                for ($i = 0; $i < $quantity; $i++) {
-                    $requiredLevel = $structureMeta['level'] - 1;
-                    $row = DB::table('nation_buildings')
-                        ->where('nation_id', $nation->id)
-                        ->where('building_catalog_id', $catalogId)
-                        ->where('level', $requiredLevel)
-                        ->where('status', 'built')
-                        ->orderBy('id')
-                        ->first();
-                    if (!$row) {
-                        break;
-                    }
-                    DB::table('nation_buildings')->where('id', $row->id)->update([
-                        'level' => $structureMeta['level'],
-                        'status' => 'built',
-                        'updated_at' => now(),
-                    ]);
+                if (!empty($plannedStructureUpgrades)) {
+                    foreach ($plannedStructureUpgrades as $upgradePlan) {
+                        $rowId = (int) ($upgradePlan['row_id'] ?? 0);
+                        if ($rowId <= 0) {
+                            continue;
+                        }
+                        $upgradePayload = [
+                            'level' => $structureMeta['level'],
+                            'status' => 'built',
+                            'updated_at' => now(),
+                        ];
+                        if ($hasTerrainType) {
+                            $upgradePayload['terrain_type'] = $upgradePlan['terrain_type'] ?? null;
+                        }
+                        if ($hasTerrainAllocated) {
+                            $upgradePayload['terrain_allocated_square_miles'] = (float) ($upgradePlan['terrain_allocated_square_miles'] ?? 0);
+                        }
+                        DB::table('nation_buildings')->where('id', $rowId)->update($upgradePayload);
 
-                    $lowerCode = 'struct_' . $structureMeta['family'] . '_l' . $requiredLevel;
-                    $lowerItemId = DB::table('shop_items')->where('code', $lowerCode)->value('id');
-                    if ($lowerItemId) {
-                        $lowerAsset = DB::table('nation_assets')
+                        $requiredLevel = $structureMeta['level'] - 1;
+                        $lowerCode = 'struct_' . $structureMeta['family'] . '_l' . $requiredLevel;
+                        $lowerItemId = DB::table('shop_items')->where('code', $lowerCode)->value('id');
+                        if ($lowerItemId) {
+                            $lowerAsset = DB::table('nation_assets')
+                                ->where('nation_id', $nation->id)
+                                ->where('shop_item_id', $lowerItemId)
+                                ->first();
+                            if ($lowerAsset) {
+                                if ((int) $lowerAsset->qty <= 1) {
+                                    DB::table('nation_assets')->where('id', $lowerAsset->id)->delete();
+                                } else {
+                                    DB::table('nation_assets')->where('id', $lowerAsset->id)->update([
+                                        'qty' => (int) $lowerAsset->qty - 1,
+                                        'updated_at' => now(),
+                                    ]);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    for ($i = 0; $i < $quantity; $i++) {
+                        $requiredLevel = $structureMeta['level'] - 1;
+                        $row = DB::table('nation_buildings')
                             ->where('nation_id', $nation->id)
-                            ->where('shop_item_id', $lowerItemId)
+                            ->where('building_catalog_id', $catalogId)
+                            ->where('level', $requiredLevel)
+                            ->where('status', 'built')
+                            ->orderBy('id')
                             ->first();
-                        if ($lowerAsset) {
-                            if ((int) $lowerAsset->qty <= 1) {
-                                DB::table('nation_assets')->where('id', $lowerAsset->id)->delete();
-                            } else {
-                                DB::table('nation_assets')->where('id', $lowerAsset->id)->update([
-                                    'qty' => (int) $lowerAsset->qty - 1,
-                                    'updated_at' => now(),
-                                ]);
+                        if (!$row) {
+                            break;
+                        }
+                        DB::table('nation_buildings')->where('id', $row->id)->update([
+                            'level' => $structureMeta['level'],
+                            'status' => 'built',
+                            'updated_at' => now(),
+                        ]);
+
+                        $lowerCode = 'struct_' . $structureMeta['family'] . '_l' . $requiredLevel;
+                        $lowerItemId = DB::table('shop_items')->where('code', $lowerCode)->value('id');
+                        if ($lowerItemId) {
+                            $lowerAsset = DB::table('nation_assets')
+                                ->where('nation_id', $nation->id)
+                                ->where('shop_item_id', $lowerItemId)
+                                ->first();
+                            if ($lowerAsset) {
+                                if ((int) $lowerAsset->qty <= 1) {
+                                    DB::table('nation_assets')->where('id', $lowerAsset->id)->delete();
+                                } else {
+                                    DB::table('nation_assets')->where('id', $lowerAsset->id)->update([
+                                        'qty' => (int) $lowerAsset->qty - 1,
+                                        'updated_at' => now(),
+                                    ]);
+                                }
                             }
                         }
                     }
@@ -511,6 +670,243 @@ class ShopController extends Controller
         return [
             'family' => $matches[1],
             'level' => (int) $matches[2],
+        ];
+    }
+
+    private function structureTerrainRequirementForShopItem($item): ?array
+    {
+        if (!Schema::hasColumn('building_catalog', 'terrain_requirement_json')) {
+            return null;
+        }
+
+        $meta = $this->parseStructureCode((string) ($item->code ?? ''));
+        if (!$meta) {
+            return null;
+        }
+
+        $raw = DB::table('building_catalog')
+            ->where('code', (string) ($meta['family'] ?? ''))
+            ->value('terrain_requirement_json');
+        if ($raw === null) {
+            return null;
+        }
+
+        $map = $this->normalizeStructureTerrainRequirementMap(
+            json_decode((string) $raw, true) ?: []
+        );
+        $rule = $this->structureTerrainRequirementForLevel($map, (int) ($meta['level'] ?? 1));
+        $required = (float) ($rule['required_square_miles'] ?? 0);
+        $allowed = is_array($rule['allowed_terrain'] ?? null) ? $rule['allowed_terrain'] : [];
+        if ($required <= 0 || empty($allowed)) {
+            return null;
+        }
+
+        return [
+            'required_square_miles' => $required,
+            'allowed_terrain' => array_values(array_map(static fn ($v) => strtolower((string) $v), $allowed)),
+        ];
+    }
+
+    private function terrainKeys(): array
+    {
+        return ['grassland', 'mountain', 'freshwater', 'hills', 'desert', 'seafront'];
+    }
+
+    private function normalizeStructureTerrainRequirementMap(array $requirements): array
+    {
+        $normalized = [];
+        $terrainKeySet = array_fill_keys($this->terrainKeys(), true);
+
+        foreach ($requirements as $levelKey => $rawRule) {
+            $level = max(1, (int) $levelKey);
+            if (!is_array($rawRule)) {
+                continue;
+            }
+
+            $required = (float) ($rawRule['required_square_miles'] ?? $rawRule['required'] ?? $rawRule['amount'] ?? 0);
+            if (!is_finite($required) || $required < 0) {
+                $required = 0;
+            }
+
+            $allowedRaw = $rawRule['allowed_terrain'] ?? ($rawRule['terrain_types'] ?? []);
+            $allowed = [];
+            if (is_array($allowedRaw)) {
+                foreach ($allowedRaw as $terrain) {
+                    $key = strtolower(trim((string) $terrain));
+                    if ($key === '' || !isset($terrainKeySet[$key])) {
+                        continue;
+                    }
+                    $allowed[$key] = true;
+                }
+            }
+
+            if ($required <= 0 || empty($allowed)) {
+                continue;
+            }
+
+            $normalized[(string) $level] = [
+                'required_square_miles' => round($required, 2),
+                'allowed_terrain' => array_values(array_keys($allowed)),
+            ];
+        }
+
+        uksort($normalized, static fn ($a, $b) => (int) $a <=> (int) $b);
+
+        return $normalized;
+    }
+
+    private function structureTerrainRequirementForLevel(array $terrainRequirementMap, int $level): array
+    {
+        $rule = $terrainRequirementMap[(string) max(1, $level)] ?? null;
+        if (!is_array($rule)) {
+            return ['required_square_miles' => 0.0, 'allowed_terrain' => []];
+        }
+
+        return [
+            'required_square_miles' => max(0.0, (float) ($rule['required_square_miles'] ?? 0)),
+            'allowed_terrain' => is_array($rule['allowed_terrain'] ?? null) ? $rule['allowed_terrain'] : [],
+        ];
+    }
+
+    private function computeNationTerrainAvailability(int $nationId): array
+    {
+        $totals = array_fill_keys($this->terrainKeys(), 0.0);
+        $used = array_fill_keys($this->terrainKeys(), 0.0);
+
+        $terrainRow = DB::table('nation_terrain_stats')->where('nation_id', $nationId)->first();
+        $squareMiles = [];
+        if ($terrainRow && isset($terrainRow->square_miles_json)) {
+            $squareMiles = json_decode((string) $terrainRow->square_miles_json, true);
+            $squareMiles = is_array($squareMiles) ? $squareMiles : [];
+        }
+
+        foreach ($totals as $terrain => $ignored) {
+            $totals[$terrain] = max(0.0, (float) ($squareMiles[$terrain] ?? 0));
+        }
+
+        $available = [];
+        foreach ($totals as $terrain => $total) {
+            $available[$terrain] = max(0.0, $total);
+        }
+
+        $rows = DB::table('nation_buildings as nb')
+            ->leftJoin('building_catalog as bc', 'nb.building_catalog_id', '=', 'bc.id')
+            ->where('nb.nation_id', $nationId)
+            ->whereIn('nb.status', ['built', 'constructing', 'upgrading'])
+            ->select('nb.level', 'nb.terrain_type', 'nb.terrain_allocated_square_miles', 'bc.terrain_requirement_json')
+            ->get();
+
+        $missingAllocationRows = [];
+        foreach ($rows as $row) {
+            $type = strtolower(trim((string) ($row->terrain_type ?? '')));
+            $allocated = max(0.0, (float) ($row->terrain_allocated_square_miles ?? 0));
+            if ($type !== '' && array_key_exists($type, $used) && $allocated > 0) {
+                $used[$type] += $allocated;
+                $available[$type] = max(0.0, (float) ($available[$type] ?? 0) - $allocated);
+                continue;
+            }
+            $missingAllocationRows[] = $row;
+        }
+
+        foreach ($missingAllocationRows as $row) {
+            $terrainRequirementMap = $this->normalizeStructureTerrainRequirementMap(
+                json_decode((string) ($row->terrain_requirement_json ?? 'null'), true) ?: []
+            );
+            $rule = $this->structureTerrainRequirementForLevel($terrainRequirementMap, (int) ($row->level ?? 1));
+            $required = max(0.0, (float) ($rule['required_square_miles'] ?? 0));
+            $allowed = is_array($rule['allowed_terrain'] ?? null) ? $rule['allowed_terrain'] : [];
+            if ($required <= 0 || empty($allowed)) {
+                continue;
+            }
+
+            $pick = null;
+            $bestAvailable = -1.0;
+            foreach ($allowed as $terrainType) {
+                $terrainKey = strtolower(trim((string) $terrainType));
+                if (!array_key_exists($terrainKey, $available)) {
+                    continue;
+                }
+                $candidate = (float) ($available[$terrainKey] ?? 0);
+                if ($candidate > $bestAvailable) {
+                    $bestAvailable = $candidate;
+                    $pick = $terrainKey;
+                }
+            }
+
+            if ($pick === null) {
+                continue;
+            }
+
+            $used[$pick] += $required;
+            $available[$pick] = max(0.0, (float) ($available[$pick] ?? 0) - $required);
+        }
+
+        $available = [];
+        foreach ($totals as $terrain => $total) {
+            $available[$terrain] = max(0.0, $total - (float) ($used[$terrain] ?? 0));
+        }
+
+        return [
+            'total' => $totals,
+            'used' => $used,
+            'available' => $available,
+        ];
+    }
+
+    private function allocateTerrainForStructurePlacement(array &$terrainAvailability, array $terrainRequirementMap, int $level, ?string $preferredTerrainType = null): ?array
+    {
+        $rule = $this->structureTerrainRequirementForLevel($terrainRequirementMap, $level);
+        $required = (float) ($rule['required_square_miles'] ?? 0);
+        $allowedTerrain = is_array($rule['allowed_terrain'] ?? null) ? $rule['allowed_terrain'] : [];
+
+        if ($required <= 0 || empty($allowedTerrain)) {
+            return [
+                'terrain_type' => null,
+                'terrain_allocated_square_miles' => 0.0,
+            ];
+        }
+
+        $preferred = strtolower(trim((string) ($preferredTerrainType ?? '')));
+        if ($preferred !== '') {
+            if (!in_array($preferred, $allowedTerrain, true)) {
+                return null;
+            }
+            $available = (float) ($terrainAvailability['available'][$preferred] ?? 0.0);
+            if ($available < $required) {
+                return null;
+            }
+            $terrainAvailability['available'][$preferred] = max(0.0, (float) ($terrainAvailability['available'][$preferred] ?? 0) - $required);
+            $terrainAvailability['used'][$preferred] = (float) ($terrainAvailability['used'][$preferred] ?? 0) + $required;
+            return [
+                'terrain_type' => $preferred,
+                'terrain_allocated_square_miles' => round($required, 2),
+            ];
+        }
+
+        $bestType = null;
+        $bestAvailable = -1.0;
+        foreach ($allowedTerrain as $terrainType) {
+            $terrainKey = strtolower(trim((string) $terrainType));
+            $available = (float) ($terrainAvailability['available'][$terrainKey] ?? 0.0);
+            if ($available < $required) {
+                continue;
+            }
+            if ($available > $bestAvailable) {
+                $bestAvailable = $available;
+                $bestType = $terrainKey;
+            }
+        }
+
+        if ($bestType === null) {
+            return null;
+        }
+
+        $terrainAvailability['available'][$bestType] = max(0.0, (float) ($terrainAvailability['available'][$bestType] ?? 0) - $required);
+        $terrainAvailability['used'][$bestType] = (float) ($terrainAvailability['used'][$bestType] ?? 0) + $required;
+
+        return [
+            'terrain_type' => $bestType,
+            'terrain_allocated_square_miles' => round($required, 2),
         ];
     }
 

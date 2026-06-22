@@ -2094,6 +2094,14 @@ async function loadSection(name) {
     if (!panel) return;
 
     const rows = Array.isArray(structures) ? structures : [];
+    const terrainTypes = [
+      { key: 'grassland', label: 'Grassland' },
+      { key: 'mountain', label: 'Mountain' },
+      { key: 'freshwater', label: 'Freshwater' },
+      { key: 'hills', label: 'Hills' },
+      { key: 'desert', label: 'Desert' },
+      { key: 'seafront', label: 'Sea Front' },
+    ];
 
     const resourceCatalog = [];
     const seenResourceKeys = new Set();
@@ -2127,7 +2135,14 @@ async function loadSection(name) {
       const production = (row.yearly_production_json && typeof row.yearly_production_json === 'object')
         ? row.yearly_production_json
         : {};
+      const maintenance = (row.yearly_maintenance_json && typeof row.yearly_maintenance_json === 'object')
+        ? row.yearly_maintenance_json
+        : {};
       Object.values(production).forEach((mapObj) => {
+        if (!mapObj || typeof mapObj !== 'object' || Array.isArray(mapObj)) return;
+        Object.keys(mapObj).forEach(k => addResourceOption(k, 'Existing / Other'));
+      });
+      Object.values(maintenance).forEach((mapObj) => {
         if (!mapObj || typeof mapObj !== 'object' || Array.isArray(mapObj)) return;
         Object.keys(mapObj).forEach(k => addResourceOption(k, 'Existing / Other'));
       });
@@ -2179,31 +2194,109 @@ async function loadSection(name) {
       `;
     };
 
-    const levelEditorMarkup = (structureId, level, mapObj) => {
-      const entries = Object.entries(mapObj || {});
-      const rowsMarkup = entries.length
-        ? entries.map(([k, v]) => productionRowMarkup(k, v)).join('')
-        : productionRowMarkup('', 0);
+    const maintenanceRowMarkup = (resourceKey, amount, filterTerm = '') => {
+      const safeAmount = Number.isFinite(Number(amount)) ? Number(amount) : 0;
       return `
-        <div class="struct-level-editor" data-structure-id="${structureId}" data-level="${level}" style="margin-top:8px;border:1px solid var(--border);border-radius:8px;padding:8px;">
-          <div class="row" style="justify-content:space-between;align-items:center;">
-            <strong style="font-size:13px;">Level ${level}</strong>
-            <button type="button" class="primary struct-prod-add" data-structure-id="${structureId}" data-level="${level}" style="padding:4px 10px;">+ Add Resource</button>
-          </div>
-          <div class="struct-prod-rows" id="struct-prod-rows-${structureId}-${level}">
-            ${rowsMarkup}
-          </div>
+        <div class="row struct-maint-row" style="align-items:center;gap:6px;margin-top:4px;">
+          <select class="struct-maint-key" style="flex:1;">${resourceSelectOptionsMarkup(resourceKey, filterTerm)}</select>
+          <input class="struct-maint-val" type="number" step="0.01" style="width:110px;" value="${safeAmount}">
+          <button type="button" class="primary struct-maint-remove" style="background:#8a1a1a;padding:4px 10px;">Remove</button>
         </div>
       `;
     };
 
-    const levelEditorsMarkup = (structureId, maxLevel, productionMap) => {
+    const terrainRequirementMarkup = (structureId, level, terrainRule) => {
+      const allowed = Array.isArray(terrainRule?.allowed_terrain)
+        ? terrainRule.allowed_terrain.map(v => String(v || '').toLowerCase())
+        : [];
+      const required = Number(terrainRule?.required_square_miles || 0);
+
+      return `
+        <details style="margin-top:8px;">
+          <summary>Terrain Requirement</summary>
+          <div style="margin-top:6px;display:grid;gap:8px;">
+            <label style="font-size:12px;">Required Square Miles
+              <input class="struct-terrain-required" data-structure-id="${structureId}" data-level="${level}" type="number" min="0" step="0.01" value="${Number.isFinite(required) ? required : 0}" style="margin-top:4px;max-width:200px;">
+            </label>
+            <div>
+              <div class="muted" style="font-size:12px;margin-bottom:4px;">Allowed Terrain Types</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px;">
+                ${terrainTypes.map(t => `
+                  <label style="font-size:12px;display:flex;gap:6px;align-items:center;">
+                    <input class="struct-terrain-allowed" data-structure-id="${structureId}" data-level="${level}" type="checkbox" value="${t.key}" ${allowed.includes(t.key) ? 'checked' : ''}>
+                    <span>${escapeHtml(t.label)}</span>
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        </details>
+      `;
+    };
+
+    const levelEditorMarkup = (structureId, level, productionObj, maintenanceObj, terrainRule) => {
+      const productionEntries = Object.entries(productionObj || {});
+      const productionRowsMarkup = productionEntries.length
+        ? productionEntries.map(([k, v]) => productionRowMarkup(k, v)).join('')
+        : productionRowMarkup('', 0);
+      const maintenanceEntries = Object.entries(maintenanceObj || {});
+      const maintenanceRowsMarkup = maintenanceEntries.length
+        ? maintenanceEntries.map(([k, v]) => maintenanceRowMarkup(k, v)).join('')
+        : maintenanceRowMarkup('', 0);
+      return `
+        <div class="struct-level-editor" data-structure-id="${structureId}" data-level="${level}" style="margin-top:8px;border:1px solid var(--border);border-radius:8px;padding:8px;">
+          <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <strong style="font-size:13px;">Level ${level}</strong>
+          </div>
+          <div class="row" style="justify-content:space-between;align-items:center;">
+            <span class="muted" style="font-size:12px;">Production Per Game Year</span>
+            <button type="button" class="primary struct-prod-add" data-structure-id="${structureId}" data-level="${level}" style="padding:4px 10px;">+ Add Production</button>
+          </div>
+          <div class="struct-prod-rows" id="struct-prod-rows-${structureId}-${level}">
+            ${productionRowsMarkup}
+          </div>
+          <div class="row" style="justify-content:space-between;align-items:center;margin-top:8px;">
+            <span class="muted" style="font-size:12px;">Maintenance Per Game Year</span>
+            <button type="button" class="primary struct-maint-add" data-structure-id="${structureId}" data-level="${level}" style="padding:4px 10px;">+ Add Maintenance</button>
+          </div>
+          <div class="struct-maint-rows" id="struct-maint-rows-${structureId}-${level}">
+            ${maintenanceRowsMarkup}
+          </div>
+          ${terrainRequirementMarkup(structureId, level, terrainRule)}
+        </div>
+      `;
+    };
+
+    const levelEditorsMarkup = (structureId, maxLevel, productionMap, maintenanceMap, terrainRequirementMap) => {
       const chunks = [];
       for (let level = 1; level <= maxLevel; level++) {
-        const levelMap = (productionMap && typeof productionMap === 'object') ? (productionMap[String(level)] || {}) : {};
-        chunks.push(levelEditorMarkup(structureId, level, levelMap));
+        const levelProductionMap = (productionMap && typeof productionMap === 'object') ? (productionMap[String(level)] || {}) : {};
+        const levelMaintenanceMap = (maintenanceMap && typeof maintenanceMap === 'object') ? (maintenanceMap[String(level)] || {}) : {};
+        const levelTerrainRule = (terrainRequirementMap && typeof terrainRequirementMap === 'object') ? (terrainRequirementMap[String(level)] || null) : null;
+        chunks.push(levelEditorMarkup(structureId, level, levelProductionMap, levelMaintenanceMap, levelTerrainRule));
       }
       return chunks.join('');
+    };
+
+    const terrainRuleSignature = (rule) => {
+      const required = Number(rule?.required_square_miles || 0);
+      const allowed = Array.isArray(rule?.allowed_terrain)
+        ? rule.allowed_terrain.map(v => String(v || '').toLowerCase().trim()).filter(Boolean).sort()
+        : [];
+      if (!Number.isFinite(required) || required <= 0 || allowed.length === 0) {
+        return 'none';
+      }
+      return `${required.toFixed(4)}|${allowed.join(',')}`;
+    };
+
+    const areTerrainRulesSameForAllLevels = (terrainRequirementMap, maxLevel) => {
+      const map = (terrainRequirementMap && typeof terrainRequirementMap === 'object') ? terrainRequirementMap : {};
+      const firstSig = terrainRuleSignature(map['1'] || null);
+      for (let level = 2; level <= maxLevel; level++) {
+        const sig = terrainRuleSignature(map[String(level)] || null);
+        if (sig !== firstSig) return false;
+      }
+      return true;
     };
 
     const structureCardsHtml = rows.map((row) => {
@@ -2211,6 +2304,13 @@ async function loadSection(name) {
       const production = (row.yearly_production_json && typeof row.yearly_production_json === 'object')
         ? row.yearly_production_json
         : {};
+      const maintenance = (row.yearly_maintenance_json && typeof row.yearly_maintenance_json === 'object')
+        ? row.yearly_maintenance_json
+        : {};
+      const terrainRequirement = (row.terrain_requirement_json && typeof row.terrain_requirement_json === 'object')
+        ? row.terrain_requirement_json
+        : {};
+      const sameTerrainAllLevels = areTerrainRulesSameForAllLevels(terrainRequirement, maxLevel);
 
       return `
         <div class="resource-def-card" style="margin-bottom:10px;">
@@ -2220,15 +2320,21 @@ async function loadSection(name) {
             <label>Level Capacity <input id="struct-max-${row.id}" type="number" min="1" max="100" value="${maxLevel}"></label>
             <label>List Order <input id="struct-order-${row.id}" type="number" min="0" value="${Number(row.list_order || 0)}"></label>
           </div>
+          <div class="row" style="margin-top:6px;">
+            <label style="font-size:12px;display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" class="struct-same-terrain-toggle" id="struct-same-terrain-${row.id}" data-structure-id="${row.id}" ${sameTerrainAllLevels ? 'checked' : ''}>
+              <span>Use the same terrain requirements at every level</span>
+            </label>
+          </div>
           <details style="margin-top:6px;">
-            <summary>Per Level Yearly Resource Production</summary>
+            <summary>Per Level Production / Maintenance Per Game Year</summary>
             <div class="row" style="margin-top:8px;gap:8px;align-items:center;">
               <input id="struct-resource-filter-${row.id}" class="struct-resource-filter" data-id="${row.id}" type="search" placeholder="Filter resources by name/type/group" style="flex:1;min-width:260px;">
               <button type="button" class="primary struct-levels-apply" data-id="${row.id}">Apply Level Capacity</button>
-              <span class="muted" style="font-size:12px;">Use this after changing Level Capacity so you can edit production for added levels.</span>
+              <span class="muted" style="font-size:12px;">Use this after changing Level Capacity so you can edit production and maintenance for added levels.</span>
             </div>
             <div id="struct-levels-${row.id}">
-              ${levelEditorsMarkup(row.id, maxLevel, production)}
+              ${levelEditorsMarkup(row.id, maxLevel, production, maintenance, terrainRequirement)}
             </div>
           </details>
           <div class="row" style="margin-top:8px;">
@@ -2258,14 +2364,37 @@ async function loadSection(name) {
     `;
 
     const collectProductionMapFromEditor = (structureId) => {
+      const collectMap = (rowClass, keyClass, valueClass) => {
+        const out = {};
+        panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"]`).forEach(levelEditor => {
+          const level = Math.max(1, Number(levelEditor.getAttribute('data-level') || 1));
+          const bucket = {};
+          levelEditor.querySelectorAll(`.${rowClass}`).forEach(resourceRow => {
+            const keyRaw = String(resourceRow.querySelector(`.${keyClass}`)?.value || '');
+            const key = canonicalResourceKey(keyRaw);
+            const amount = Number(resourceRow.querySelector(`.${valueClass}`)?.value || 0);
+            if (!key || !Number.isFinite(amount) || amount === 0) return;
+            bucket[key] = amount;
+          });
+          if (Object.keys(bucket).length > 0) {
+            out[String(level)] = bucket;
+          }
+        });
+        return out;
+      };
+
+      return collectMap('struct-prod-row', 'struct-prod-key', 'struct-prod-val');
+    };
+
+    const collectMaintenanceMapFromEditor = (structureId) => {
       const out = {};
       panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"]`).forEach(levelEditor => {
         const level = Math.max(1, Number(levelEditor.getAttribute('data-level') || 1));
         const bucket = {};
-        levelEditor.querySelectorAll('.struct-prod-row').forEach(prodRow => {
-          const keyRaw = String(prodRow.querySelector('.struct-prod-key')?.value || '');
+        levelEditor.querySelectorAll('.struct-maint-row').forEach(prodRow => {
+          const keyRaw = String(prodRow.querySelector('.struct-maint-key')?.value || '');
           const key = canonicalResourceKey(keyRaw);
-          const amount = Number(prodRow.querySelector('.struct-prod-val')?.value || 0);
+          const amount = Number(prodRow.querySelector('.struct-maint-val')?.value || 0);
           if (!key || !Number.isFinite(amount) || amount === 0) return;
           bucket[key] = amount;
         });
@@ -2276,11 +2405,87 @@ async function loadSection(name) {
       return out;
     };
 
+    const collectTerrainRequirementMapFromEditor = (structureId) => {
+      const out = {};
+      const sameTerrainEnabled = !!document.getElementById(`struct-same-terrain-${structureId}`)?.checked;
+      if (sameTerrainEnabled) {
+        const maxLevel = Math.max(1, Number(document.getElementById(`struct-max-${structureId}`)?.value || 1));
+        const firstEditor = panel.querySelector(`.struct-level-editor[data-structure-id="${structureId}"][data-level="1"]`);
+        const required = Number(firstEditor?.querySelector('.struct-terrain-required')?.value || 0);
+        const allowed = Array.from(firstEditor?.querySelectorAll('.struct-terrain-allowed:checked') || [])
+          .map(el => String(el.value || '').toLowerCase().trim())
+          .filter(Boolean);
+        if (!Number.isFinite(required) || required <= 0 || allowed.length === 0) {
+          return out;
+        }
+        const normalizedAllowed = Array.from(new Set(allowed));
+        for (let level = 1; level <= maxLevel; level++) {
+          out[String(level)] = {
+            required_square_miles: required,
+            allowed_terrain: normalizedAllowed,
+          };
+        }
+        return out;
+      }
+
+      panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"]`).forEach(levelEditor => {
+        const level = Math.max(1, Number(levelEditor.getAttribute('data-level') || 1));
+        const requiredEl = levelEditor.querySelector('.struct-terrain-required');
+        const required = Number(requiredEl?.value || 0);
+        const allowed = Array.from(levelEditor.querySelectorAll('.struct-terrain-allowed:checked'))
+          .map(el => String(el.value || '').toLowerCase().trim())
+          .filter(Boolean);
+        if (!Number.isFinite(required) || required <= 0 || allowed.length === 0) {
+          return;
+        }
+        out[String(level)] = {
+          required_square_miles: required,
+          allowed_terrain: Array.from(new Set(allowed)),
+        };
+      });
+      return out;
+    };
+
+    const syncSameTerrainInputsState = (structureId) => {
+      const enabled = !!document.getElementById(`struct-same-terrain-${structureId}`)?.checked;
+      panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"]`).forEach(levelEditor => {
+        const level = Math.max(1, Number(levelEditor.getAttribute('data-level') || 1));
+        const shouldDisable = enabled && level > 1;
+        levelEditor.querySelectorAll('.struct-terrain-required, .struct-terrain-allowed').forEach(input => {
+          input.disabled = shouldDisable;
+        });
+      });
+    };
+
+    const cloneFirstTerrainRequirementAcrossLevels = (structureId) => {
+      const firstEditor = panel.querySelector(`.struct-level-editor[data-structure-id="${structureId}"][data-level="1"]`);
+      if (!firstEditor) return;
+
+      const required = String(firstEditor.querySelector('.struct-terrain-required')?.value || '0');
+      const allowedSet = new Set(
+        Array.from(firstEditor.querySelectorAll('.struct-terrain-allowed:checked'))
+          .map(el => String(el.value || '').toLowerCase().trim())
+          .filter(Boolean)
+      );
+
+      panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"]`).forEach(levelEditor => {
+        const level = Math.max(1, Number(levelEditor.getAttribute('data-level') || 1));
+        if (level <= 1) return;
+        const requiredInput = levelEditor.querySelector('.struct-terrain-required');
+        if (requiredInput) requiredInput.value = required;
+        levelEditor.querySelectorAll('.struct-terrain-allowed').forEach(input => {
+          input.checked = allowedSet.has(String(input.value || '').toLowerCase().trim());
+        });
+      });
+    };
+
     const rebuildLevelEditorsForStructure = (structureId, maxLevel) => {
       const container = document.getElementById(`struct-levels-${structureId}`);
       if (!container) return;
-      const existing = collectProductionMapFromEditor(structureId);
-      container.innerHTML = levelEditorsMarkup(structureId, maxLevel, existing);
+      const existingProduction = collectProductionMapFromEditor(structureId);
+      const existingMaintenance = collectMaintenanceMapFromEditor(structureId);
+      const existingTerrainRequirements = collectTerrainRequirementMapFromEditor(structureId);
+      container.innerHTML = levelEditorsMarkup(structureId, maxLevel, existingProduction, existingMaintenance, existingTerrainRequirements);
       const filterInput = document.getElementById(`struct-resource-filter-${structureId}`);
       const filterValue = String(filterInput?.value || '');
       if (filterValue) {
@@ -2289,7 +2494,7 @@ async function loadSection(name) {
     };
 
     const applyStructureResourceFilter = (structureId, filterTerm) => {
-      panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"] .struct-prod-key`).forEach(select => {
+      panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"] .struct-prod-key, .struct-level-editor[data-structure-id="${structureId}"] .struct-maint-key`).forEach(select => {
         const selected = String(select.value || '');
         select.innerHTML = resourceSelectOptionsMarkup(selected, filterTerm);
         if (selected) {
@@ -2305,6 +2510,12 @@ async function loadSection(name) {
         return;
       }
 
+      const removeMaintenanceBtn = event.target.closest('.struct-maint-remove');
+      if (removeMaintenanceBtn) {
+        removeMaintenanceBtn.closest('.struct-maint-row')?.remove();
+        return;
+      }
+
       const addBtn = event.target.closest('.struct-prod-add');
       if (addBtn) {
         const structureId = Number(addBtn.getAttribute('data-structure-id') || 0);
@@ -2314,6 +2525,18 @@ async function loadSection(name) {
         if (!rowsContainer) return;
         const filterTerm = String(document.getElementById(`struct-resource-filter-${structureId}`)?.value || '');
         rowsContainer.insertAdjacentHTML('beforeend', productionRowMarkup('', 0, filterTerm));
+        return;
+      }
+
+      const addMaintenanceBtn = event.target.closest('.struct-maint-add');
+      if (addMaintenanceBtn) {
+        const structureId = Number(addMaintenanceBtn.getAttribute('data-structure-id') || 0);
+        const level = Number(addMaintenanceBtn.getAttribute('data-level') || 0);
+        if (!structureId || !level) return;
+        const rowsContainer = document.getElementById(`struct-maint-rows-${structureId}-${level}`);
+        if (!rowsContainer) return;
+        const filterTerm = String(document.getElementById(`struct-resource-filter-${structureId}`)?.value || '');
+        rowsContainer.insertAdjacentHTML('beforeend', maintenanceRowMarkup('', 0, filterTerm));
         return;
       }
 
@@ -2327,6 +2550,10 @@ async function loadSection(name) {
           maxLevelInput.value = String(maxLevel);
         }
         rebuildLevelEditorsForStructure(structureId, maxLevel);
+        if (document.getElementById(`struct-same-terrain-${structureId}`)?.checked) {
+          cloneFirstTerrainRequirementAcrossLevels(structureId);
+        }
+        syncSameTerrainInputsState(structureId);
       }
     };
 
@@ -2336,6 +2563,38 @@ async function loadSection(name) {
         if (!structureId) return;
         applyStructureResourceFilter(structureId, String(input.value || ''));
       });
+    });
+
+    panel.querySelectorAll('.struct-same-terrain-toggle').forEach(toggle => {
+      toggle.addEventListener('change', () => {
+        const structureId = Number(toggle.getAttribute('data-structure-id') || 0);
+        if (!structureId) return;
+        if (toggle.checked) {
+          cloneFirstTerrainRequirementAcrossLevels(structureId);
+        }
+        syncSameTerrainInputsState(structureId);
+      });
+      const structureId = Number(toggle.getAttribute('data-structure-id') || 0);
+      if (structureId) {
+        if (toggle.checked) {
+          cloneFirstTerrainRequirementAcrossLevels(structureId);
+        }
+        syncSameTerrainInputsState(structureId);
+      }
+    });
+
+    panel.addEventListener('input', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (!target.classList.contains('struct-terrain-required') && !target.classList.contains('struct-terrain-allowed')) return;
+      const levelEditor = target.closest('.struct-level-editor');
+      if (!levelEditor) return;
+      const structureId = Number(levelEditor.getAttribute('data-structure-id') || 0);
+      const level = Math.max(1, Number(levelEditor.getAttribute('data-level') || 1));
+      if (!structureId) return;
+      const sameEnabled = !!document.getElementById(`struct-same-terrain-${structureId}`)?.checked;
+      if (!sameEnabled || level !== 1) return;
+      cloneFirstTerrainRequirementAcrossLevels(structureId);
     });
 
     const createStructureBtn = document.getElementById('createStructureBtn');
@@ -2366,6 +2625,8 @@ async function loadSection(name) {
             max_level: maxLevel,
             list_order: listOrder,
             yearly_production_json: {},
+            yearly_maintenance_json: {},
+            terrain_requirement_json: {},
           }),
         });
 
@@ -2391,6 +2652,8 @@ async function loadSection(name) {
         const maxLevel = Math.max(1, Number(document.getElementById(`struct-max-${id}`)?.value || 1));
         const listOrder = Math.max(0, Number(document.getElementById(`struct-order-${id}`)?.value || 0));
         const yearlyProduction = collectProductionMapFromEditor(id);
+        const yearlyMaintenance = collectMaintenanceMapFromEditor(id);
+        const terrainRequirements = collectTerrainRequirementMapFromEditor(id);
 
         if (!name) {
           if (msgEl) msgEl.textContent = 'Name is required.';
@@ -2406,6 +2669,8 @@ async function loadSection(name) {
             max_level: maxLevel,
             list_order: listOrder,
             yearly_production_json: yearlyProduction,
+            yearly_maintenance_json: yearlyMaintenance,
+            terrain_requirement_json: terrainRequirements,
           }),
         });
 
@@ -2635,7 +2900,12 @@ async function loadPlayer() {
   document.querySelectorAll('.playerBuildingDetail').forEach(button => {
     const showDetails = () => {
       const payload = safeJsonParse(button.dataset.json, {});
-      document.getElementById('playerBuildingDetailPanel').innerHTML = `<strong>${payload.display_name || 'Building'}</strong><br>Level: ${payload.level || 1}<br>Status: ${payload.status || 'built'}<br>Code: ${payload.code || '-'}<br>ID: ${payload.id || '-'}`;
+      const terrainType = String(payload?.terrain_type || '').toLowerCase().trim();
+      const terrainAllocated = Number(payload?.terrain_allocated_square_miles || 0);
+      const terrainLine = (terrainType && Number.isFinite(terrainAllocated) && terrainAllocated > 0)
+        ? `<br>Terrain: ${escapeHtml(labelTerrainKey(terrainType))} (${fmtNum(terrainAllocated)} sq mi)`
+        : '';
+      document.getElementById('playerBuildingDetailPanel').innerHTML = `<strong>${payload.display_name || 'Building'}</strong><br>Level: ${payload.level || 1}<br>Status: ${payload.status || 'built'}<br>Code: ${payload.code || '-'}${terrainLine}<br>ID: ${payload.id || '-'}`;
     };
     button.addEventListener('mouseenter', showDetails);
     button.addEventListener('click', showDetails);
@@ -7324,7 +7594,7 @@ async function loadShop() {
             <div id="newShopYearlyRows"></div>
             <div class="row" style="margin:4px 0 8px;"><button class="primary" type="button" id="newShopYearlyAdd">+ Add Yearly Row</button></div>
 
-            <label style="font-size:12px;">Yearly Maintenance</label>
+            <label style="font-size:12px;">Maintenance Per Game Year</label>
             <div id="newShopMaintenanceRows"></div>
             <div class="row" style="margin:4px 0 8px;"><button class="primary" type="button" id="newShopMaintenanceAdd">+ Add Maintenance Row</button></div>
 
@@ -7714,21 +7984,56 @@ async function loadShop() {
           </div>`;
       } else {
         const isUpgradeAvailable = canBuyUpgrade(i);
+        const terrainReq = (i.terrain_requirement_for_level && typeof i.terrain_requirement_for_level === 'object')
+          ? i.terrain_requirement_for_level
+          : null;
+        const terrainAllowed = Array.isArray(terrainReq?.allowed_terrain)
+          ? terrainReq.allowed_terrain.map(v => String(v || '').toLowerCase().trim()).filter(Boolean)
+          : [];
+        const terrainRequired = Number(terrainReq?.required_square_miles || 0);
+        const hasTerrainRequirement = Number.isFinite(terrainRequired) && terrainRequired > 0 && terrainAllowed.length > 0;
+        const needsTerrainSelection = hasTerrainRequirement && terrainAllowed.length > 1;
+        const terrainUi = hasTerrainRequirement
+          ? (needsTerrainSelection
+              ? `
+                <label style="font-size:12px;margin-top:6px;display:block;">Choose Terrain Type</label>
+                <select id="buy-terrain-${i.id}" style="margin-top:2px;">
+                  <option value="">Select terrain...</option>
+                  ${terrainAllowed.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(labelTerrainKey(t))}</option>`).join('')}
+                </select>
+                <div class="muted" style="font-size:12px;">Uses ${fmtNum(terrainRequired)} sq mi of the selected terrain.</div>
+              `
+              : `<div class="muted" style="font-size:12px;margin-top:6px;">Terrain: ${escapeHtml(labelTerrainKey(terrainAllowed[0]))} (${fmtNum(terrainRequired)} sq mi)</div>`)
+          : '';
         return `
           <div class="card">
             <div><strong>${i.display_name}</strong></div>
             ${String(i.category_code || '') === 'research' ? `<div class="muted" style="font-size:11px;">Code: ${escapeHtml(String(i.code || ''))}</div>` : ''}
             <div class="muted" style="font-size:12px;">${i.description_text || ''}</div>
             <div class="muted" style="font-size:13px;">Cost: ${formatCost(costObj)}</div>
-            ${Object.keys(maintenanceObj).length ? `<div class="muted" style="font-size:12px;">Yearly maintenance: ${formatCost(maintenanceObj)}</div>` : ''}
+            ${Object.keys(maintenanceObj).length ? `<div class="muted" style="font-size:12px;">Maintenance Per Game Year: ${formatCost(maintenanceObj)}</div>` : ''}
+            ${terrainUi}
             ${(!isUpgradeAvailable && i.category_code === 'build') ? '<div class="muted" style="font-size:12px;margin-top:6px;">Need a lower-level structure to upgrade.</div>' : ''}
-            <button class="primary buyItem" data-id="${i.id}" ${(!isUpgradeAvailable && i.category_code === 'build') ? 'disabled style="margin-top:6px;opacity:0.45;cursor:not-allowed;"' : 'style="margin-top:6px;"'}>Buy</button>
+            <button class="primary buyItem" data-id="${i.id}" data-needs-terrain-selection="${needsTerrainSelection ? '1' : '0'}" ${(!isUpgradeAvailable && i.category_code === 'build') ? 'disabled style="margin-top:6px;opacity:0.45;cursor:not-allowed;"' : 'style="margin-top:6px;"'}>Buy</button>
           </div>`;
       }
     }).join('') || '<div class="muted">No items</div>';
 
     document.querySelectorAll('.buyItem').forEach(btn => btn.onclick = async () => {
-      const r = await api('/api/shop/buy', { method: 'POST', body: JSON.stringify({ item_id: Number(btn.dataset.id), quantity: 1 }) });
+      const itemId = Number(btn.dataset.id);
+      const needsTerrainSelection = String(btn.dataset.needsTerrainSelection || '0') === '1';
+      const terrainType = String(document.getElementById(`buy-terrain-${itemId}`)?.value || '').toLowerCase().trim();
+      if (needsTerrainSelection && !terrainType) {
+        document.getElementById('shopPurchaseMsg').textContent = 'Select a terrain type before purchasing this structure.';
+        return;
+      }
+
+      const payload = { item_id: itemId, quantity: 1 };
+      if (terrainType) {
+        payload.terrain_type = terrainType;
+      }
+
+      const r = await api('/api/shop/buy', { method: 'POST', body: JSON.stringify(payload) });
       if (r.ok) {
         document.getElementById('shopPurchaseMsg').textContent = 'Purchase successful.';
         loadResources();
@@ -8912,6 +9217,7 @@ async function loadAllNations() {
     // Fetch resource definitions for dynamic base/advanced resource fields
     const resourceDefsRes = await api('/api/resources');
     const resourceDefs = resourceDefsRes && resourceDefsRes.ok ? await resourceDefsRes.json() : { base: {}, advanced: {} };
+    setDynamicResourceLabels(resourceDefs);
     const extra = safeJsonParse(d.resources?.extra_json, {}) || {};
     const baseRes = {
       ...(extra.base || {}),
@@ -8927,6 +9233,24 @@ async function loadAllNations() {
       });
     });
     const advancedRes = d.resources?.advanced || extra.advanced || extra.refined || {};
+    const currencyRes = (extra.currencies && typeof extra.currencies === 'object') ? extra.currencies : {};
+
+    const makeReadOnlyResourceRows = (values, type) => {
+      return Object.entries(values || {})
+        .map(([name, raw]) => {
+          const amount = toFiniteNumber(raw, 0);
+          if (amount === 0) return '';
+          const key = `${type}:${name}`;
+          return `<div class="res-kv"><span>${escapeHtml(labelKey(key))}</span><span>${fmtNum(amount)}</span></div>`;
+        })
+        .filter(Boolean)
+        .join('');
+    };
+
+    const readOnlyBaseRows = makeReadOnlyResourceRows(baseRes, 'base');
+    const readOnlyAdvancedRows = makeReadOnlyResourceRows(advancedRes, 'advanced');
+    const readOnlyCurrencyRows = makeReadOnlyResourceRows(currencyRes, 'currencies');
+    const hasReadOnlyResources = !!(readOnlyBaseRows || readOnlyAdvancedRows || readOnlyCurrencyRows);
 
     // Canonical dynamic income rows: [{type:'base'|'advanced', name:'resource_name', amount:number}]
     const initialIncomeRows = [];
@@ -8982,7 +9306,7 @@ async function loadAllNations() {
     function makeResourceInputs(type, values) {
       const groups = resourceDefs[type] || {};
       return Object.entries(groups).map(([group, defs]) => `
-        <details style="margin:6px 0;" open>
+        <details style="margin:6px 0;">
           <summary style="font-size:13px;">${group}</summary>
           <div class="nation-editor-grid" style="margin-top:6px;">
             ${defs.map(def => `<label style="font-size:12px;">${escapeHtml(def.display_name)}<input id="${type}-res-${def.name}" type="number" value="${values[def.name] || 0}" style="margin-top:4px;"></label>`).join('')}
@@ -9005,6 +9329,122 @@ async function loadAllNations() {
       return `${buildGroup('base')}${buildGroup('advanced')}`;
     }
 
+    const computeStructureYearlyEffectsSummary = (buildings = []) => {
+      const productionTotals = {};
+      const maintenanceTotals = {};
+      const breakdown = [];
+
+      (Array.isArray(buildings) ? buildings : []).forEach(building => {
+        const level = Math.max(1, Number(building?.level || 1));
+        let productionRaw = building?.yearly_production_json;
+        let maintenanceRaw = building?.yearly_maintenance_json;
+        if (typeof productionRaw === 'string') {
+          try {
+            productionRaw = JSON.parse(productionRaw);
+          } catch {
+            productionRaw = null;
+          }
+        }
+        if (typeof maintenanceRaw === 'string') {
+          try {
+            maintenanceRaw = JSON.parse(maintenanceRaw);
+          } catch {
+            maintenanceRaw = null;
+          }
+        }
+
+        const resolveLevelMap = (rawMap) => {
+          if (!rawMap || typeof rawMap !== 'object') return {};
+          let levelMap = rawMap[String(level)];
+          if (!levelMap || typeof levelMap !== 'object' || Array.isArray(levelMap)) {
+            levelMap = {};
+            Object.entries(rawMap).forEach(([k, v]) => {
+              if (typeof v === 'number') levelMap[k] = v;
+            });
+          }
+          return levelMap;
+        };
+
+        const productionMap = resolveLevelMap(productionRaw);
+        const maintenanceMap = resolveLevelMap(maintenanceRaw);
+
+        const productionLineItems = [];
+        Object.entries(productionMap).forEach(([key, rawValue]) => {
+          const amount = Number(rawValue || 0);
+          if (!Number.isFinite(amount) || amount === 0) return;
+          productionTotals[key] = (productionTotals[key] || 0) + amount;
+          productionLineItems.push(`${escapeHtml(labelKey(key))}: <strong>+${fmtNum(amount)}</strong>`);
+        });
+
+        const maintenanceLineItems = [];
+        Object.entries(maintenanceMap).forEach(([key, rawValue]) => {
+          const amount = Number(rawValue || 0);
+          if (!Number.isFinite(amount) || amount === 0) return;
+          maintenanceTotals[key] = (maintenanceTotals[key] || 0) + amount;
+          maintenanceLineItems.push(`${escapeHtml(labelKey(key))}: <strong>-${fmtNum(amount)}</strong>`);
+        });
+
+        const lineItems = [];
+        if (productionLineItems.length) {
+          lineItems.push(`Production: ${productionLineItems.join(' &nbsp;+&nbsp; ')}`);
+        }
+        if (maintenanceLineItems.length) {
+          lineItems.push(`Maintenance: ${maintenanceLineItems.join(' &nbsp;+&nbsp; ')}`);
+        }
+
+        if (lineItems.length > 0) {
+          breakdown.push(`<div class="res-kv"><span>${escapeHtml(building?.display_name || 'Structure')} L${level}</span><span>${lineItems.join(' &nbsp;|&nbsp; ')}</span></div>`);
+        }
+      });
+
+      const toRows = (totals, sign = '') => Object.entries(totals)
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+        .map(([key, amount]) => `<div class="res-kv"><span>${escapeHtml(labelKey(key))}</span><span>${sign}${fmtNum(amount)}</span></div>`)
+        .join('');
+
+      const netTotals = {};
+      Object.entries(productionTotals).forEach(([key, amount]) => {
+        netTotals[key] = (netTotals[key] || 0) + Number(amount || 0);
+      });
+      Object.entries(maintenanceTotals).forEach(([key, amount]) => {
+        netTotals[key] = (netTotals[key] || 0) - Number(amount || 0);
+      });
+      const netRows = Object.entries(netTotals)
+        .filter(([, amount]) => Number(amount || 0) !== 0)
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+        .map(([key, amount]) => `<div class="res-kv"><span>${escapeHtml(labelKey(key))}</span><span>${Number(amount) > 0 ? '+' : ''}${fmtNum(amount)}</span></div>`)
+        .join('');
+
+      return {
+        productionRows: toRows(productionTotals, '+'),
+        maintenanceRows: toRows(maintenanceTotals, '-'),
+        netRows,
+        breakdownRows: breakdown.join(''),
+      };
+    };
+
+    const terrainKeys = ['grassland', 'mountain', 'freshwater', 'hills', 'desert', 'seafront'];
+    const terrainTotals = Object.fromEntries(terrainKeys.map(k => [k, Math.max(0, Number(sqMiles?.[k] || 0))]));
+    const terrainUsed = Object.fromEntries(terrainKeys.map(k => [k, 0]));
+    const terrainUsageByBuildingRows = [];
+    (Array.isArray(d.buildings) ? d.buildings : []).forEach(building => {
+      const terrainType = String(building?.terrain_type || '').toLowerCase().trim();
+      const allocated = Math.max(0, Number(building?.terrain_allocated_square_miles || 0));
+      if (!terrainType || allocated <= 0 || !Object.prototype.hasOwnProperty.call(terrainUsed, terrainType)) {
+        return;
+      }
+      terrainUsed[terrainType] += allocated;
+      terrainUsageByBuildingRows.push(`<div class="res-kv"><span>${escapeHtml(building?.display_name || 'Structure')} L${Number(building?.level || 1)}${building?.status ? ` (${escapeHtml(String(building.status))})` : ''}</span><span>${escapeHtml(labelTerrainKey(terrainType))}: ${fmtNum(allocated)} sq mi</span></div>`);
+    });
+    const terrainAvailabilityRows = terrainKeys.map(key => {
+      const total = Number(terrainTotals[key] || 0);
+      const used = Number(terrainUsed[key] || 0);
+      const available = Math.max(0, total - used);
+      return `<div class="res-kv"><span>${escapeHtml(labelTerrainKey(key))}</span><span>Used ${fmtNum(used)} / ${fmtNum(total)} | Available ${fmtNum(available)} sq mi</span></div>`;
+    }).join('');
+
+    const structureYearlyEffectsSummary = computeStructureYearlyEffectsSummary(d.buildings || []);
+
     document.getElementById('adminNationEditor').innerHTML = `
       <div class="nation-editor-block" style="margin-top:0;">
         <div class="nation-editor-grid">
@@ -9014,7 +9454,16 @@ async function loadAllNations() {
         </div>
         <label style="display:block;margin-top:8px;">About<textarea id="nAbout" style="margin-top:4px;">${d.nation.about_text || ''}</textarea></label>
       </div>
-      <details style="margin-top:8px;" open>
+      <details style="margin-top:8px;">
+        <summary>Current Resources (Read Only)</summary>
+        <div class="nation-editor-block">
+          ${hasReadOnlyResources ? '' : '<div class="muted">No owned resources with value above zero.</div>'}
+          ${readOnlyBaseRows ? `<details style="margin-top:6px;"><summary>Base Resources</summary><div class="res-panel" style="margin-top:6px;">${readOnlyBaseRows}</div></details>` : ''}
+          ${readOnlyAdvancedRows ? `<details style="margin-top:6px;"><summary>Advanced Resources</summary><div class="res-panel" style="margin-top:6px;">${readOnlyAdvancedRows}</div></details>` : ''}
+          ${readOnlyCurrencyRows ? `<details style="margin-top:6px;"><summary>Currencies</summary><div class="res-panel" style="margin-top:6px;">${readOnlyCurrencyRows}</div></details>` : ''}
+        </div>
+      </details>
+      <details style="margin-top:8px;">
         <summary>Base Resources</summary>
         <div class="nation-editor-block">${makeResourceInputs('base', baseRes)}</div>
       </details>
@@ -9053,11 +9502,36 @@ async function loadAllNations() {
           </div>
         </div>
       </details>
+      <details style="margin-top:8px;">
+        <summary>Terrain Usage By Structures (Read Only)</summary>
+        <div class="nation-editor-block">
+          <div class="muted" style="margin-bottom:6px;">Used vs available terrain for the selected nation. Used terrain is based on tracked structure allocations.</div>
+          ${terrainAvailabilityRows}
+          ${terrainUsageByBuildingRows.length ? `<details style="margin-top:8px;"><summary>Per Structure Terrain Usage</summary><div class="res-panel" style="margin-top:6px;">${terrainUsageByBuildingRows.join('')}</div></details>` : '<div class="muted" style="margin-top:8px;">No structures are currently consuming tracked terrain.</div>'}
+        </div>
+      </details>
+      <details style="margin-top:8px;">
+        <summary>Structure Production / Maintenance Per Game Year</summary>
+        <div class="nation-editor-block">
+          ${structureYearlyEffectsSummary.productionRows
+            ? `<div class="muted" style="margin-bottom:6px;">Total production per year from currently built structures:</div>${structureYearlyEffectsSummary.productionRows}`
+            : '<div class="muted">No built structure production per game year is configured.</div>'}
+          ${structureYearlyEffectsSummary.maintenanceRows
+            ? `<div class="muted" style="margin:10px 0 6px 0;">Total maintenance per year from currently built structures:</div>${structureYearlyEffectsSummary.maintenanceRows}`
+            : ''}
+          ${structureYearlyEffectsSummary.netRows
+            ? `<div class="muted" style="margin:10px 0 6px 0;">Net yearly effect from currently built structures:</div>${structureYearlyEffectsSummary.netRows}`
+            : ''}
+          ${structureYearlyEffectsSummary.breakdownRows
+            ? `<details style="margin-top:8px;"><summary>Per Structure Breakdown</summary><div class="res-panel" style="margin-top:6px;">${structureYearlyEffectsSummary.breakdownRows}</div></details>`
+            : ''}
+        </div>
+      </details>
       <div class="row"><button class="primary" id="saveNation">Save Nation</button><span class="muted" id="saveNationMsg"></span></div>
 
       <hr style="margin:12px 0;">
       <h3 style="margin:0 0 8px;">Owned Units / Buildings</h3>
-      <details open style="margin-bottom:8px;">
+      <details style="margin-bottom:8px;">
         <summary>Units (${(d.units || []).length})</summary>
         <div class="list" style="max-height:220px;">${(d.units || []).map(u => `
           <div class="admin-asset-row">
@@ -9069,11 +9543,11 @@ async function loadAllNations() {
           </div>
         `).join('') || '<div class="muted">No units</div>'}</div>
       </details>
-      <details open style="margin-bottom:8px;">
+      <details style="margin-bottom:8px;">
         <summary>Buildings (${(d.buildings || []).length})</summary>
         <div class="list" style="max-height:220px;">${(d.buildings || []).map(b => `
           <div class="admin-asset-row">
-            <div>${escapeHtml(b.display_name || 'Building')} L${Number(b.level || 1)} <span class="muted">(${escapeHtml(b.status || 'built')})</span></div>
+            <div>${escapeHtml(b.display_name || 'Building')} L${Number(b.level || 1)} <span class="muted">(${escapeHtml(b.status || 'built')})</span>${(Number(b.terrain_allocated_square_miles || 0) > 0 && b.terrain_type) ? ` <span class="muted">| ${escapeHtml(labelTerrainKey(String(b.terrain_type)))} ${fmtNum(Number(b.terrain_allocated_square_miles || 0))} sq mi</span>` : ''}</div>
             <button class="primary admin-asset-remove removeBuildingBtn" data-building-id="${b.id}">Remove</button>
           </div>
         `).join('') || '<div class="muted">No buildings</div>'}</div>
@@ -9097,6 +9571,12 @@ async function loadAllNations() {
         <label style="font-size:13px;">Search Buildings</label>
         <input id="buildingCatalogSearch" placeholder="Type to filter buildings...">
         <select id="buildingCatId" class="admin-picker-list" size="8" style="margin-top:6px;"></select>
+        <div id="buildingTerrainFeedback" class="res-panel" style="margin-top:6px;"></div>
+        <div style="margin-top:6px;">
+          <label style="font-size:12px;display:block;">Terrain Type (used for this placement)</label>
+          <select id="buildingTerrainType" style="margin-top:4px;max-width:320px;"><option value="">Auto / Best Available</option></select>
+          <div class="muted" style="font-size:12px;margin-top:4px;">When multiple terrain types are allowed, you must choose one here before adding.</div>
+        </div>
         <div class="row" style="margin-top:6px;">
           <div style="min-width:100px;"><label style="font-size:12px;">Level</label><input id="buildingLevel" type="number" value="1" min="1"></div>
           <div style="min-width:180px;"><label style="font-size:12px;">Status</label><select id="buildingStatus"><option value="built">Built</option><option value="constructing">Constructing</option><option value="upgrading">Upgrading</option></select></div>
@@ -9208,12 +9688,147 @@ async function loadAllNations() {
         return !needle || hay.includes(needle);
       });
       buildingSelect.innerHTML = filtered.map(b => `<option value="${b.id}">${escapeHtml(b.display_name || 'Building')} [${escapeHtml(b.code || '')}]</option>`).join('');
+      renderBuildingTerrainFeedback();
+    };
+
+    const getTerrainRequirementForLevel = (building, level) => {
+      let map = building?.terrain_requirement_json;
+      if (typeof map === 'string') {
+        try {
+          map = JSON.parse(map);
+        } catch {
+          map = null;
+        }
+      }
+      if (!map || typeof map !== 'object') return null;
+      const rule = map[String(Math.max(1, Number(level || 1)))];
+      if (!rule || typeof rule !== 'object') return null;
+      const required = Number(rule.required_square_miles || 0);
+      const allowed = Array.isArray(rule.allowed_terrain)
+        ? rule.allowed_terrain.map(v => String(v || '').toLowerCase().trim()).filter(Boolean)
+        : [];
+      if (!Number.isFinite(required) || required <= 0 || allowed.length === 0) return null;
+      return { required_square_miles: required, allowed_terrain: Array.from(new Set(allowed)) };
+    };
+
+    const renderBuildingTerrainFeedback = () => {
+      const feedbackEl = document.getElementById('buildingTerrainFeedback');
+      if (!feedbackEl) return;
+
+      const terrainTypeEl = document.getElementById('buildingTerrainType');
+      const setTerrainTypeOptions = (options, requireExplicitSelection = false) => {
+        if (!terrainTypeEl) return;
+        const normalized = Array.isArray(options)
+          ? Array.from(new Set(options.map(v => String(v || '').toLowerCase().trim()).filter(Boolean)))
+          : [];
+        if (!normalized.length) {
+          terrainTypeEl.innerHTML = '<option value="">Auto / Best Available</option>';
+          terrainTypeEl.value = '';
+          terrainTypeEl.disabled = true;
+          return;
+        }
+
+        const previous = String(terrainTypeEl.value || '').toLowerCase().trim();
+        const firstOption = requireExplicitSelection ? '<option value="">Select terrain...</option>' : '<option value="">Auto / Best Available</option>';
+        terrainTypeEl.innerHTML = `${firstOption}${normalized.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(labelTerrainKey(t))}</option>`).join('')}`;
+        terrainTypeEl.disabled = false;
+
+        if (normalized.includes(previous)) {
+          terrainTypeEl.value = previous;
+          return;
+        }
+        if (requireExplicitSelection) {
+          terrainTypeEl.value = '';
+          return;
+        }
+        if (normalized.length === 1) {
+          terrainTypeEl.value = normalized[0];
+          return;
+        }
+        terrainTypeEl.value = '';
+      };
+
+      const selectedId = Number(document.getElementById('buildingCatId')?.value || 0);
+      const selectedBuilding = buildingCatalog.find(b => Number(b.id || 0) === selectedId);
+      if (!selectedBuilding) {
+        setTerrainTypeOptions([], false);
+        feedbackEl.innerHTML = '<div class="muted">Select a building to see terrain requirements.</div>';
+        return;
+      }
+
+      const level = Math.max(1, Number(document.getElementById('buildingLevel')?.value || 1));
+      const qty = Math.max(1, Number(document.getElementById('buildingQty')?.value || 1));
+      const requirement = getTerrainRequirementForLevel(selectedBuilding, level);
+      if (!requirement) {
+        setTerrainTypeOptions([], false);
+        feedbackEl.innerHTML = '<div class="muted">No terrain requirement configured for this building level.</div>';
+        return;
+      }
+
+      const requireExplicitSelection = requirement.allowed_terrain.length > 1;
+      setTerrainTypeOptions(requirement.allowed_terrain, requireExplicitSelection);
+      const selectedTerrainType = String(document.getElementById('buildingTerrainType')?.value || '').toLowerCase().trim();
+
+      const availability = {};
+      terrainKeys.forEach(key => {
+        availability[key] = Math.max(0, Number(terrainTotals[key] || 0) - Number(terrainUsed[key] || 0));
+      });
+
+      const requiredEach = requirement.required_square_miles;
+      let canPlaceAll = true;
+      const allocations = [];
+      for (let i = 0; i < qty; i++) {
+        let chosen = null;
+        let bestAvailable = -1;
+        const preferred = selectedTerrainType && requirement.allowed_terrain.includes(selectedTerrainType)
+          ? [selectedTerrainType]
+          : requirement.allowed_terrain;
+        preferred.forEach(terrain => {
+          const available = Number(availability[terrain] || 0);
+          if (available >= requiredEach && available > bestAvailable) {
+            bestAvailable = available;
+            chosen = terrain;
+          }
+        });
+        if (!chosen) {
+          canPlaceAll = false;
+          break;
+        }
+        availability[chosen] = Math.max(0, Number(availability[chosen] || 0) - requiredEach);
+        allocations.push(chosen);
+      }
+
+      const allowedRows = requirement.allowed_terrain
+        .map(t => `<div class="res-kv"><span>${escapeHtml(labelTerrainKey(t))}</span><span>Available ${fmtNum(Math.max(0, Number(terrainTotals[t] || 0) - Number(terrainUsed[t] || 0)))} sq mi</span></div>`)
+        .join('');
+
+      const summary = canPlaceAll
+        ? `<div class="success" style="font-size:12px;">Enough terrain is currently available for ${fmtNum(qty)} placement(s) at level ${fmtNum(level)}${selectedTerrainType ? ` using ${escapeHtml(labelTerrainKey(selectedTerrainType))}` : ''}.</div>`
+        : `<div class="danger" style="font-size:12px;">Not enough ${selectedTerrainType ? `${escapeHtml(labelTerrainKey(selectedTerrainType))} ` : 'eligible '}terrain is currently available for ${fmtNum(qty)} placement(s) at level ${fmtNum(level)}.</div>`;
+
+      const selectedNote = requireExplicitSelection && !selectedTerrainType
+        ? '<div class="danger" style="font-size:12px;margin-top:6px;">Select a terrain type before adding this structure.</div>'
+        : '';
+      const currentSelectionLine = `<div class="muted" style="font-size:12px;margin-top:6px;">Current terrain selection: ${selectedTerrainType ? escapeHtml(labelTerrainKey(selectedTerrainType)) : 'Auto / Best Available'}</div>`;
+
+      feedbackEl.innerHTML = `
+        <div class="muted" style="font-size:12px;">Terrain requirement for ${escapeHtml(selectedBuilding.display_name || 'Selected building')} L${fmtNum(level)}: ${fmtNum(requiredEach)} sq mi each.</div>
+        <div class="muted" style="font-size:12px;margin-top:4px;">Allowed terrain: ${requirement.allowed_terrain.map(t => escapeHtml(labelTerrainKey(t))).join(', ')}</div>
+        ${currentSelectionLine}
+        <div style="margin-top:6px;">${allowedRows}</div>
+        <div style="margin-top:6px;">${summary}</div>
+        ${selectedNote}
+      `;
     };
 
     renderUnitOptions();
     renderBuildingOptions();
     document.getElementById('unitCatalogSearch').addEventListener('input', (e) => renderUnitOptions(e.target.value));
     document.getElementById('buildingCatalogSearch').addEventListener('input', (e) => renderBuildingOptions(e.target.value));
+    document.getElementById('buildingCatId')?.addEventListener('change', renderBuildingTerrainFeedback);
+    document.getElementById('buildingLevel')?.addEventListener('input', renderBuildingTerrainFeedback);
+    document.getElementById('buildingQty')?.addEventListener('input', renderBuildingTerrainFeedback);
+    document.getElementById('buildingTerrainType')?.addEventListener('change', renderBuildingTerrainFeedback);
 
     document.getElementById('saveNation').onclick = async () => {
       // Collect dynamic base/advanced resources
@@ -9276,12 +9891,27 @@ async function loadAllNations() {
       const level = Number(document.getElementById('buildingLevel').value || 1);
       const status = document.getElementById('buildingStatus').value;
       const qty = Number(document.getElementById('buildingQty').value || 1);
+      const terrainType = String(document.getElementById('buildingTerrainType')?.value || '').toLowerCase().trim();
       if (!buildingCatalogId) { document.getElementById('addBuildingMsg').textContent = 'Select a building from the list.'; return; }
+
+      const selectedBuilding = buildingCatalog.find(b => Number(b.id || 0) === buildingCatalogId);
+      const requirement = selectedBuilding ? getTerrainRequirementForLevel(selectedBuilding, level) : null;
+      const requiresSelection = !!(requirement && Array.isArray(requirement.allowed_terrain) && requirement.allowed_terrain.length > 1);
+      if (requiresSelection && !terrainType) {
+        document.getElementById('addBuildingMsg').textContent = 'Select a terrain type before adding this structure.';
+        return;
+      }
+
+      const payload = { building_catalog_id: buildingCatalogId, level, status, qty };
+      if (terrainType) {
+        payload.terrain_type = terrainType;
+      }
+
       const r = await api('/api/admin/nations/' + id + '/buildings', {
         method: 'POST',
-        body: JSON.stringify({ building_catalog_id: buildingCatalogId, level, status, qty }),
+        body: JSON.stringify(payload),
       });
-      document.getElementById('addBuildingMsg').textContent = r.ok ? 'Added!' : 'Failed';
+      document.getElementById('addBuildingMsg').textContent = r.ok ? 'Added!' : await readErrorMessage(r, 'Failed');
       if (r.ok) {
         openEditor(id);
       }
@@ -10003,7 +10633,7 @@ async function loadTimeTracker() {
         <input id="ttCurrentYear" type="number" min="1" step="1" value="${d.current_game_year}">
       </div>
       <div class="row">
-        <label><input id="ttApplyYearEffects" type="checkbox" ${settings?.apply_year_change_effects ? 'checked' : ''}> Apply income/maintenance when changing year</label>
+        <label><input id="ttApplyYearEffects" type="checkbox" ${settings?.apply_year_change_effects !== false ? 'checked' : ''}> Apply income/maintenance when changing year</label>
       </div>
       <div class="row">
         <button class="primary" id="ttSave">Save Time Settings</button>
@@ -10016,6 +10646,18 @@ async function loadTimeTracker() {
     </div>
   `;
 
+  const persistApplyYearEffectsSetting = async (nextValue) => {
+    settings.apply_year_change_effects = !!nextValue;
+    await api('/api/me/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ apply_year_change_effects: !!nextValue }),
+    });
+  };
+
+  document.getElementById('ttApplyYearEffects').addEventListener('change', async (e) => {
+    await persistApplyYearEffectsSetting(!!e.target.checked);
+  });
+
   document.getElementById('ttSave').onclick = async () => {
     const applyYearChangeEffects = document.getElementById('ttApplyYearEffects').checked;
     const payload = {
@@ -10027,18 +10669,19 @@ async function loadTimeTracker() {
     };
     const save = await api('/api/admin/time-tracker', { method: 'PATCH', body: JSON.stringify(payload) });
     document.getElementById('ttMsg').textContent = save.ok ? 'Saved' : 'Failed';
-    settings.apply_year_change_effects = applyYearChangeEffects;
-    await api('/api/me/settings', {
-      method: 'PATCH',
-      body: JSON.stringify({ apply_year_change_effects: applyYearChangeEffects }),
-    });
+    await persistApplyYearEffectsSetting(applyYearChangeEffects);
     if (save.ok) loadTimeTracker();
     barkIfEnabled();
   };
 
   document.getElementById('ttNextYear').onclick = async () => {
-    if (!window.confirm('Advance to the next year and apply income/maintenance once?')) return;
-    const r = await api('/api/admin/time-tracker/next-year', { method: 'POST', body: JSON.stringify({ apply_effects: true }) });
+    const applyEffects = !!document.getElementById('ttApplyYearEffects').checked;
+    const prompt = applyEffects
+      ? 'Advance to the next year and apply income/maintenance once?'
+      : 'Advance to the next year without applying income/maintenance?';
+    if (!window.confirm(prompt)) return;
+    await persistApplyYearEffectsSetting(applyEffects);
+    const r = await api('/api/admin/time-tracker/next-year', { method: 'POST', body: JSON.stringify({ apply_effects: applyEffects }) });
     document.getElementById('ttMsg').textContent = r.ok ? 'Year advanced' : 'Failed';
     if (r.ok) loadTimeTracker();
     barkIfEnabled();

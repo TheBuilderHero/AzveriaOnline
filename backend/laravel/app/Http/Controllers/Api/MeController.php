@@ -8,6 +8,7 @@ use App\Http\Requests\Api\UpdateSettingsRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 
 class MeController extends Controller
 {
@@ -100,10 +101,16 @@ class MeController extends Controller
         $assets = DB::table('nation_assets as na')
             ->join('shop_items as si', 'na.shop_item_id', '=', 'si.id')
             ->where('na.nation_id', $nation->id)
-            ->select('na.qty', 'si.display_name', 'si.maintenance_json', 'si.yearly_effect_json')
+            ->select('na.qty', 'si.code', 'si.display_name', 'si.maintenance_json', 'si.yearly_effect_json')
             ->get();
 
         foreach ($assets as $asset) {
+            $assetCode = strtolower(trim((string) ($asset->code ?? '')));
+            if ($assetCode !== '' && str_starts_with($assetCode, 'struct_')) {
+                // Structures are projected from nation_buildings below.
+                continue;
+            }
+
             $qty = (int) $asset->qty;
             $yearly = json_decode($asset->yearly_effect_json ?? 'null', true) ?: [];
             $maintenance = json_decode($asset->maintenance_json ?? 'null', true) ?: [];
@@ -128,6 +135,119 @@ class MeController extends Controller
                     'key' => $key,
                     'amount' => $amount,
                 ];
+            }
+        }
+
+        if (Schema::hasColumn('building_catalog', 'yearly_production_json')) {
+            $hasStructureYearlyMaintenance = Schema::hasColumn('building_catalog', 'yearly_maintenance_json');
+            $shopHasYearlyEffectJson = Schema::hasColumn('shop_items', 'yearly_effect_json');
+            $shopHasMaintenanceJson = Schema::hasColumn('shop_items', 'maintenance_json');
+            $structureShopEffectCache = [];
+
+            $structureQuery = DB::table('nation_buildings as nb')
+                ->join('building_catalog as bc', 'nb.building_catalog_id', '=', 'bc.id')
+                ->where('nb.nation_id', $nation->id)
+                ->where('nb.status', 'built')
+                ->select('nb.level', 'bc.code', 'bc.display_name', 'bc.yearly_production_json');
+            if ($hasStructureYearlyMaintenance) {
+                $structureQuery->addSelect('bc.yearly_maintenance_json');
+            }
+            $structureRows = $structureQuery->get();
+
+            foreach ($structureRows as $row) {
+                $level = max(1, (int) ($row->level ?? 1));
+                $buildingCode = strtolower(trim((string) ($row->code ?? '')));
+                $productionMap = json_decode((string) ($row->yearly_production_json ?? 'null'), true);
+                $maintenanceMap = $hasStructureYearlyMaintenance
+                    ? json_decode((string) ($row->yearly_maintenance_json ?? 'null'), true)
+                    : [];
+
+                $levelMap = is_array($productionMap) ? ($productionMap[(string) $level] ?? null) : null;
+                if (!is_array($levelMap)) {
+                    $levelMap = [];
+                    foreach ((is_array($productionMap) ? $productionMap : []) as $key => $value) {
+                        if (is_numeric($value)) {
+                            $levelMap[(string) $key] = (float) $value;
+                        }
+                    }
+                }
+
+                $maintenanceLevelMap = [];
+                if ($hasStructureYearlyMaintenance) {
+                    $maintenanceLevelMap = is_array($maintenanceMap) ? ($maintenanceMap[(string) $level] ?? null) : null;
+                    if (!is_array($maintenanceLevelMap)) {
+                        $maintenanceLevelMap = [];
+                        foreach ((is_array($maintenanceMap) ? $maintenanceMap : []) as $key => $value) {
+                            if (is_numeric($value)) {
+                                $maintenanceLevelMap[(string) $key] = (float) $value;
+                            }
+                        }
+                    }
+                }
+
+                if (empty($levelMap) || ($hasStructureYearlyMaintenance && empty($maintenanceLevelMap))) {
+                    $familyCode = $buildingCode;
+                    if ($familyCode !== '' && preg_match('/^struct_(.+)_l\d+$/', $familyCode, $matches)) {
+                        $familyCode = strtolower(trim((string) ($matches[1] ?? '')));
+                    }
+
+                    if ($familyCode !== '' && $shopHasYearlyEffectJson) {
+                        $shopCode = 'struct_' . $familyCode . '_l' . $level;
+                        if (!array_key_exists($shopCode, $structureShopEffectCache)) {
+                            $shopQuery = DB::table('shop_items')->where('code', $shopCode)->select('yearly_effect_json');
+                            if ($shopHasMaintenanceJson) {
+                                $shopQuery->addSelect('maintenance_json');
+                            }
+                            $shopEffect = $shopQuery->first();
+                            $structureShopEffectCache[$shopCode] = [
+                                'yearly' => is_object($shopEffect)
+                                    ? (json_decode((string) ($shopEffect->yearly_effect_json ?? 'null'), true) ?: [])
+                                    : [],
+                                'maintenance' => ($shopHasMaintenanceJson && is_object($shopEffect))
+                                    ? (json_decode((string) ($shopEffect->maintenance_json ?? 'null'), true) ?: [])
+                                    : [],
+                            ];
+                        }
+
+                        $cached = $structureShopEffectCache[$shopCode] ?? ['yearly' => [], 'maintenance' => []];
+                        if (empty($levelMap) && is_array($cached['yearly'] ?? null)) {
+                            $levelMap = $cached['yearly'];
+                        }
+                        if ($hasStructureYearlyMaintenance && empty($maintenanceLevelMap) && is_array($cached['maintenance'] ?? null)) {
+                            $maintenanceLevelMap = $cached['maintenance'];
+                        }
+                    }
+                }
+
+                foreach ($levelMap as $key => $value) {
+                    $amount = (float) $value;
+                    if ($amount == 0.0) {
+                        continue;
+                    }
+                    $this->accumulateProjection($projection['income'], (string) $key, $amount);
+                    $this->accumulateProjection($projection['net'], (string) $key, $amount);
+                    $projection['income_breakdown'][] = [
+                        'asset' => (string) ($row->display_name ?? 'Structure') . ' (L' . $level . ')',
+                        'key' => (string) $key,
+                        'amount' => $amount,
+                    ];
+                }
+
+                if ($hasStructureYearlyMaintenance) {
+                    foreach ($maintenanceLevelMap as $key => $value) {
+                        $amount = (float) $value;
+                        if ($amount == 0.0) {
+                            continue;
+                        }
+                        $this->accumulateProjection($projection['maintenance'], (string) $key, $amount);
+                        $this->accumulateProjection($projection['net'], (string) $key, -$amount);
+                        $projection['maintenance_breakdown'][] = [
+                            'asset' => (string) ($row->display_name ?? 'Structure') . ' (L' . $level . ')',
+                            'key' => (string) $key,
+                            'amount' => $amount,
+                        ];
+                    }
+                }
             }
         }
 
@@ -262,7 +382,9 @@ class MeController extends Controller
             $payload['map_terrain_color_overrides'] = $this->normalizeTerrainColorOverrides($mapSettings['map_terrain_color_overrides'] ?? []);
             $payload['terrain_color_overrides'] = $this->normalizeTerrainColorOverrides($extra['terrain_color_overrides'] ?? []);
             $payload['show_unread_chat_badge'] = (bool) ($extra['show_unread_chat_badge'] ?? true);
-            $payload['apply_year_change_effects'] = (bool) ($extra['apply_year_change_effects'] ?? false);
+            $payload['apply_year_change_effects'] = array_key_exists('apply_year_change_effects', $extra)
+                ? (bool) $extra['apply_year_change_effects']
+                : true;
             $payload['alliance_color_overrides'] = is_array($extra['alliance_color_overrides'] ?? null)
                 ? $extra['alliance_color_overrides']
                 : [];
@@ -282,7 +404,7 @@ class MeController extends Controller
                 'map_zoom_sensitivity' => 1,
                 'map_show_nation_names' => (bool) ($this->loadGlobalMapSettingsRaw()['map_show_nation_names'] ?? true),
                 'show_unread_chat_badge' => true,
-                'apply_year_change_effects' => false,
+                'apply_year_change_effects' => true,
                 'terrain_color_overrides' => [],
                 'alliance_color_overrides' => [],
                 'political_nation_color_overrides' => [],
@@ -300,7 +422,7 @@ class MeController extends Controller
         $payload['map_terrain_color_overrides'] = $this->normalizeTerrainColorOverrides($globalMapSettings['map_terrain_color_overrides'] ?? []);
         $payload['terrain_color_overrides'] = [];
         $payload['show_unread_chat_badge'] = true;
-        $payload['apply_year_change_effects'] = false;
+        $payload['apply_year_change_effects'] = true;
         $payload['alliance_color_overrides'] = [];
         $payload['political_nation_color_overrides'] = [];
         return response()->json($payload);
@@ -324,7 +446,7 @@ class MeController extends Controller
             : (bool) ($current['show_unread_chat_badge'] ?? true);
         $extra['apply_year_change_effects'] = array_key_exists('apply_year_change_effects', $data)
             ? (bool) $data['apply_year_change_effects']
-            : (bool) ($current['apply_year_change_effects'] ?? false);
+            : (bool) ($current['apply_year_change_effects'] ?? true);
         $extra['terrain_color_overrides'] = array_key_exists('terrain_color_overrides', $data)
             ? $this->normalizeTerrainColorOverrides($data['terrain_color_overrides'] ?? [])
             : $this->normalizeTerrainColorOverrides($extra['terrain_color_overrides'] ?? []);
