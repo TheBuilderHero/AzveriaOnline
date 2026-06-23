@@ -1796,13 +1796,31 @@ class AdminController extends Controller
         $data = $request->validate([
             'map_max_zoom_pct' => ['sometimes', 'integer', 'min:100', 'max:300'],
             'map_show_nation_names' => ['sometimes', 'boolean'],
+            'map_split_water_colors' => ['sometimes', 'boolean'],
             'map_popup_fields' => ['sometimes', 'array', 'max:12'],
-            'map_popup_fields.*' => ['required', 'string', 'in:alliance,leader_name,about_text,color,owned_terrain_pixels,total_army_rating,units_count,buildings_count,races'],
+            'map_popup_fields.*' => ['required', 'string', 'in:alliance,leader_name,about_text,color,owned_terrain_square_miles,owned_terrain_pixels,total_army_rating,units_count,buildings_count,races'],
+            'map_pixels_to_square_miles_formula' => ['sometimes', 'string', 'max:120', 'regex:/^[0-9A-Za-z_+\-*\/().\s]+$/'],
             'map_terrain_color_overrides' => ['sometimes', 'array'],
             'map_terrain_color_overrides.*' => ['nullable', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
         ]);
 
+        if (array_key_exists('map_pixels_to_square_miles_formula', $data)
+            && !preg_match('/\bPIXELS\b/i', (string) $data['map_pixels_to_square_miles_formula'])) {
+            return response()->json(['message' => 'Map formula must include PIXELS.'], 422);
+        }
+
+        $requestedFormula = array_key_exists('map_pixels_to_square_miles_formula', $data)
+            ? $this->normalizeMapSquareMilesFormula((string) $data['map_pixels_to_square_miles_formula'])
+            : null;
+        if ($requestedFormula !== null && !$this->isProportionalMapSquareMilesFormula($requestedFormula)) {
+            return response()->json([
+                'message' => 'Map formula must be proportional to PIXELS (for example: PIXELS, PIXELS*0.25, PIXELS/4).',
+            ], 422);
+        }
+
         $current = $this->loadMapSettingsRaw();
+        $previousFormula = $this->normalizeMapSquareMilesFormula((string) ($current['map_pixels_to_square_miles_formula'] ?? 'PIXELS'));
+        $nextFormula = $requestedFormula ?? $previousFormula;
 
         $payload = [
             'map_max_zoom_pct' => array_key_exists('map_max_zoom_pct', $data)
@@ -1811,9 +1829,15 @@ class AdminController extends Controller
             'map_show_nation_names' => array_key_exists('map_show_nation_names', $data)
                 ? (bool) $data['map_show_nation_names']
                 : (bool) ($current['map_show_nation_names'] ?? true),
+            'map_split_water_colors' => array_key_exists('map_split_water_colors', $data)
+                ? (bool) $data['map_split_water_colors']
+                : (bool) ($current['map_split_water_colors'] ?? false),
             'map_popup_fields' => array_key_exists('map_popup_fields', $data)
                 ? $this->normalizeMapPopupFields($data['map_popup_fields'], false)
                 : $this->normalizeMapPopupFields($current['map_popup_fields'] ?? []),
+            'map_pixels_to_square_miles_formula' => array_key_exists('map_pixels_to_square_miles_formula', $data)
+                ? $nextFormula
+                : $previousFormula,
             'map_terrain_color_overrides' => array_key_exists('map_terrain_color_overrides', $data)
                 ? $this->normalizeMapTerrainColorOverrides($data['map_terrain_color_overrides'])
                 : $this->normalizeMapTerrainColorOverrides($current['map_terrain_color_overrides'] ?? []),
@@ -1821,8 +1845,24 @@ class AdminController extends Controller
             'updated_by_user_id' => (int) $request->user()->id,
         ];
 
-        if (!$this->saveMapSettingsRaw($payload)) {
-            return response()->json(['message' => 'Map settings storage is unavailable.'], 500);
+        $previousUnit = $this->evaluateMapSquareMilesFormula($previousFormula, 1.0);
+        $nextUnit = $this->evaluateMapSquareMilesFormula($nextFormula, 1.0);
+        $scaleRatio = ($previousUnit > 0.0 && $nextUnit > 0.0) ? ($nextUnit / $previousUnit) : 1.0;
+
+        try {
+            DB::transaction(function () use ($payload, $scaleRatio, $nextFormula, $previousFormula) {
+                if (!$this->saveMapSettingsRaw($payload)) {
+                    throw new \RuntimeException('Map settings storage is unavailable.');
+                }
+
+                if ($nextFormula !== $previousFormula) {
+                    $this->applyMapSquareMilesScale($scaleRatio);
+                }
+            });
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 500);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Failed to apply map formula update.'], 500);
         }
 
         return response()->json(['message' => 'Map settings saved.']);
@@ -2662,7 +2702,9 @@ class AdminController extends Controller
             return [
                 'map_max_zoom_pct' => 180,
                 'map_show_nation_names' => false,
+                'map_split_water_colors' => false,
                 'map_popup_fields' => $this->defaultMapPopupFields(),
+                'map_pixels_to_square_miles_formula' => 'PIXELS',
                 'map_terrain_color_overrides' => [],
             ];
         }
@@ -2672,7 +2714,9 @@ class AdminController extends Controller
             return [
                 'map_max_zoom_pct' => 180,
                 'map_show_nation_names' => false,
+                'map_split_water_colors' => false,
                 'map_popup_fields' => $this->defaultMapPopupFields(),
+                'map_pixels_to_square_miles_formula' => 'PIXELS',
                 'map_terrain_color_overrides' => [],
             ];
         }
@@ -2688,9 +2732,11 @@ class AdminController extends Controller
         return [
             'map_max_zoom_pct' => $maxZoom,
             'map_show_nation_names' => (bool) ($decoded['map_show_nation_names'] ?? false),
+            'map_split_water_colors' => (bool) ($decoded['map_split_water_colors'] ?? false),
             'map_popup_fields' => array_key_exists('map_popup_fields', $decoded)
                 ? $this->normalizeMapPopupFields($decoded['map_popup_fields'], false)
                 : $this->defaultMapPopupFields(),
+            'map_pixels_to_square_miles_formula' => $this->normalizeMapSquareMilesFormula((string) ($decoded['map_pixels_to_square_miles_formula'] ?? 'PIXELS')),
             'map_terrain_color_overrides' => $this->normalizeMapTerrainColorOverrides($decoded['map_terrain_color_overrides'] ?? []),
         ];
     }
@@ -2709,6 +2755,8 @@ class AdminController extends Controller
             'tundra',
             'magic_grassland',
             'water',
+            'water_sea',
+            'water_fresh',
         ];
         $allowed = array_fill_keys($allowedTerrainKeys, true);
 
@@ -2730,7 +2778,7 @@ class AdminController extends Controller
 
     private function defaultMapPopupFields(): array
     {
-        return ['alliance', 'races', 'color', 'owned_terrain_pixels'];
+        return ['alliance', 'races', 'color', 'owned_terrain_square_miles'];
     }
 
     private function availableMapPopupFields(): array
@@ -2740,7 +2788,7 @@ class AdminController extends Controller
             'leader_name',
             'about_text',
             'color',
-            'owned_terrain_pixels',
+            'owned_terrain_square_miles',
             'total_army_rating',
             'units_count',
             'buildings_count',
@@ -2755,6 +2803,9 @@ class AdminController extends Controller
         $out = [];
         foreach ($list as $item) {
             $key = strtolower(trim((string) $item));
+            if ($key === 'owned_terrain_pixels') {
+                $key = 'owned_terrain_square_miles';
+            }
             if ($key === '' || !isset($allowed[$key]) || in_array($key, $out, true)) {
                 continue;
             }
@@ -2766,6 +2817,129 @@ class AdminController extends Controller
         }
 
         return $fallbackDefault ? $this->defaultMapPopupFields() : [];
+    }
+
+    private function normalizeMapSquareMilesFormula(string $raw): string
+    {
+        $formula = strtoupper(trim($raw));
+        if ($formula === '' || !preg_match('/^[0-9A-Z_+\-*\/().\s]+$/', $formula) || !preg_match('/\bPIXELS\b/', $formula)) {
+            return 'PIXELS';
+        }
+
+        return preg_replace('/\s+/', ' ', $formula) ?: 'PIXELS';
+    }
+
+    private function evaluateMapSquareMilesFormula(string $formula, float $pixels): float
+    {
+        $normalized = $this->normalizeMapSquareMilesFormula($formula);
+        $value = max(0.0, $pixels);
+        $expr = str_replace('PIXELS', '(' . $value . ')', $normalized);
+        if (preg_match('/[A-Z_]/', $expr)) {
+            return $value;
+        }
+
+        $oldHandler = set_error_handler(static function ($severity, $message) {
+            throw new \RuntimeException((string) $message);
+        });
+
+        try {
+            $result = eval('return ' . $expr . ';');
+        } catch (\Throwable $e) {
+            $result = $value;
+        } finally {
+            restore_error_handler();
+        }
+
+        if (!is_numeric($result)) {
+            return $value;
+        }
+
+        $num = (float) $result;
+        if (!is_finite($num) || $num < 0) {
+            return $value;
+        }
+
+        return $num;
+    }
+
+    private function isProportionalMapSquareMilesFormula(string $formula): bool
+    {
+        $v0 = $this->evaluateMapSquareMilesFormula($formula, 0.0);
+        $v1 = $this->evaluateMapSquareMilesFormula($formula, 1.0);
+        $v2 = $this->evaluateMapSquareMilesFormula($formula, 2.0);
+        if ($v1 <= 0.0) {
+            return false;
+        }
+        if (abs($v0) > 0.0001) {
+            return false;
+        }
+        if (abs($v2 - ($v1 * 2.0)) > max(0.0001, $v1 * 0.01)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private function applyMapSquareMilesScale(float $ratio): void
+    {
+        if (!is_finite($ratio) || $ratio <= 0 || abs($ratio - 1.0) < 0.000001) {
+            return;
+        }
+
+        if (Schema::hasColumn('building_catalog', 'terrain_requirement_json')) {
+            $rows = DB::table('building_catalog')->select('id', 'terrain_requirement_json')->get();
+            foreach ($rows as $row) {
+                $decoded = json_decode((string) ($row->terrain_requirement_json ?? 'null'), true);
+                if (!is_array($decoded) || empty($decoded)) {
+                    continue;
+                }
+                $normalized = $this->normalizeStructureTerrainRequirementMap($decoded);
+                if (empty($normalized)) {
+                    continue;
+                }
+                foreach ($normalized as $level => $rule) {
+                    $required = max(0.0, (float) ($rule['required_square_miles'] ?? 0));
+                    $normalized[$level]['required_square_miles'] = round($required * $ratio, 4);
+                }
+
+                DB::table('building_catalog')->where('id', (int) $row->id)->update([
+                    'terrain_requirement_json' => json_encode($normalized),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+
+        if (Schema::hasColumn('nation_buildings', 'terrain_allocated_square_miles')) {
+            $rows = DB::table('nation_buildings')
+                ->select('id', 'terrain_allocated_square_miles')
+                ->whereNotNull('terrain_allocated_square_miles')
+                ->get();
+            foreach ($rows as $row) {
+                $value = max(0.0, (float) ($row->terrain_allocated_square_miles ?? 0));
+                DB::table('nation_buildings')->where('id', (int) $row->id)->update([
+                    'terrain_allocated_square_miles' => round($value * $ratio, 4),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+
+        $terrainRows = DB::table('nation_terrain_stats')->select('nation_id', 'square_miles_json')->get();
+        foreach ($terrainRows as $row) {
+            $decoded = json_decode((string) ($row->square_miles_json ?? 'null'), true);
+            $sqMiles = is_array($decoded) ? $decoded : [];
+            $scaled = [];
+            foreach ($sqMiles as $key => $val) {
+                if (!is_numeric($val)) {
+                    continue;
+                }
+                $scaled[(string) $key] = round(max(0.0, (float) $val) * $ratio, 4);
+            }
+
+            DB::table('nation_terrain_stats')->where('nation_id', (int) $row->nation_id)->update(array_merge(
+                $this->accounts->buildTerrainStatsPayload($scaled),
+                ['updated_at' => now()]
+            ));
+        }
     }
 
     private function saveMapSettingsRaw(array $payload): bool
@@ -3650,7 +3824,7 @@ class AdminController extends Controller
 
     private function terrainKeys(): array
     {
-        return ['grassland', 'mountain', 'freshwater', 'hills', 'desert', 'seafront'];
+        return ['grassland', 'forest', 'mountain', 'desert', 'tundra', 'magic_grassland', 'water', 'freshwater', 'hills', 'seafront'];
     }
 
     private function normalizeStructureTerrainRequirementMap(array $requirements): array

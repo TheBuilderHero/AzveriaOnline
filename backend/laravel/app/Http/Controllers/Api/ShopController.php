@@ -709,7 +709,7 @@ class ShopController extends Controller
 
     private function terrainKeys(): array
     {
-        return ['grassland', 'mountain', 'freshwater', 'hills', 'desert', 'seafront'];
+        return ['grassland', 'forest', 'mountain', 'desert', 'tundra', 'magic_grassland', 'water', 'freshwater', 'hills', 'seafront'];
     }
 
     private function normalizeStructureTerrainRequirementMap(array $requirements): array

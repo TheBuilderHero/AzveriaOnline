@@ -378,7 +378,9 @@ class MeController extends Controller
             $payload['map_show_nation_names'] = array_key_exists('map_show_nation_names', $extra)
                 ? (bool) $extra['map_show_nation_names']
                 : (bool) ($mapSettings['map_show_nation_names'] ?? true);
+            $payload['map_split_water_colors'] = (bool) ($mapSettings['map_split_water_colors'] ?? false);
             $payload['map_popup_fields'] = $this->normalizeMapPopupFields($mapSettings['map_popup_fields'] ?? []);
+            $payload['map_pixels_to_square_miles_formula'] = $this->normalizeMapSquareMilesFormula((string) ($mapSettings['map_pixels_to_square_miles_formula'] ?? 'PIXELS'));
             $payload['map_terrain_color_overrides'] = $this->normalizeTerrainColorOverrides($mapSettings['map_terrain_color_overrides'] ?? []);
             $payload['terrain_color_overrides'] = $this->normalizeTerrainColorOverrides($extra['terrain_color_overrides'] ?? []);
             $payload['show_unread_chat_badge'] = (bool) ($extra['show_unread_chat_badge'] ?? true);
@@ -418,7 +420,9 @@ class MeController extends Controller
         $globalMapSettings = $this->loadGlobalMapSettingsRaw();
         $payload['map_max_zoom_pct'] = (int) ($globalMapSettings['map_max_zoom_pct'] ?? 180);
         $payload['map_show_nation_names'] = (bool) ($globalMapSettings['map_show_nation_names'] ?? true);
+        $payload['map_split_water_colors'] = (bool) ($globalMapSettings['map_split_water_colors'] ?? false);
         $payload['map_popup_fields'] = $this->normalizeMapPopupFields($globalMapSettings['map_popup_fields'] ?? []);
+        $payload['map_pixels_to_square_miles_formula'] = $this->normalizeMapSquareMilesFormula((string) ($globalMapSettings['map_pixels_to_square_miles_formula'] ?? 'PIXELS'));
         $payload['map_terrain_color_overrides'] = $this->normalizeTerrainColorOverrides($globalMapSettings['map_terrain_color_overrides'] ?? []);
         $payload['terrain_color_overrides'] = [];
         $payload['show_unread_chat_badge'] = true;
@@ -859,7 +863,9 @@ class MeController extends Controller
             return [
                 'map_max_zoom_pct' => 180,
                 'map_show_nation_names' => false,
+                'map_split_water_colors' => false,
                 'map_popup_fields' => $this->defaultMapPopupFields(),
+                'map_pixels_to_square_miles_formula' => 'PIXELS',
                 'map_terrain_color_overrides' => [],
             ];
         }
@@ -869,7 +875,9 @@ class MeController extends Controller
             return [
                 'map_max_zoom_pct' => 180,
                 'map_show_nation_names' => false,
+                'map_split_water_colors' => false,
                 'map_popup_fields' => $this->defaultMapPopupFields(),
+                'map_pixels_to_square_miles_formula' => 'PIXELS',
                 'map_terrain_color_overrides' => [],
             ];
         }
@@ -885,9 +893,11 @@ class MeController extends Controller
         return [
             'map_max_zoom_pct' => $maxZoom,
             'map_show_nation_names' => (bool) ($decoded['map_show_nation_names'] ?? false),
+            'map_split_water_colors' => (bool) ($decoded['map_split_water_colors'] ?? false),
             'map_popup_fields' => array_key_exists('map_popup_fields', $decoded)
                 ? $this->normalizeMapPopupFields($decoded['map_popup_fields'], false)
                 : $this->defaultMapPopupFields(),
+            'map_pixels_to_square_miles_formula' => $this->normalizeMapSquareMilesFormula((string) ($decoded['map_pixels_to_square_miles_formula'] ?? 'PIXELS')),
             'map_terrain_color_overrides' => $this->normalizeTerrainColorOverrides($decoded['map_terrain_color_overrides'] ?? []),
         ];
     }
@@ -906,6 +916,8 @@ class MeController extends Controller
             'tundra',
             'magic_grassland',
             'water',
+            'water_sea',
+            'water_fresh',
         ];
         $allowed = array_fill_keys($allowedTerrainKeys, true);
 
@@ -927,7 +939,7 @@ class MeController extends Controller
 
     private function defaultMapPopupFields(): array
     {
-        return ['alliance', 'races', 'color', 'owned_terrain_pixels'];
+        return ['alliance', 'races', 'color', 'owned_terrain_square_miles'];
     }
 
     private function availableMapPopupFields(): array
@@ -937,7 +949,7 @@ class MeController extends Controller
             'leader_name',
             'about_text',
             'color',
-            'owned_terrain_pixels',
+            'owned_terrain_square_miles',
             'total_army_rating',
             'units_count',
             'buildings_count',
@@ -952,6 +964,9 @@ class MeController extends Controller
         $out = [];
         foreach ($list as $item) {
             $key = strtolower(trim((string) $item));
+            if ($key === 'owned_terrain_pixels') {
+                $key = 'owned_terrain_square_miles';
+            }
             if ($key === '' || !isset($allowed[$key]) || in_array($key, $out, true)) {
                 continue;
             }
@@ -963,6 +978,16 @@ class MeController extends Controller
         }
 
         return $fallbackDefault ? $this->defaultMapPopupFields() : [];
+    }
+
+    private function normalizeMapSquareMilesFormula(string $raw): string
+    {
+        $formula = strtoupper(trim($raw));
+        if ($formula === '' || !preg_match('/^[0-9A-Z_+\-*\/().\s]+$/', $formula) || !preg_match('/\bPIXELS\b/', $formula)) {
+            return 'PIXELS';
+        }
+
+        return preg_replace('/\s+/', ' ', $formula) ?: 'PIXELS';
     }
 
     private function findNation(int $userId): ?object

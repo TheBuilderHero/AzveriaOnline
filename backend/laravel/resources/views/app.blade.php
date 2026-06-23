@@ -847,14 +847,14 @@ const api = async (url, opts = {}) => {
   }
 };
 
-const DEFAULT_MAP_POPUP_FIELDS = ['alliance', 'races', 'color', 'owned_terrain_pixels'];
+const DEFAULT_MAP_POPUP_FIELDS = ['alliance', 'races', 'color', 'owned_terrain_square_miles'];
 const MAP_POPUP_FIELD_DEFS = [
   { key: 'alliance', label: 'Alliance' },
   { key: 'leader_name', label: 'Leader Name' },
   { key: 'about_text', label: 'About Text' },
   { key: 'races', label: 'Races' },
   { key: 'color', label: 'Nation Color Swatch' },
-  { key: 'owned_terrain_pixels', label: 'Owned Terrain (pixels)' },
+  { key: 'owned_terrain_square_miles', label: 'Owned Terrain (sq mi)' },
   { key: 'total_army_rating', label: 'Total Army Rating' },
   { key: 'units_count', label: 'Total Units' },
   { key: 'buildings_count', label: 'Total Buildings' },
@@ -864,7 +864,8 @@ const normalizeMapPopupFieldsClient = (raw, fallbackDefault = true) => {
   const input = Array.isArray(raw) ? raw : [];
   const out = [];
   input.forEach((item) => {
-    const key = String(item || '').trim().toLowerCase();
+    let key = String(item || '').trim().toLowerCase();
+    if (key === 'owned_terrain_pixels') key = 'owned_terrain_square_miles';
     if (!key || !allowed.has(key) || out.includes(key)) return;
     out.push(key);
   });
@@ -872,7 +873,45 @@ const normalizeMapPopupFieldsClient = (raw, fallbackDefault = true) => {
   return fallbackDefault ? DEFAULT_MAP_POPUP_FIELDS.slice() : [];
 };
 
-let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal', map_zoom_sensitivity: 1, map_max_zoom_pct: 180, map_show_nation_names: false, map_popup_fields: DEFAULT_MAP_POPUP_FIELDS.slice(), map_terrain_color_overrides: {}, terrain_color_overrides: {}, alliance_color_overrides: {}, political_nation_color_overrides: {} };
+const normalizeMapSquareMilesFormulaClient = (raw) => {
+  const formula = String(raw || '').trim().toUpperCase();
+  if (!formula) return 'PIXELS';
+  if (!/^[0-9A-Z_+\-*\/().\s]+$/.test(formula)) return 'PIXELS';
+  if (!/\bPIXELS\b/.test(formula)) return 'PIXELS';
+  return formula.replace(/\s+/g, ' ');
+};
+
+const evaluateMapSquareMilesFormulaClient = (formulaRaw, pixels) => {
+  const px = Math.max(0, toFiniteNumber(pixels, 0));
+  const formula = normalizeMapSquareMilesFormulaClient(formulaRaw || 'PIXELS');
+  const expression = formula.replace(/\bPIXELS\b/g, `(${px})`);
+  if (/[A-Z_]/.test(expression)) return px;
+  try {
+    const value = Function(`"use strict"; return (${expression});`)();
+    const num = toFiniteNumber(value, px);
+    return Math.max(0, num);
+  } catch {
+    return px;
+  }
+};
+
+const buildMapFormulaPreviewText = (nextFormulaRaw, currentFormulaRaw) => {
+  const currentFormula = normalizeMapSquareMilesFormulaClient(currentFormulaRaw || 'PIXELS');
+  const nextFormula = normalizeMapSquareMilesFormulaClient(nextFormulaRaw || 'PIXELS');
+  const currentPerPixel = evaluateMapSquareMilesFormulaClient(currentFormula, 1);
+  const nextPerPixel = evaluateMapSquareMilesFormulaClient(nextFormula, 1);
+  if (currentPerPixel <= 0 || nextPerPixel <= 0) {
+    return 'Preview unavailable for this formula.';
+  }
+  const ratio = nextPerPixel / currentPerPixel;
+  return `Preview: 1 pixel currently = ${fmtNum(Math.round(currentPerPixel * 10000) / 10000)} sq mi, new = ${fmtNum(Math.round(nextPerPixel * 10000) / 10000)} sq mi, scale = ${fmtNum(Math.round(ratio * 10000) / 10000)}x.`;
+};
+
+const pixelsToSquareMiles = (pixels) => {
+  return evaluateMapSquareMilesFormulaClient(settings?.map_pixels_to_square_miles_formula || 'PIXELS', pixels);
+};
+
+let settings = { dog_bark_enabled: 0, theme: 'light', color_blind_mode: 'none', font_mode: 'normal', map_zoom_sensitivity: 1, map_max_zoom_pct: 180, map_show_nation_names: false, map_split_water_colors: false, map_popup_fields: DEFAULT_MAP_POPUP_FIELDS.slice(), map_pixels_to_square_miles_formula: 'PIXELS', map_terrain_color_overrides: {}, terrain_color_overrides: {}, alliance_color_overrides: {}, political_nation_color_overrides: {} };
 let ws = null;
 let wsAuthToken = null;
 let wsAuthTokenExpiresAt = 0;
@@ -999,6 +1038,42 @@ function extractList(payload) {
   return [];
 }
 
+async function fetchAllPaginated(urlBase, { perPage = 100, maxPages = 100, fallbackLabel = 'Failed to load paginated data.' } = {}) {
+  const rows = [];
+  let page = 1;
+
+  while (page <= maxPages) {
+    const res = await api(`${urlBase}${urlBase.includes('?') ? '&' : '?'}per_page=${perPage}&page=${page}`);
+    if (!res || !res.ok) {
+      throw new Error(await readErrorMessage(res, fallbackLabel));
+    }
+
+    const payload = await parseJsonResponse(res, { data: [] });
+    rows.push(...extractList(payload));
+
+    const currentPage = Number(payload?.current_page || page);
+    const lastPage = Number(payload?.last_page || currentPage);
+    if (!Number.isFinite(lastPage) || currentPage >= lastPage) {
+      break;
+    }
+
+    page = currentPage + 1;
+  }
+
+  const deduped = [];
+  const seen = new Set();
+  rows.forEach(row => {
+    const id = Number(row?.id || 0);
+    if (id > 0) {
+      if (seen.has(id)) return;
+      seen.add(id);
+    }
+    deduped.push(row);
+  });
+
+  return deduped;
+}
+
 function safeJsonParse(value, fallback = null) {
   if (value === null || value === undefined) return fallback;
   if (typeof value !== 'string') return value;
@@ -1053,14 +1128,33 @@ function normalizeTerrainSquareMiles(raw) {
   };
 }
 
+function normalizeExtendedTerrainSquareMiles(raw) {
+  const base = normalizeTerrainSquareMiles(raw);
+  const parsed = safeJsonParse(raw, raw) || {};
+  const asObject = typeof parsed === 'string' ? (safeJsonParse(parsed, {}) || {}) : parsed;
+  const source = (asObject && typeof asObject === 'object') ? asObject : {};
+
+  return {
+    ...base,
+    forest: toFiniteNumber(source.forest, toFiniteNumber(source.hills, 0)),
+    water: toFiniteNumber(source.water, base.freshwater + base.seafront),
+    tundra: toFiniteNumber(source.tundra, 0),
+    magic_grassland: toFiniteNumber(source.magic_grassland, 0),
+  };
+}
+
 function labelTerrainKey(key) {
   const map = {
     grassland: 'Grassland',
+    forest: 'Forest',
     mountain: 'Mountain',
     freshwater: 'Freshwater',
     hills: 'Hills',
     desert: 'Desert',
     seafront: 'Sea Front',
+    water: 'Water',
+    tundra: 'Tundra',
+    magic_grassland: 'Magic Grassland',
   };
   return map[key] || key.replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
 }
@@ -2096,10 +2190,14 @@ async function loadSection(name) {
     const rows = Array.isArray(structures) ? structures : [];
     const terrainTypes = [
       { key: 'grassland', label: 'Grassland' },
+      { key: 'forest', label: 'Forest' },
       { key: 'mountain', label: 'Mountain' },
+      { key: 'desert', label: 'Desert' },
+      { key: 'tundra', label: 'Tundra' },
+      { key: 'magic_grassland', label: 'Magic Grassland' },
+      { key: 'water', label: 'Water' },
       { key: 'freshwater', label: 'Freshwater' },
       { key: 'hills', label: 'Hills' },
-      { key: 'desert', label: 'Desert' },
       { key: 'seafront', label: 'Sea Front' },
     ];
 
@@ -2617,28 +2715,33 @@ async function loadSection(name) {
 
         createStructureBtn.disabled = true;
         if (msgEl) msgEl.textContent = 'Creating…';
-        const res = await api('/api/admin/structures', {
-          method: 'POST',
-          body: JSON.stringify({
-            code,
-            display_name: name,
-            max_level: maxLevel,
-            list_order: listOrder,
-            yearly_production_json: {},
-            yearly_maintenance_json: {},
-            terrain_requirement_json: {},
-          }),
-        });
+        try {
+          const res = await api('/api/admin/structures', {
+            method: 'POST',
+            body: JSON.stringify({
+              code,
+              display_name: name,
+              max_level: maxLevel,
+              list_order: listOrder,
+              yearly_production_json: {},
+              yearly_maintenance_json: {},
+              terrain_requirement_json: {},
+            }),
+          });
 
-        if (!res || !res.ok) {
-          if (msgEl) msgEl.textContent = await readErrorMessage(res, 'Failed to create structure.');
+          if (!res || !res.ok) {
+            if (msgEl) msgEl.textContent = await readErrorMessage(res, 'Failed to create structure.');
+            return;
+          }
+
+          if (msgEl) msgEl.textContent = 'Created.';
+          await loadStructureEditor();
+          barkIfEnabled();
+        } catch (err) {
+          if (msgEl) msgEl.textContent = err?.message || 'Failed to create structure.';
+        } finally {
           createStructureBtn.disabled = false;
-          return;
         }
-
-        if (msgEl) msgEl.textContent = 'Created.';
-        await loadStructureEditor();
-        barkIfEnabled();
       });
     }
 
@@ -3592,7 +3695,7 @@ async function loadMap() {
       forest: '#2e7a3d',
       mountain: '#4d3269',
       desert: '#d8c55a',
-      tundra: 'rgba(0,0,0,0)',
+      tundra: '#f2f6fb',
       magic_grassland: '#7d2323',
       water: '#357ec7',
     },
@@ -3601,7 +3704,7 @@ async function loadMap() {
       forest: '#3e7d4f',
       mountain: '#57508b',
       desert: '#d7be7a',
-      tundra: 'rgba(0,0,0,0)',
+      tundra: '#eef4fb',
       magic_grassland: '#6d4b28',
       water: '#2f7dc9',
     },
@@ -3610,7 +3713,7 @@ async function loadMap() {
       forest: '#637d39',
       mountain: '#5b4f86',
       desert: '#d8be74',
-      tundra: 'rgba(0,0,0,0)',
+      tundra: '#eff5fa',
       magic_grassland: '#8b4631',
       water: '#2c7dc1',
     },
@@ -3619,7 +3722,7 @@ async function loadMap() {
       forest: '#376a40',
       mountain: '#7e5f4f',
       desert: '#bfa26b',
-      tundra: 'rgba(0,0,0,0)',
+      tundra: '#edf2f8',
       magic_grassland: '#7d3e2e',
       water: '#4a84b8',
     },
@@ -3833,7 +3936,7 @@ async function loadMap() {
   let politicalNeedsPostPaintBorderUpdate = false;
   const normalizeTerrainColorOverridesClient = (raw) => {
     if (!raw || typeof raw !== 'object') return {};
-    const allowed = new Set(TERRAIN_KEYS);
+    const allowed = new Set([...TERRAIN_KEYS, 'water_sea', 'water_fresh']);
     const out = {};
     Object.entries(raw).forEach(([k, v]) => {
       const key = String(k || '').trim().toLowerCase();
@@ -3854,11 +3957,63 @@ async function loadMap() {
     adminTerrainColorOverrides = { ...legacyTerrainColorOverrides };
   }
   let colorOverrides = { ...adminTerrainColorOverrides, ...userTerrainColorOverrides };
+  let pendingAdminTerrainColorOverrides = null;
+  let pendingUserTerrainColorOverrides = null;
+  let pendingMapSplitWaterColors = null;
   const syncTerrainColorOverrides = () => {
     colorOverrides = { ...adminTerrainColorOverrides, ...userTerrainColorOverrides };
   };
+  const getPendingTerrainColorContext = () => {
+    const admin = normalizeTerrainColorOverridesClient(pendingAdminTerrainColorOverrides || adminTerrainColorOverrides || {});
+    const userOverrides = user.role === 'admin'
+      ? {}
+      : normalizeTerrainColorOverridesClient(pendingUserTerrainColorOverrides || userTerrainColorOverrides || {});
+    const split = pendingMapSplitWaterColors == null
+      ? !!settings.map_split_water_colors
+      : !!pendingMapSplitWaterColors;
+    return {
+      admin,
+      user: userOverrides,
+      combined: { ...admin, ...userOverrides },
+      split,
+    };
+  };
+  const hasPendingTerrainColorChanges = () => {
+    const pending = getPendingTerrainColorContext();
+    const liveAdmin = normalizeTerrainColorOverridesClient(adminTerrainColorOverrides || {});
+    const liveUser = normalizeTerrainColorOverridesClient(userTerrainColorOverrides || {});
+    const pendingAdminJson = JSON.stringify(pending.admin);
+    const pendingUserJson = JSON.stringify(pending.user);
+    const liveAdminJson = JSON.stringify(liveAdmin);
+    const liveUserJson = JSON.stringify(liveUser);
+    if (pendingAdminJson !== liveAdminJson) return true;
+    if (pendingUserJson !== liveUserJson) return true;
+    return pending.split !== !!settings.map_split_water_colors;
+  };
+  const waterColorSourceLabel = (key) => {
+    const pending = getPendingTerrainColorContext();
+    if (Object.prototype.hasOwnProperty.call(pending.user, key)) {
+      return 'Source: Personal override';
+    }
+    if (Object.prototype.hasOwnProperty.call(pending.admin, key)) {
+      return 'Source: Global admin default';
+    }
+    return 'Source: Theme default';
+  };
+  const getWaterColorsForPalette = (palette) => {
+    const split = !!settings.map_split_water_colors;
+    if (!split) {
+      const shared = palette.water || '#357ec7';
+      return { sea: shared, fresh: shared, split: false };
+    }
+
+    const sea = colorOverrides.water_sea || palette.water_sea || palette.water || '#357ec7';
+    const fresh = colorOverrides.water_fresh || palette.water_fresh || palette.water || '#357ec7';
+    return { sea, fresh, split: true };
+  };
   let selectedNationId = 0;
   let labelCache = [];
+  let ownerComponentGrid = new Int32Array(mapWidth * mapHeight).fill(-1);
   let lastPaintPoint = null;
   let outlinePoints = [];
   let outlineClosed = false;
@@ -4002,12 +4157,26 @@ async function loadMap() {
   );
 
   const terrainColorControlsHtml = () => {
-    const palette = getPalette();
+    const pending = getPendingTerrainColorContext();
+    const modeKey = settings.color_blind_mode || 'none';
+    const base = baseTerrainPalette[modeKey] || baseTerrainPalette.none;
+    const palette = { ...base, ...pending.combined };
+    const waterColors = pending.split
+      ? {
+          sea: pending.combined.water_sea || palette.water_sea || palette.water || '#357ec7',
+          fresh: pending.combined.water_fresh || palette.water_fresh || palette.water || '#357ec7',
+          split: true,
+        }
+      : {
+          sea: palette.water || '#357ec7',
+          fresh: palette.water || '#357ec7',
+          split: false,
+        };
     const sourceLabel = (key) => {
-      if (Object.prototype.hasOwnProperty.call(userTerrainColorOverrides, key)) {
+      if (Object.prototype.hasOwnProperty.call(pending.user, key)) {
         return 'Source: Personal override';
       }
-      if (Object.prototype.hasOwnProperty.call(adminTerrainColorOverrides, key)) {
+      if (Object.prototype.hasOwnProperty.call(pending.admin, key)) {
         return 'Source: Global admin default';
       }
       return 'Source: Theme default';
@@ -4015,12 +4184,31 @@ async function loadMap() {
     return `
       <details open>
         <summary>Terrain Colors</summary>
-        ${TERRAIN_KEYS.map(key => `
+        ${TERRAIN_KEYS.filter(key => key !== 'water').map(key => `
           <div class="terrain-color-row">
             <label style="font-size:12px;">${labelTerrainKey(key)}<div class="map-small-label">${sourceLabel(key)}</div></label>
             <input type="color" class="terrainColorInput" data-key="${key}" value="${palette[key].startsWith('#') ? palette[key] : '#cccccc'}">
           </div>
         `).join('')}
+        <div class="terrain-color-row">
+          <label style="font-size:12px;">Split Sea/Freshwater Colors<div class="map-small-label">Admin global map setting</div></label>
+          <input type="checkbox" id="splitWaterColorsToggle" ${pending.split ? 'checked' : ''} ${user.role === 'admin' ? '' : 'disabled'}>
+        </div>
+        ${pending.split ? `
+          <div class="terrain-color-row">
+            <label style="font-size:12px;">Sea Water<div class="map-small-label">${waterColorSourceLabel('water_sea')}</div></label>
+            <input type="color" class="terrainColorInput" data-key="water_sea" value="${String(waterColors.sea || '#357ec7').startsWith('#') ? waterColors.sea : '#357ec7'}">
+          </div>
+          <div class="terrain-color-row">
+            <label style="font-size:12px;">Freshwater<div class="map-small-label">${waterColorSourceLabel('water_fresh')}</div></label>
+            <input type="color" class="terrainColorInput" data-key="water_fresh" value="${String(waterColors.fresh || '#357ec7').startsWith('#') ? waterColors.fresh : '#357ec7'}">
+          </div>
+        ` : `
+          <div class="terrain-color-row">
+            <label style="font-size:12px;">Water<div class="map-small-label">${sourceLabel('water')}</div></label>
+            <input type="color" class="terrainColorInput" data-key="water" value="${String(palette.water || '#357ec7').startsWith('#') ? palette.water : '#357ec7'}">
+          </div>
+        `}
         <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
           <button class="primary" type="button" id="terrainColorResetBtn">Reset Colors</button>
           <button class="primary" type="button" id="terrainColorSaveBtn">Save Colors</button>
@@ -4031,41 +4219,57 @@ async function loadMap() {
   };
 
   const bindTerrainColorInputs = (root = document) => {
+    if (pendingAdminTerrainColorOverrides == null) {
+      pendingAdminTerrainColorOverrides = { ...adminTerrainColorOverrides };
+    }
+    if (pendingUserTerrainColorOverrides == null) {
+      pendingUserTerrainColorOverrides = { ...userTerrainColorOverrides };
+    }
+    if (pendingMapSplitWaterColors == null) {
+      pendingMapSplitWaterColors = !!settings.map_split_water_colors;
+    }
+
     root.querySelectorAll('.terrainColorInput').forEach(input => {
       input.addEventListener('input', () => {
         const key = String(input.dataset.key || '').trim().toLowerCase();
         if (!key || !/^#[0-9A-Fa-f]{6}$/.test(String(input.value || ''))) return;
         if (user.role === 'admin') {
-          adminTerrainColorOverrides[key] = input.value;
+          pendingAdminTerrainColorOverrides[key] = input.value;
         } else {
-          userTerrainColorOverrides[key] = input.value;
+          pendingUserTerrainColorOverrides[key] = input.value;
         }
-        syncTerrainColorOverrides();
-        terrainLayerDirty = true;
-        waterLayerDirty = true;
-        render();
+        if (colorMsgEl) {
+          colorMsgEl.textContent = 'Unsaved color changes. Click Save Colors to apply.';
+        }
       });
     });
 
     const colorMsgEl = root.querySelector('#terrainColorMsg');
     const saveColorsBtn = root.querySelector('#terrainColorSaveBtn');
     const resetColorsBtn = root.querySelector('#terrainColorResetBtn');
+    const splitWaterColorsToggle = root.querySelector('#splitWaterColorsToggle');
+
+    if (splitWaterColorsToggle && user.role === 'admin') {
+      splitWaterColorsToggle.onchange = () => {
+        pendingMapSplitWaterColors = !!splitWaterColorsToggle.checked;
+        if (colorMsgEl) {
+          colorMsgEl.textContent = 'Unsaved color changes. Click Save Colors to apply.';
+        }
+        renderSidebar();
+      };
+    }
 
     if (resetColorsBtn) {
       resetColorsBtn.onclick = () => {
         if (user.role === 'admin') {
-          adminTerrainColorOverrides = {};
+          pendingAdminTerrainColorOverrides = {};
         } else {
-          userTerrainColorOverrides = {};
+          pendingUserTerrainColorOverrides = {};
         }
-        syncTerrainColorOverrides();
-        terrainLayerDirty = true;
-        waterLayerDirty = true;
         if (colorMsgEl) colorMsgEl.textContent = user.role === 'admin'
-          ? 'Global terrain colors reset. Click Save Colors to persist for all players.'
-          : 'Your terrain color overrides were reset. Click Save Colors to persist.';
+          ? 'Global terrain colors reset in draft. Click Save Colors to apply for all players.'
+          : 'Your terrain color overrides reset in draft. Click Save Colors to apply.';
         renderSidebar();
-        render();
       };
     }
 
@@ -4079,19 +4283,21 @@ async function loadMap() {
         setMapBusy(true, 'Saving terrain colors...');
 
         try {
+          const pending = getPendingTerrainColorContext();
           const saveRes = user.role === 'admin'
             ? await api('/api/admin/map-settings', {
                 method: 'PATCH',
                 timeout: 120000,
                 body: JSON.stringify({
-                  map_terrain_color_overrides: normalizeTerrainColorOverridesClient(adminTerrainColorOverrides),
+                  map_split_water_colors: !!pending.split,
+                  map_terrain_color_overrides: normalizeTerrainColorOverridesClient(pending.admin),
                 }),
               })
             : await api('/api/me/settings', {
                 method: 'PATCH',
                 timeout: 120000,
                 body: JSON.stringify({
-                  terrain_color_overrides: normalizeTerrainColorOverridesClient(userTerrainColorOverrides),
+                  terrain_color_overrides: normalizeTerrainColorOverridesClient(pending.user),
                 }),
               });
 
@@ -4103,10 +4309,22 @@ async function loadMap() {
           }
 
           if (user.role === 'admin') {
-            settings.map_terrain_color_overrides = normalizeTerrainColorOverridesClient(adminTerrainColorOverrides);
+            adminTerrainColorOverrides = normalizeTerrainColorOverridesClient(pending.admin);
+            settings.map_terrain_color_overrides = normalizeTerrainColorOverridesClient(pending.admin);
+            settings.map_split_water_colors = !!pending.split;
           } else {
-            settings.terrain_color_overrides = normalizeTerrainColorOverridesClient(userTerrainColorOverrides);
+            userTerrainColorOverrides = normalizeTerrainColorOverridesClient(pending.user);
+            settings.terrain_color_overrides = normalizeTerrainColorOverridesClient(pending.user);
           }
+
+          pendingAdminTerrainColorOverrides = null;
+          pendingUserTerrainColorOverrides = null;
+          pendingMapSplitWaterColors = null;
+          syncTerrainColorOverrides();
+          terrainLayerDirty = true;
+          waterLayerDirty = true;
+          renderSidebar();
+          render();
 
           updateMapPayloadIndicator(true);
           setMapStatus(user.role === 'admin' ? 'Global terrain colors saved.' : 'Your terrain color overrides saved.', { clearAfterMs: MAP_STATUS_INFO_MS, state: 'success' });
@@ -4116,6 +4334,11 @@ async function loadMap() {
           setMapStatus(message, { state: 'error' });
           if (colorMsgEl) colorMsgEl.textContent = message;
         } finally {
+          if (!hasPendingTerrainColorChanges()) {
+            pendingAdminTerrainColorOverrides = null;
+            pendingUserTerrainColorOverrides = null;
+            pendingMapSplitWaterColors = null;
+          }
           mapSaveInProgress = false;
           saveColorsBtn.disabled = false;
           if (resetColorsBtn) resetColorsBtn.disabled = false;
@@ -4430,7 +4653,7 @@ async function loadMap() {
       const rgbByCode = new Array(TERRAIN_KEYS.length);
       for (let code = 0; code < TERRAIN_KEYS.length; code++) {
         const key = CODE_TO_TERRAIN[code];
-        rgbByCode[code] = (key === 'tundra' || key === 'water') ? null : parseColorToRgb(palette[key] || '#ffffff');
+        rgbByCode[code] = (key === 'water') ? null : parseColorToRgb(palette[key] || '#ffffff');
       }
       const img = terrainLayerCtx.createImageData(mapWidth, mapHeight);
       for (let i = 0; i < terrainGrid.length; i++) {
@@ -4448,9 +4671,13 @@ async function loadMap() {
 
     if (waterLayerDirty) {
       const img = waterLayerCtx.createImageData(mapWidth, mapHeight);
-      const rgb = parseColorToRgb(palette.water || '#357ec7');
+      const seaMask = computeSeaConnectedWaterMask();
+      const waterColors = getWaterColorsForPalette(palette);
+      const seaRgb = parseColorToRgb(waterColors.sea || '#357ec7');
+      const freshRgb = parseColorToRgb(waterColors.fresh || '#357ec7');
       for (let i = 0; i < terrainGrid.length; i++) {
         if (terrainGrid[i] !== TERRAIN_CODES.water) continue;
+        const rgb = seaMask[i] ? seaRgb : freshRgb;
         const p = i * 4;
         img.data[p] = rgb.r;
         img.data[p + 1] = rgb.g;
@@ -4523,33 +4750,112 @@ async function loadMap() {
     return c;
   };
 
+  // Sea water is any water tile connected (4-neighbor) to the map border.
+  // Border-disconnected water bodies are treated as freshwater.
+  const computeSeaConnectedWaterMask = () => {
+    const waterCode = TERRAIN_CODES.water;
+    const seaMask = new Uint8Array(mapWidth * mapHeight);
+    const queue = [];
+
+    const pushIfBorderSea = (x, y) => {
+      if (!inBounds(x, y)) return;
+      const i = idx(x, y);
+      if (seaMask[i]) return;
+      if (terrainGrid[i] !== waterCode) return;
+      seaMask[i] = 1;
+      queue.push(i);
+    };
+
+    for (let x = 0; x < mapWidth; x++) {
+      pushIfBorderSea(x, 0);
+      pushIfBorderSea(x, mapHeight - 1);
+    }
+    for (let y = 1; y < mapHeight - 1; y++) {
+      pushIfBorderSea(0, y);
+      pushIfBorderSea(mapWidth - 1, y);
+    }
+
+    while (queue.length) {
+      const i = queue.pop();
+      const x = i % mapWidth;
+      const y = Math.floor(i / mapWidth);
+      const neighbors = [
+        [x - 1, y],
+        [x + 1, y],
+        [x, y - 1],
+        [x, y + 1],
+        [x - 1, y - 1],
+        [x + 1, y - 1],
+        [x - 1, y + 1],
+        [x + 1, y + 1],
+      ];
+
+      for (const [nx, ny] of neighbors) {
+        if (!inBounds(nx, ny)) continue;
+        const ni = idx(nx, ny);
+        if (seaMask[ni]) continue;
+        if (terrainGrid[ni] !== waterCode) continue;
+        seaMask[ni] = 1;
+        queue.push(ni);
+      }
+    }
+
+    return seaMask;
+  };
+
+  const getNeighborIndexes8 = (i) => {
+    const x = i % mapWidth;
+    const y = Math.floor(i / mapWidth);
+    return [
+      x > 0 ? (i - 1) : -1,
+      x < mapWidth - 1 ? (i + 1) : -1,
+      y > 0 ? (i - mapWidth) : -1,
+      y < mapHeight - 1 ? (i + mapWidth) : -1,
+      (x > 0 && y > 0) ? (i - mapWidth - 1) : -1,
+      (x < mapWidth - 1 && y > 0) ? (i - mapWidth + 1) : -1,
+      (x > 0 && y < mapHeight - 1) ? (i + mapWidth - 1) : -1,
+      (x < mapWidth - 1 && y < mapHeight - 1) ? (i + mapWidth + 1) : -1,
+    ];
+  };
+
   const terrainPixelBreakdownForNation = (nationId) => {
     const idNum = Number(nationId);
     const out = Object.fromEntries(TERRAIN_KEYS.map(k => [k, 0]));
+    out.freshwater = 0;
+    out.seafront = 0;
     const waterCode = TERRAIN_CODES.water;
+    const seaWaterMask = computeSeaConnectedWaterMask();
     for (let i = 0; i < ownerGrid.length; i++) {
       if (ownerGrid[i] !== idNum) continue;
       const key = CODE_TO_TERRAIN[terrainGrid[i]] || 'grassland';
       if (key === 'water') continue; // nations don't own water tiles
       out[key] += 1;
     }
-    // Water stat = land pixels of this nation that border a water tile (coastline pixels).
-    const waterSet = new Set();
+    // Split coastline into seafront vs freshwater by edge-connected water classification.
+    const seafrontSet = new Set();
+    const freshwaterSet = new Set();
     for (let i = 0; i < ownerGrid.length; i++) {
       if (ownerGrid[i] !== idNum) continue;
       if (terrainGrid[i] === waterCode) continue; // skip water tiles owned by nation (shouldn't happen)
-      const x = i % mapWidth;
-      const y = Math.floor(i / mapWidth);
-      if (
-        (x > 0           && terrainGrid[i - 1] === waterCode) ||
-        (x < mapWidth-1  && terrainGrid[i + 1] === waterCode) ||
-        (y > 0           && terrainGrid[i - mapWidth] === waterCode) ||
-        (y < mapHeight-1 && terrainGrid[i + mapWidth] === waterCode)
-      ) {
-        waterSet.add(i);
+      let touchesSea = false;
+      let touchesFreshwater = false;
+
+      for (const ni of getNeighborIndexes8(i)) {
+        if (ni < 0) continue;
+        if (terrainGrid[ni] !== waterCode) continue;
+        if (seaWaterMask[ni]) touchesSea = true;
+        else touchesFreshwater = true;
+      }
+
+      if (touchesSea) {
+        seafrontSet.add(i);
+      } else if (touchesFreshwater) {
+        freshwaterSet.add(i);
       }
     }
-    out.water = waterSet.size;
+    out.seafront = seafrontSet.size;
+    out.freshwater = freshwaterSet.size;
+    out.water = out.seafront + out.freshwater;
     return out;
   };
 
@@ -4592,7 +4898,7 @@ async function loadMap() {
     Object.entries(raw).forEach(([k, v]) => {
       const key = String(k || '').trim();
       const color = String(v || '').trim();
-      if (!key) return;
+      if (!key || key === '0') return;
       if (/^#[0-9A-Fa-f]{6}$/.test(color)) out[key] = color;
     });
     return out;
@@ -4613,7 +4919,7 @@ async function loadMap() {
 
   const mapNationColor = (nationId) => {
     const key = String(Number(nationId || 0));
-    if (!key || key === '0') return '#7d7d7d';
+    if (!key || key === '0') return '#ffffff';
     if (politicalNationColorOverrides[key]) return politicalNationColorOverrides[key];
     const seed = Number(key);
     const hue = Math.abs((seed * 47) % 360);
@@ -4630,12 +4936,15 @@ async function loadMap() {
   };
 
   const computeLabels = () => {
-    const findNearestOwnerPixel = (owner, targetX, targetY, maxRadius = 220) => {
+    ownerComponentGrid = new Int32Array(ownerGrid.length).fill(-1);
+
+    const components = [];
+    const findNearestComponentPixel = (componentId, targetX, targetY, maxRadius = 220) => {
       const cx = clamp(Math.round(targetX), 0, mapWidth - 1);
       const cy = clamp(Math.round(targetY), 0, mapHeight - 1);
 
       const centerIndex = idx(cx, cy);
-      if (ownerGrid[centerIndex] === owner) {
+      if (ownerComponentGrid[centerIndex] === componentId) {
         return { x: cx, y: cy };
       }
 
@@ -4647,15 +4956,15 @@ async function loadMap() {
 
         for (let x = minX; x <= maxX; x++) {
           const topI = idx(x, minY);
-          if (ownerGrid[topI] === owner) return { x, y: minY };
+          if (ownerComponentGrid[topI] === componentId) return { x, y: minY };
           const bottomI = idx(x, maxY);
-          if (ownerGrid[bottomI] === owner) return { x, y: maxY };
+          if (ownerComponentGrid[bottomI] === componentId) return { x, y: maxY };
         }
         for (let y = minY + 1; y < maxY; y++) {
           const leftI = idx(minX, y);
-          if (ownerGrid[leftI] === owner) return { x: minX, y };
+          if (ownerComponentGrid[leftI] === componentId) return { x: minX, y };
           const rightI = idx(maxX, y);
-          if (ownerGrid[rightI] === owner) return { x: maxX, y };
+          if (ownerComponentGrid[rightI] === componentId) return { x: maxX, y };
         }
       }
 
@@ -4669,15 +4978,23 @@ async function loadMap() {
       if (!owner || visited[i]) continue;
       const queue = [i];
       visited[i] = 1;
+      const componentId = components.length;
       let sumX = 0;
       let sumY = 0;
+      let sumXX = 0;
+      let sumYY = 0;
+      let sumXY = 0;
       let count = 0;
       while (queue.length) {
         const p = queue.pop();
+        ownerComponentGrid[p] = componentId;
         const x = p % mapWidth;
         const y = Math.floor(p / mapWidth);
         sumX += x;
         sumY += y;
+        sumXX += x * x;
+        sumYY += y * y;
+        sumXY += x * y;
         count++;
         const nbs = [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]];
         for (const [nx, ny] of nbs) {
@@ -4688,24 +5005,48 @@ async function loadMap() {
           queue.push(ni);
         }
       }
+
+      components.push({
+        componentId,
+        owner,
+        sumX,
+        sumY,
+        sumXX,
+        sumYY,
+        sumXY,
+        count,
+      });
+    }
+
+    for (const component of components) {
+      const { componentId, owner, sumX, sumY, sumXX, sumYY, sumXY, count } = component;
       const meta = getNationById(owner);
       const full = meta?.name || `Nation ${owner}`;
       const name = count < full.length * 70 ? firstLetterName(full) : full;
 
       const centroidX = sumX / count;
       const centroidY = sumY / count;
-      const ownerAnchor = findNearestOwnerPixel(owner, centroidX, centroidY) || {
+      const ownerAnchor = findNearestComponentPixel(componentId, centroidX, centroidY) || {
         x: centroidX,
         y: centroidY,
       };
 
+      const covXX = (sumXX / count) - (centroidX * centroidX);
+      const covYY = (sumYY / count) - (centroidY * centroidY);
+      const covXY = (sumXY / count) - (centroidX * centroidY);
+      const rawAngle = 0.5 * Math.atan2(2 * covXY, covXX - covYY);
+      const maxAngle = Math.PI / 7; // ~25.7deg cap keeps text readable and upright.
+      const angle = clamp(rawAngle, -maxAngle, maxAngle);
+
       labels.push({
+        componentId,
         owner,
         x: centroidX,
         y: centroidY,
         anchorX: ownerAnchor.x,
         anchorY: ownerAnchor.y,
         size: count,
+        angle,
         name,
       });
     }
@@ -4750,6 +5091,7 @@ async function loadMap() {
       const textWidth = ctx.measureText(text).width;
       const textHeight = fontPx * 1.1;
       const pad = 5;
+      const angle = toFiniteNumber(label.angle, 0);
       const stepX = Math.max(textWidth + 16, 28);
       const stepY = Math.max(textHeight + 12, 20);
 
@@ -4765,25 +5107,76 @@ async function loadMap() {
         { dx: -stepX * 0.55, dy: -stepY },
       ];
 
-      const buildBox = (cx, cy) => ({
-        left: cx - (textWidth / 2) - pad,
-        right: cx + (textWidth / 2) + pad,
-        top: cy - (textHeight / 2) - pad,
-        bottom: cy + (textHeight / 2) + pad,
-      });
+      const buildBox = (cx, cy) => {
+        const halfW = (textWidth / 2) + pad;
+        const halfH = (textHeight / 2) + pad;
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        const extentX = Math.abs(cosA * halfW) + Math.abs(sinA * halfH);
+        const extentY = Math.abs(sinA * halfW) + Math.abs(cosA * halfH);
+        return {
+          left: cx - extentX,
+          right: cx + extentX,
+          top: cy - extentY,
+          bottom: cy + extentY,
+        };
+      };
 
-      const candidateIsOnOwnerLand = (cx, cy) => {
-        const worldX = Math.floor((cx - transform.originX) / transform.scale);
-        const worldY = Math.floor((cy - transform.originY) / transform.scale);
-        if (!inBounds(worldX, worldY)) return false;
-        return ownerGrid[idx(worldX, worldY)] === label.owner;
+      const candidateFitsContiguousTerritory = (cx, cy) => {
+        const centerWorldX = Math.floor((cx - transform.originX) / transform.scale);
+        const centerWorldY = Math.floor((cy - transform.originY) / transform.scale);
+        if (!inBounds(centerWorldX, centerWorldY)) return false;
+        const centerIndex = idx(centerWorldX, centerWorldY);
+        if (ownerComponentGrid[centerIndex] !== label.componentId) return false;
+
+        const sampleCols = 5;
+        const sampleRows = 3;
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        let ownerHits = 0;
+        let waterHits = 0;
+        let otherHits = 0;
+        let total = 0;
+
+        for (let row = 0; row < sampleRows; row++) {
+          for (let col = 0; col < sampleCols; col++) {
+            const px = ((col / (sampleCols - 1)) - 0.5) * textWidth;
+            const py = ((row / (sampleRows - 1)) - 0.5) * textHeight;
+            const rx = (px * cosA) - (py * sinA);
+            const ry = (px * sinA) + (py * cosA);
+            const sx = cx + rx;
+            const sy = cy + ry;
+            const worldX = Math.floor((sx - transform.originX) / transform.scale);
+            const worldY = Math.floor((sy - transform.originY) / transform.scale);
+
+            total++;
+            if (!inBounds(worldX, worldY)) {
+              otherHits++;
+              continue;
+            }
+
+            const worldIndex = idx(worldX, worldY);
+            if (ownerComponentGrid[worldIndex] === label.componentId) {
+              ownerHits++;
+            } else if (terrainGrid[worldIndex] === TERRAIN_CODES.water) {
+              waterHits++;
+            } else {
+              otherHits++;
+            }
+          }
+        }
+
+        if (otherHits > 0) return false;
+        const ownerRatio = ownerHits / Math.max(1, total);
+        const waterRatio = waterHits / Math.max(1, total);
+        return ownerRatio >= 0.6 && waterRatio <= 0.4;
       };
 
       let chosen = null;
       for (const candidate of candidates) {
         const cx = anchorX + candidate.dx;
         const cy = anchorY + candidate.dy;
-        if (!candidateIsOnOwnerLand(cx, cy)) continue;
+        if (!candidateFitsContiguousTerritory(cx, cy)) continue;
         const box = buildBox(cx, cy);
         if (occupies.some(used => intersects(box, used))) continue;
         chosen = { cx, cy, box };
@@ -4796,7 +5189,7 @@ async function loadMap() {
           for (const side of sidePref) {
             const cx = anchorX + (side * (stepX * (0.5 + ring * 0.45)));
             const cy = anchorY + (((ring % 2 === 0) ? 1 : -1) * Math.ceil(ring / 2) * stepY);
-            if (!candidateIsOnOwnerLand(cx, cy)) continue;
+            if (!candidateFitsContiguousTerritory(cx, cy)) continue;
             const box = buildBox(cx, cy);
             if (occupies.some(used => intersects(box, used))) continue;
             chosen = { cx, cy, box };
@@ -4806,9 +5199,7 @@ async function loadMap() {
       }
 
       if (!chosen) {
-        const cx = anchorX;
-        const cy = anchorY;
-        chosen = { cx, cy, box: buildBox(cx, cy) };
+        return;
       }
 
       occupies.push(chosen.box);
@@ -4826,8 +5217,12 @@ async function loadMap() {
       ctx.lineWidth = Math.max(2, fontPx / 6);
       ctx.strokeStyle = 'rgba(0,0,0,0.72)';
       ctx.fillStyle = '#f8f8f8';
-      ctx.strokeText(text, chosen.cx, chosen.cy);
-      ctx.fillText(text, chosen.cx, chosen.cy);
+      ctx.save();
+      ctx.translate(chosen.cx, chosen.cy);
+      ctx.rotate(angle);
+      ctx.strokeText(text, 0, 0);
+      ctx.fillText(text, 0, 0);
+      ctx.restore();
     });
   };
 
@@ -4847,7 +5242,7 @@ async function loadMap() {
     transform.originY = ((viewH - mapHeight * scale) / 2) + panY;
 
     ctx.clearRect(0, 0, viewW, viewH);
-    ctx.fillStyle = '#0f1520';
+    ctx.fillStyle = (mapType === 'political' || mode === 'political-editor') ? '#ffffff' : '#0f1520';
     ctx.fillRect(0, 0, viewW, viewH);
 
     ctx.save();
@@ -4925,6 +5320,17 @@ async function loadMap() {
 
   const setNationInfo = async (nationId) => {
     selectedNationId = Number(nationId || 0);
+    const mapNationSelectView = document.getElementById('mapNationSelectView');
+    if (mapNationSelectView) {
+      const preferredValue = selectedNationId > 0 ? String(selectedNationId) : 'me';
+      const fallbackValue = mapNationSelectView.querySelector(`option[value="${preferredValue}"]`)
+        ? preferredValue
+        : 'me';
+      if (String(mapNationSelectView.value || '') !== fallbackValue) {
+        mapNationSelectView.value = fallbackValue;
+      }
+      mapNationSelectView.dispatchEvent(new Event('change', { bubbles: true }));
+    }
     if (!selectedNationId) {
       mapNationInfo.style.display = 'none';
       mapNationInfo.innerHTML = '';
@@ -4970,8 +5376,9 @@ async function loadMap() {
     if (popupFields.includes('color')) {
       infoRows.push(`<div class="map-small-label">Color: <span aria-label="Nation color swatch" style="display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,0.4);vertical-align:middle;background:${nationColor};"></span></div>`);
     }
-    if (popupFields.includes('owned_terrain_pixels')) {
-      infoRows.push(`<div class="map-small-label">Owned Terrain (pixels): ${canViewTerrain ? fmtNum(pixels) : 'Hidden by visibility rules'}</div>`);
+    if (popupFields.includes('owned_terrain_square_miles')) {
+      const squareMiles = pixelsToSquareMiles(pixels);
+      infoRows.push(`<div class="map-small-label">Owned Terrain (sq mi): ${canViewTerrain ? fmtNum(Math.round(squareMiles * 100) / 100) : 'Hidden by visibility rules'}</div>`);
     }
     if (popupFields.includes('total_army_rating')) {
       infoRows.push(`<div class="map-small-label">Total Army Rating: ${canViewArmyRating ? fmtNum(armyRating ?? 0) : 'Hidden by visibility rules'}</div>`);
@@ -5358,9 +5765,9 @@ async function loadMap() {
       terrain_square_miles: {
         grassland: n.terrainBreakdown.grassland,
         mountain: n.terrainBreakdown.mountain,
-        hills: n.terrainBreakdown.forest,
-        freshwater: 0,
-        seafront: n.terrainBreakdown.water,
+        hills: n.terrainBreakdown.hills,
+        freshwater: n.terrainBreakdown.freshwater,
+        seafront: n.terrainBreakdown.seafront,
         desert: n.terrainBreakdown.desert,
         forest: n.terrainBreakdown.forest,
         water: n.terrainBreakdown.water,
@@ -5431,6 +5838,7 @@ async function loadMap() {
 
   const buildNationTerrainStatsMap = () => {
     const waterCode = TERRAIN_CODES.water;
+    const seaWaterMask = computeSeaConnectedWaterMask();
     const statsByNation = new Map();
     const getStats = (nationId) => {
       let stats = statsByNation.get(nationId);
@@ -5439,6 +5847,8 @@ async function loadMap() {
         pixels: 0,
         terrainBreakdown: Object.fromEntries(TERRAIN_KEYS.map(k => [k, 0])),
       };
+      stats.terrainBreakdown.freshwater = 0;
+      stats.terrainBreakdown.seafront = 0;
       statsByNation.set(nationId, stats);
       return stats;
     };
@@ -5458,18 +5868,28 @@ async function loadMap() {
       if (!owner) continue;
       if (terrainGrid[i] === waterCode) continue;
 
-      const x = i % mapWidth;
-      const y = Math.floor(i / mapWidth);
-      if (
-        (x > 0 && terrainGrid[i - 1] === waterCode) ||
-        (x < mapWidth - 1 && terrainGrid[i + 1] === waterCode) ||
-        (y > 0 && terrainGrid[i - mapWidth] === waterCode) ||
-        (y < mapHeight - 1 && terrainGrid[i + mapWidth] === waterCode)
-      ) {
-        const stats = getStats(owner);
-        stats.terrainBreakdown.water = (stats.terrainBreakdown.water || 0) + 1;
+      let touchesSea = false;
+      let touchesFreshwater = false;
+      for (const ni of getNeighborIndexes8(i)) {
+        if (ni < 0) continue;
+        if (terrainGrid[ni] !== waterCode) continue;
+        if (seaWaterMask[ni]) touchesSea = true;
+        else touchesFreshwater = true;
+      }
+
+      const stats = getStats(owner);
+      if (touchesSea) {
+        stats.terrainBreakdown.seafront = (stats.terrainBreakdown.seafront || 0) + 1;
+      } else if (touchesFreshwater) {
+        stats.terrainBreakdown.freshwater = (stats.terrainBreakdown.freshwater || 0) + 1;
       }
     }
+
+    statsByNation.forEach((stats) => {
+      const sea = Math.max(0, Number(stats?.terrainBreakdown?.seafront || 0));
+      const fresh = Math.max(0, Number(stats?.terrainBreakdown?.freshwater || 0));
+      stats.terrainBreakdown.water = sea + fresh;
+    });
 
     return statsByNation;
   };
@@ -5888,6 +6308,10 @@ async function loadMap() {
             <div class="row" style="margin-top:8px;">
               <button class="primary" id="saveMapPopupFieldsBtn">Save Popup Fields</button>
             </div>
+            <label style="margin-top:8px;font-size:12px;">Owned Terrain Formula (use PIXELS)</label>
+            <input id="mapPixelsToSqMilesFormula" type="text" value="${esc(normalizeMapSquareMilesFormulaClient(settings?.map_pixels_to_square_miles_formula || 'PIXELS'))}" placeholder="Examples: PIXELS, PIXELS*0.25, (PIXELS/4)+10">
+            <div class="muted" id="mapPixelsToSqMilesFormulaPreview" style="font-size:11px;margin-top:4px;"></div>
+            <div class="muted" style="font-size:11px;margin-top:4px;">This controls how map popup owned terrain is shown in square miles for players and admin.</div>
           ` : '<div class="muted" style="margin-top:6px;">Popup field configuration is managed by admin.</div>'}
         </div>
         <h3 style="margin-top:10px;">Terrain Sq Miles</h3>
@@ -5991,6 +6415,20 @@ async function loadMap() {
         });
 
         const popupOrderList = document.getElementById('mapPopupOrderList');
+        const mapFormulaInput = document.getElementById('mapPixelsToSqMilesFormula');
+        const mapFormulaPreview = document.getElementById('mapPixelsToSqMilesFormulaPreview');
+        const refreshMapFormulaPreview = () => {
+          if (!mapFormulaPreview) return;
+          mapFormulaPreview.textContent = buildMapFormulaPreviewText(
+            mapFormulaInput?.value || 'PIXELS',
+            settings?.map_pixels_to_square_miles_formula || 'PIXELS'
+          );
+        };
+        if (mapFormulaInput) {
+          mapFormulaInput.addEventListener('input', refreshMapFormulaPreview);
+          refreshMapFormulaPreview();
+        }
+
         if (popupOrderList) {
           const fieldOrder = MAP_POPUP_FIELD_DEFS.map(f => f.key);
           const orderedKeys = [
@@ -6052,10 +6490,12 @@ async function loadMap() {
               checkedInOrder,
               false
             );
+            const mapFormula = normalizeMapSquareMilesFormulaClient(mapFormulaInput?.value || 'PIXELS');
             const saveRes = await api('/api/admin/map-settings', {
               method: 'PATCH',
               body: JSON.stringify({
                 map_popup_fields: mapPopupFields,
+                map_pixels_to_square_miles_formula: mapFormula,
               }),
             });
             if (!saveRes || !saveRes.ok) {
@@ -6063,7 +6503,12 @@ async function loadMap() {
               return;
             }
             settings.map_popup_fields = mapPopupFields;
-            mapStatusMsg.textContent = 'Nation popup fields saved.';
+            settings.map_pixels_to_square_miles_formula = mapFormula;
+            if (mapFormulaInput) mapFormulaInput.value = mapFormula;
+            if (mapFormulaPreview) {
+              mapFormulaPreview.textContent = buildMapFormulaPreviewText(mapFormula, mapFormula);
+            }
+            mapStatusMsg.textContent = 'Nation popup fields and formula saved.';
             if (selectedNationId > 0) {
               setNationInfo(selectedNationId);
             }
@@ -6160,9 +6605,10 @@ async function loadMap() {
           document.getElementById('mapTerrainStats').innerHTML = '<div class="muted">Terrain is hidden by visibility rules for this nation.</div>';
           return;
         }
-        const normalized = normalizeTerrainColorStats(sqMiles);
+        const normalized = normalizeExtendedTerrainSquareMiles(sqMiles);
+        const mapTerrainStatsKeys = ['grassland', 'forest', 'mountain', 'desert', 'tundra', 'magic_grassland', 'water', 'freshwater', 'hills', 'seafront'];
         const total = Math.max(1, Object.values(normalized).reduce((sum, val) => sum + toFiniteNumber(val, 0), 0));
-        document.getElementById('mapTerrainStats').innerHTML = TERRAIN_KEYS.map((k) => {
+        document.getElementById('mapTerrainStats').innerHTML = mapTerrainStatsKeys.map((k) => {
           const v = normalized[k] || 0;
           const value = toFiniteNumber(v, 0);
           const pct = ((value / total) * 100).toFixed(1);
@@ -6202,19 +6648,22 @@ async function loadMap() {
   // avoiding a full O(W*H) rebuild during live painting.
   let brushPaletteSignature = '';
   let brushTerrainRgbByCode = [];
-  let brushWaterRgb = { r: 53, g: 126, b: 199 };
+  let brushSeaWaterRgb = { r: 53, g: 126, b: 199 };
+  let brushFreshWaterRgb = { r: 53, g: 126, b: 199 };
   const syncBrushPaletteCache = () => {
     const palette = getPalette();
-    const signature = JSON.stringify(palette);
+    const signature = JSON.stringify({ palette, splitWaterColors: !!settings.map_split_water_colors });
     if (signature === brushPaletteSignature) return;
     const rgbByCode = new Array(TERRAIN_KEYS.length);
     for (let code = 0; code < TERRAIN_KEYS.length; code++) {
       const key = CODE_TO_TERRAIN[code];
-      rgbByCode[code] = (key === 'tundra' || key === 'water') ? null : parseColorToRgb(palette[key] || '#ffffff');
+      rgbByCode[code] = (key === 'water') ? null : parseColorToRgb(palette[key] || '#ffffff');
     }
     brushPaletteSignature = signature;
     brushTerrainRgbByCode = rgbByCode;
-    brushWaterRgb = parseColorToRgb(palette.water || '#357ec7');
+    const waterColors = getWaterColorsForPalette(palette);
+    brushSeaWaterRgb = parseColorToRgb(waterColors.sea || '#357ec7');
+    brushFreshWaterRgb = parseColorToRgb(waterColors.fresh || '#357ec7');
   };
 
   const applyBrushToTerrainCanvas = (op) => {
@@ -6228,6 +6677,7 @@ async function loadMap() {
     const bh = Math.min(mapHeight, cy + r + 1) - by;
     if (bw <= 0 || bh <= 0) return;
     const offsets = getBrushOffsets(r);
+    const seaWaterMask = computeSeaConnectedWaterMask();
     const tImg = terrainLayerCtx.getImageData(bx, by, bw, bh);
     const wImg = waterLayerCtx.getImageData(bx, by, bw, bh);
     for (let i = 0; i < offsets.length; i += 2) {
@@ -6242,10 +6692,8 @@ async function loadMap() {
       const p = (row * bw + col) * 4;
       if (code === TERRAIN_CODES.water) {
         tImg.data[p + 3] = 0;
-        wImg.data[p] = brushWaterRgb.r; wImg.data[p + 1] = brushWaterRgb.g; wImg.data[p + 2] = brushWaterRgb.b; wImg.data[p + 3] = 255;
-      } else if (code === TERRAIN_CODES.tundra) {
-        tImg.data[p + 3] = 0;
-        wImg.data[p + 3] = 0;
+        const wrgb = seaWaterMask[gi] ? brushSeaWaterRgb : brushFreshWaterRgb;
+        wImg.data[p] = wrgb.r; wImg.data[p + 1] = wrgb.g; wImg.data[p + 2] = wrgb.b; wImg.data[p + 3] = 255;
       } else {
         const rgb = brushTerrainRgbByCode[code];
         tImg.data[p] = rgb.r; tImg.data[p + 1] = rgb.g; tImg.data[p + 2] = rgb.b; tImg.data[p + 3] = 255;
@@ -8219,7 +8667,9 @@ async function loadShop() {
       requirement_json,
     };
     const r = await api('/api/admin/shop/items', { method: 'POST', body: JSON.stringify(payload) });
-    document.getElementById('createShopItemMsg').textContent = r.ok ? 'Created' : 'Failed';
+    document.getElementById('createShopItemMsg').textContent = r.ok
+      ? 'Created'
+      : await readErrorMessage(r, 'Failed to create shop item.');
     if (r.ok) {
       const reload = await api('/api/shop/items?per_page=300');
       const refreshed = extractList(await reload.json());
@@ -8831,6 +9281,9 @@ async function loadSettings() {
         <label for="mapMaxZoomGlobal">Global Max Zoom Percent (all players)</label>
         <input id="mapMaxZoomGlobal" type="number" min="100" max="300" step="1" value="180">
         <label style="margin-top:8px;"><input id="mapShowNationNamesGlobal" type="checkbox"> Show nation names on map labels</label>
+        <label for="mapPixelsToSqMilesFormulaGlobal" style="margin-top:8px;">Owned Terrain Formula (use PIXELS)</label>
+        <input id="mapPixelsToSqMilesFormulaGlobal" type="text" value="PIXELS" placeholder="Examples: PIXELS, PIXELS*0.25, PIXELS/4">
+        <div class="muted" id="mapPixelsToSqMilesFormulaGlobalPreview" style="font-size:11px;margin-top:4px;"></div>
       </div>
       ` : ''}
       <div class="setting-group">
@@ -8859,12 +9312,26 @@ async function loadSettings() {
   };
   const adminMapMaxZoomInput = user.role === 'admin' ? document.getElementById('mapMaxZoomGlobal') : null;
   const adminMapShowNationNamesInput = user.role === 'admin' ? document.getElementById('mapShowNationNamesGlobal') : null;
+  const adminMapFormulaInput = user.role === 'admin' ? document.getElementById('mapPixelsToSqMilesFormulaGlobal') : null;
+  const adminMapFormulaPreview = user.role === 'admin' ? document.getElementById('mapPixelsToSqMilesFormulaGlobalPreview') : null;
+  const refreshAdminMapFormulaPreview = () => {
+    if (!adminMapFormulaPreview) return;
+    adminMapFormulaPreview.textContent = buildMapFormulaPreviewText(
+      adminMapFormulaInput?.value || 'PIXELS',
+      settings?.map_pixels_to_square_miles_formula || 'PIXELS'
+    );
+  };
   if (adminMapMaxZoomInput) {
     const globalMaxZoom = clampPct(toFiniteNumber(settings.map_max_zoom_pct, 180), 100, 300);
     adminMapMaxZoomInput.value = String(Math.round(globalMaxZoom));
   }
   if (adminMapShowNationNamesInput) {
     adminMapShowNationNamesInput.checked = settings.map_show_nation_names !== false;
+  }
+  if (adminMapFormulaInput) {
+    adminMapFormulaInput.value = normalizeMapSquareMilesFormulaClient(settings.map_pixels_to_square_miles_formula || 'PIXELS');
+    adminMapFormulaInput.addEventListener('input', refreshAdminMapFormulaPreview);
+    refreshAdminMapFormulaPreview();
   }
 
   document.getElementById('saveSettings').onclick = async () => {
@@ -8885,6 +9352,7 @@ async function loadSettings() {
         const adminPayload = {
           map_max_zoom_pct: Math.round(clampPct(toFiniteNumber(adminMapMaxZoomInput.value, 180), 100, 300)),
           map_show_nation_names: !!adminMapShowNationNamesInput?.checked,
+          map_pixels_to_square_miles_formula: normalizeMapSquareMilesFormulaClient(adminMapFormulaInput?.value || 'PIXELS'),
         };
         const adminRes = await api('/api/admin/map-settings', { method: 'PATCH', body: JSON.stringify(adminPayload) });
         if (!adminRes?.ok) {
@@ -8892,6 +9360,9 @@ async function loadSettings() {
         }
         settings.map_max_zoom_pct = adminPayload.map_max_zoom_pct;
         settings.map_show_nation_names = adminPayload.map_show_nation_names;
+        settings.map_pixels_to_square_miles_formula = adminPayload.map_pixels_to_square_miles_formula;
+        if (adminMapFormulaInput) adminMapFormulaInput.value = adminPayload.map_pixels_to_square_miles_formula;
+        refreshAdminMapFormulaPreview();
       }
       settings = { ...settings, ...payload };
       setTheme(settings.theme);
@@ -9012,10 +9483,11 @@ async function loadResetPasswordPage() {
 }
 
 async function loadAllNations() {
-
-  const nationsRes = await api('/api/admin/nations');
-  const nationsPayload = await nationsRes.json();
-  const nations = extractList(nationsPayload);
+  const nations = await fetchAllPaginated('/api/admin/nations', {
+    perPage: 100,
+    maxPages: 100,
+    fallbackLabel: 'Failed to load nations.',
+  });
 
   view.innerHTML = `
     <div class="card">
@@ -9300,7 +9772,7 @@ async function loadAllNations() {
       initialIncomeRows.push({ type: 'base', name: resourceName, amount: defaultAmount });
     });
     let sqMiles = {};
-    try { sqMiles = d.terrain?.square_miles_json ? JSON.parse(d.terrain.square_miles_json) : {}; } catch {}
+    try { sqMiles = normalizeExtendedTerrainSquareMiles(d.terrain?.square_miles_json || {}); } catch {}
 
     // Render grouped resource inputs
     function makeResourceInputs(type, values) {
@@ -9423,7 +9895,7 @@ async function loadAllNations() {
       };
     };
 
-    const terrainKeys = ['grassland', 'mountain', 'freshwater', 'hills', 'desert', 'seafront'];
+    const terrainKeys = ['grassland', 'forest', 'mountain', 'desert', 'tundra', 'magic_grassland', 'water', 'freshwater', 'hills', 'seafront'];
     const terrainTotals = Object.fromEntries(terrainKeys.map(k => [k, Math.max(0, Number(sqMiles?.[k] || 0))]));
     const terrainUsed = Object.fromEntries(terrainKeys.map(k => [k, 0]));
     const terrainUsageByBuildingRows = [];
@@ -9494,10 +9966,14 @@ async function loadAllNations() {
         <div class="nation-editor-block">
           <div class="nation-editor-grid">
             <label>Grassland<input id="nSqGrassland" type="number" value="${sqMiles.grassland || 0}" style="margin-top:4px;"></label>
+            <label>Forest<input id="nSqForest" type="number" value="${sqMiles.forest || 0}" style="margin-top:4px;"></label>
             <label>Mountain<input id="nSqMountain" type="number" value="${sqMiles.mountain || 0}" style="margin-top:4px;"></label>
+            <label>Desert<input id="nSqDesert" type="number" value="${sqMiles.desert || 0}" style="margin-top:4px;"></label>
+            <label>Tundra<input id="nSqTundra" type="number" value="${sqMiles.tundra || 0}" style="margin-top:4px;"></label>
+            <label>Magic Grassland<input id="nSqMagicGrassland" type="number" value="${sqMiles.magic_grassland || 0}" style="margin-top:4px;"></label>
+            <label>Water<input id="nSqWater" type="number" value="${sqMiles.water || 0}" style="margin-top:4px;"></label>
             <label>Freshwater<input id="nSqFreshwater" type="number" value="${sqMiles.freshwater || 0}" style="margin-top:4px;"></label>
             <label>Hills<input id="nSqHills" type="number" value="${sqMiles.hills || 0}" style="margin-top:4px;"></label>
-            <label>Desert<input id="nSqDesert" type="number" value="${sqMiles.desert || 0}" style="margin-top:4px;"></label>
             <label>Sea Front<input id="nSqSeafront" type="number" value="${sqMiles.seafront || 0}" style="margin-top:4px;"></label>
           </div>
         </div>
@@ -9861,10 +10337,14 @@ async function loadAllNations() {
         income: incomePayload,
         terrain_square_miles: {
           grassland: Number(document.getElementById('nSqGrassland').value),
+          forest: Number(document.getElementById('nSqForest').value),
           mountain: Number(document.getElementById('nSqMountain').value),
+          desert: Number(document.getElementById('nSqDesert').value),
+          tundra: Number(document.getElementById('nSqTundra').value),
+          magic_grassland: Number(document.getElementById('nSqMagicGrassland').value),
+          water: Number(document.getElementById('nSqWater').value),
           freshwater: Number(document.getElementById('nSqFreshwater').value),
           hills: Number(document.getElementById('nSqHills').value),
-          desert: Number(document.getElementById('nSqDesert').value),
           seafront: Number(document.getElementById('nSqSeafront').value),
         },
       };
@@ -10019,9 +10499,15 @@ async function loadAllNations() {
 }
 
 async function loadNotifications() {
-  const [notifRes, nationsRes] = await Promise.all([api('/api/admin/notifications'), api('/api/admin/nations')]);
+  const [notifRes, nations] = await Promise.all([
+    api('/api/admin/notifications'),
+    fetchAllPaginated('/api/admin/nations', {
+      perPage: 100,
+      maxPages: 100,
+      fallbackLabel: 'Failed to load nations.',
+    }),
+  ]);
   const notifications = await notifRes.json();
-  const nations = extractList(await nationsRes.json());
   const nationOwnerById = Object.fromEntries(nations.map(n => [Number(n.id), Number(n.owner_user_id || 0)]));
 
   const parseMeta = (n) => {
