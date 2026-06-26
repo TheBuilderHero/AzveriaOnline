@@ -11,11 +11,13 @@ class ResourceDefinition extends Model
         'display_name',
         'type',
         'group',
+        'group_order',
         'order',
         'meta',
     ];
 
     protected $casts = [
+        'group_order' => 'integer',
         'meta' => 'array',
     ];
 }

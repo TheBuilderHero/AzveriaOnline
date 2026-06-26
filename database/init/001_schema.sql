@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS unit_catalog (
   code VARCHAR(64) NOT NULL UNIQUE,
   display_name VARCHAR(160) NOT NULL,
   class_name VARCHAR(64) NOT NULL,
+  is_commander TINYINT(1) NOT NULL DEFAULT 0,
   base_stats_json JSON NOT NULL,
   upkeep_json JSON NULL,
   unlocked_by_structure VARCHAR(64) NULL,
@@ -174,9 +175,23 @@ CREATE TABLE IF NOT EXISTS shop_items (
   maintenance_json JSON NULL,
   yearly_effect_json JSON NULL,
   effect_json JSON NULL,
+  requirement_json JSON NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   visibility_json JSON NULL COMMENT 'null = global; ["all"] = global; [1,2,3] = only those user IDs',
   CONSTRAINT fk_shop_items_category FOREIGN KEY (category_id) REFERENCES shop_categories(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS nation_research (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nation_id BIGINT UNSIGNED NOT NULL,
+  shop_item_id BIGINT UNSIGNED NULL,
+  research_code VARCHAR(120) NOT NULL,
+  researched_at TIMESTAMP NULL,
+  created_at TIMESTAMP NULL,
+  updated_at TIMESTAMP NULL,
+  UNIQUE KEY uq_nation_research (nation_id, research_code),
+  CONSTRAINT fk_nation_research_nation FOREIGN KEY (nation_id) REFERENCES nations(id) ON DELETE CASCADE,
+  CONSTRAINT fk_nation_research_item FOREIGN KEY (shop_item_id) REFERENCES shop_items(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS nation_assets (
@@ -194,11 +209,15 @@ CREATE TABLE IF NOT EXISTS nation_assets (
 CREATE TABLE IF NOT EXISTS admin_notifications (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   type VARCHAR(64) NOT NULL,
+  order_status VARCHAR(32) NULL,
   title VARCHAR(255) NOT NULL,
   body TEXT NOT NULL,
   meta_json JSON NULL,
   is_read TINYINT(1) NOT NULL DEFAULT 0,
   read_at TIMESTAMP NULL,
+  reviewed_by_user_id BIGINT UNSIGNED NULL,
+  reviewed_at TIMESTAMP NULL,
+  review_note TEXT NULL,
   created_at TIMESTAMP NULL
 );
 
@@ -210,8 +229,23 @@ CREATE TABLE IF NOT EXISTS game_time (
   processed_years INT UNSIGNED NOT NULL DEFAULT 0,
   elapsed_hours_in_year DECIMAL(10,2) NOT NULL DEFAULT 0,
   auto_increment_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  is_paused TINYINT(1) NOT NULL DEFAULT 0,
+  paused_at TIMESTAMP NULL,
   year_label_offset INT NOT NULL DEFAULT 0,
   updated_at TIMESTAMP NULL
+);
+
+CREATE TABLE IF NOT EXISTS game_time_pause_history (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  paused_at TIMESTAMP NOT NULL,
+  resumed_at TIMESTAMP NULL,
+  paused_by_user_id BIGINT UNSIGNED NULL,
+  resumed_by_user_id BIGINT UNSIGNED NULL,
+  pause_note TEXT NULL,
+  created_at TIMESTAMP NULL,
+  updated_at TIMESTAMP NULL,
+  CONSTRAINT fk_game_time_pause_history_paused_by FOREIGN KEY (paused_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_game_time_pause_history_resumed_by FOREIGN KEY (resumed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_settings (
@@ -245,12 +279,10 @@ CREATE TABLE IF NOT EXISTS game_documents (
 );
 
 INSERT INTO shop_categories (code, display_name) VALUES
-  ('refinement', 'Refinement'),
-  ('structures', 'Structures'),
-  ('upgrades', 'Upgrades'),
-  ('recruitment', 'Recruitment'),
-  ('crafting', 'Crafting'),
-  ('currency_exchange', 'Currency Exchange')
+  ('craft', 'Craft'),
+  ('build', 'Build'),
+  ('recruit', 'Recruit'),
+  ('research', 'Research')
 ON DUPLICATE KEY UPDATE display_name = VALUES(display_name);
 
 INSERT INTO map_layers (layer_type, image_path, updated_at) VALUES
@@ -259,8 +291,8 @@ INSERT INTO map_layers (layer_type, image_path, updated_at) VALUES
   ('political', 'maps/political-map.png', NOW())
 ON DUPLICATE KEY UPDATE image_path = VALUES(image_path), updated_at = VALUES(updated_at);
 
-INSERT INTO game_time (id, started_at, year_started_at, seconds_per_year, processed_years, elapsed_hours_in_year, auto_increment_enabled, year_label_offset, updated_at) VALUES
-  (1, NOW(), NOW(), 172800, 0, 0, 1, 0, NOW())
+INSERT INTO game_time (id, started_at, year_started_at, seconds_per_year, processed_years, elapsed_hours_in_year, auto_increment_enabled, is_paused, paused_at, year_label_offset, updated_at) VALUES
+  (1, NOW(), NOW(), 172800, 0, 0, 1, 0, NULL, 0, NOW())
 ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at);
 
 INSERT INTO game_documents (code, title, content_text, updated_at) VALUES

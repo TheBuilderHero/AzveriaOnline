@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class AccountService
@@ -155,11 +156,12 @@ class AccountService
 
         // Backward-compatible fallback for old defaults format.
         if (!array_key_exists('starting_resources', $defaults) && empty($startingRows)) {
-            foreach (['cow', 'wood', 'ore', 'food'] as $k) {
-                if (!array_key_exists($k, $resources)) {
+            foreach ($resources as $k => $v) {
+                $name = trim((string) $k);
+                if ($name === '') {
                     continue;
                 }
-                $startingRows[] = ['type' => 'base', 'name' => $k, 'amount' => (float) $resources[$k]];
+                $startingRows[] = ['type' => 'base', 'name' => $name, 'amount' => (float) $v];
             }
         }
 
@@ -376,7 +378,89 @@ class AccountService
         }
     }
 
-    public function deleteAccount(User $user, bool $allowAdmin = false): void
+    private function pruneMapEditorStateForDeletedNations(array $nationIds): void
+    {
+        if (empty($nationIds)) {
+            return;
+        }
+
+        $disk = Storage::disk('public');
+        $paths = [
+            'maps/editor-state-active.json',
+            'maps/editor-state-draft.json',
+            'maps/editor-state.json',
+        ];
+
+        foreach ($paths as $path) {
+            if (!$disk->exists($path)) {
+                continue;
+            }
+
+            try {
+                $decoded = json_decode((string) $disk->get($path), true);
+                if (!is_array($decoded)) {
+                    continue;
+                }
+
+                $deleted = array_fill_keys(array_map('intval', $nationIds), true);
+
+                $decoded['political_nations'] = array_values(array_filter(
+                    is_array($decoded['political_nations'] ?? null) ? $decoded['political_nations'] : [],
+                    static function ($row) use ($deleted) {
+                        $nationId = (int) ($row['id'] ?? 0);
+                        if ($nationId <= 0) return true;
+                        return !isset($deleted[$nationId]);
+                    }
+                ));
+
+                $decoded['political_strokes'] = array_values(array_filter(
+                    is_array($decoded['political_strokes'] ?? null) ? $decoded['political_strokes'] : [],
+                    static function ($row) use ($deleted) {
+                        if (!is_array($row)) return false;
+                        $nationId = (int) ($row['nation_id'] ?? 0);
+                        if ($nationId <= 0) return true;
+                        return !isset($deleted[$nationId]);
+                    }
+                ));
+
+                $disk->put($path, json_encode($decoded, JSON_UNESCAPED_SLASHES));
+            } catch (\Throwable $e) {
+                // Best-effort cleanup only.
+            }
+        }
+    }
+
+    private function pruneResourceTopbarOverrideForDeletedUser(int $userId): void
+    {
+        $path = storage_path('app/resource_topbar_config.json');
+        if (!File::exists($path)) {
+            return;
+        }
+
+        try {
+            $decoded = json_decode((string) File::get($path), true);
+            if (!is_array($decoded)) {
+                return;
+            }
+
+            $decoded['overrides'] = array_values(array_filter(
+                is_array($decoded['overrides'] ?? null) ? $decoded['overrides'] : [],
+                static fn ($row) => (int) ($row['user_id'] ?? 0) !== $userId
+            ));
+
+            File::put($path, json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        } catch (\Throwable $e) {
+            // Best-effort cleanup only.
+        }
+    }
+
+    private function purgePlayerDataArtifacts(int $userId, array $nationIds): void
+    {
+        $this->pruneMapEditorStateForDeletedNations($nationIds);
+        $this->pruneResourceTopbarOverrideForDeletedUser($userId);
+    }
+
+    public function deleteAccount(User $user, bool $allowAdmin = false, bool $purgePlayerData = false): void
     {
         if (!$allowAdmin && $user->role !== 'player') {
             throw ValidationException::withMessages([
@@ -384,8 +468,11 @@ class AccountService
             ]);
         }
 
-        DB::transaction(function () use ($user) {
+        $deletedNationIds = [];
+
+        DB::transaction(function () use ($user, &$deletedNationIds) {
             $nationIds = DB::table('nations')->where('owner_user_id', $user->id)->pluck('id');
+            $deletedNationIds = $nationIds->map(static fn ($id) => (int) $id)->all();
             if ($nationIds->isNotEmpty()) {
                 DB::table('nations')->whereIn('id', $nationIds)->delete();
             }
@@ -399,5 +486,9 @@ class AccountService
 
             $user->delete();
         });
+
+        if ($purgePlayerData) {
+            $this->purgePlayerDataArtifacts((int) $user->id, $deletedNationIds);
+        }
     }
 }

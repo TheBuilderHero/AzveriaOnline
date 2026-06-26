@@ -128,6 +128,154 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+SET @has_is_paused := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'game_time'
+    AND COLUMN_NAME = 'is_paused'
+);
+SET @sql := IF(
+  @has_is_paused = 0,
+  'ALTER TABLE game_time ADD COLUMN is_paused TINYINT(1) NOT NULL DEFAULT 0 AFTER auto_increment_enabled',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_paused_at := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'game_time'
+    AND COLUMN_NAME = 'paused_at'
+);
+SET @sql := IF(
+  @has_paused_at = 0,
+  'ALTER TABLE game_time ADD COLUMN paused_at TIMESTAMP NULL AFTER is_paused',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+CREATE TABLE IF NOT EXISTS game_time_pause_history (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  paused_at TIMESTAMP NOT NULL,
+  resumed_at TIMESTAMP NULL,
+  paused_by_user_id BIGINT UNSIGNED NULL,
+  resumed_by_user_id BIGINT UNSIGNED NULL,
+  pause_note TEXT NULL,
+  created_at TIMESTAMP NULL,
+  updated_at TIMESTAMP NULL,
+  CONSTRAINT fk_game_time_pause_history_paused_by FOREIGN KEY (paused_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_game_time_pause_history_resumed_by FOREIGN KEY (resumed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+SET @has_is_commander := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'unit_catalog'
+    AND COLUMN_NAME = 'is_commander'
+);
+SET @sql := IF(
+  @has_is_commander = 0,
+  'ALTER TABLE unit_catalog ADD COLUMN is_commander TINYINT(1) NOT NULL DEFAULT 0 AFTER class_name',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_order_status := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'admin_notifications'
+    AND COLUMN_NAME = 'order_status'
+);
+SET @sql := IF(
+  @has_order_status = 0,
+  'ALTER TABLE admin_notifications ADD COLUMN order_status VARCHAR(32) NULL AFTER type',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_reviewed_by_user_id := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'admin_notifications'
+    AND COLUMN_NAME = 'reviewed_by_user_id'
+);
+SET @sql := IF(
+  @has_reviewed_by_user_id = 0,
+  'ALTER TABLE admin_notifications ADD COLUMN reviewed_by_user_id BIGINT UNSIGNED NULL AFTER read_at',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_reviewed_at := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'admin_notifications'
+    AND COLUMN_NAME = 'reviewed_at'
+);
+SET @sql := IF(
+  @has_reviewed_at = 0,
+  'ALTER TABLE admin_notifications ADD COLUMN reviewed_at TIMESTAMP NULL AFTER reviewed_by_user_id',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_review_note := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'admin_notifications'
+    AND COLUMN_NAME = 'review_note'
+);
+SET @sql := IF(
+  @has_review_note = 0,
+  'ALTER TABLE admin_notifications ADD COLUMN review_note TEXT NULL AFTER reviewed_at',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_resource_definitions_table := (
+  SELECT COUNT(*)
+  FROM information_schema.TABLES
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'resource_definitions'
+);
+
+SET @has_resource_group_order := (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'resource_definitions'
+    AND COLUMN_NAME = 'group_order'
+);
+SET @sql := IF(
+  @has_resource_definitions_table > 0 AND @has_resource_group_order = 0,
+  'ALTER TABLE resource_definitions ADD COLUMN group_order INT UNSIGNED NOT NULL DEFAULT 0 AFTER `group`',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 UPDATE nation_terrain_stats
 SET square_miles_json = JSON_SET(
     COALESCE(square_miles_json, JSON_OBJECT()),
@@ -182,12 +330,13 @@ INSERT INTO building_catalog (code, display_name, max_level) VALUES
   ('lodging', 'Lodging', 5)
 ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), max_level = VALUES(max_level);
 
-INSERT INTO unit_catalog (code, display_name, class_name, base_stats_json, upkeep_json, unlocked_by_structure, created_at, updated_at)
+INSERT INTO unit_catalog (code, display_name, class_name, is_commander, base_stats_json, upkeep_json, unlocked_by_structure, created_at, updated_at)
 VALUES
   (
     'dak_light_infantry',
     'Dakotian Light Infantry',
     'infantry',
+    0,
     JSON_OBJECT('ATK', 9, 'DEF', 7.2, 'DMG', 0.8, 'HP', 2.7, 'MVT', 1.35, 'RNG', 0.5, 'ACT', 2),
     JSON_OBJECT('X', 5, 'F', 0.5),
     'barracks_l1',
@@ -198,6 +347,7 @@ VALUES
     'dak_armored_infantry',
     'Dakotian Armored Infantry',
     'infantry',
+    0,
     JSON_OBJECT('ATK', 12, 'DEF', 14.4, 'DMG', 0.8, 'HP', 3.6, 'MVT', 1.35, 'RNG', 0.5, 'ACT', 2),
     JSON_OBJECT('X', 5, 'F', 0.5),
     'barracks_l2',
@@ -208,6 +358,7 @@ VALUES
     'dak_light_artillery',
     'Dakotian Light Artillery',
     'artillery',
+    0,
     JSON_OBJECT('ATK', 12, 'DEF', 4.8, 'DMG', 1.6, 'HP', 2.7, 'MVT', 0.45, 'RNG', 2, 'ACT', 2),
     JSON_OBJECT('X', 10),
     'factory_l1',
@@ -218,6 +369,7 @@ VALUES
     'dak_tank',
     'Dakotian Tank',
     'tank',
+    0,
     JSON_OBJECT('ATK', 18, 'DEF', 19.2, 'DMG', 1.6, 'HP', 4.5, 'MVT', 1.8, 'RNG', 1, 'ACT', 2, 'ON_DEATH_ENEMY_GAIN', '1O'),
     JSON_OBJECT('X', 10),
     'factory_l3',
@@ -228,13 +380,14 @@ VALUES
     'dak_recon_plane',
     'Dakotian Recon Plane',
     'aircraft',
+    0,
     JSON_OBJECT('ATK', 9, 'DEF', 7.2, 'DMG', 0.8, 'HP', 0.9, 'ACT', 2),
     JSON_OBJECT('X', 10),
     'airfield_l1',
     NOW(),
     NOW()
   )
-ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), class_name = VALUES(class_name), base_stats_json = VALUES(base_stats_json), upkeep_json = VALUES(upkeep_json), unlocked_by_structure = VALUES(unlocked_by_structure), updated_at = VALUES(updated_at);
+ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), class_name = VALUES(class_name), is_commander = VALUES(is_commander), base_stats_json = VALUES(base_stats_json), upkeep_json = VALUES(upkeep_json), unlocked_by_structure = VALUES(unlocked_by_structure), updated_at = VALUES(updated_at);
 
 INSERT INTO shop_items (category_id, code, display_name, cost_json, effect_json, is_active)
 SELECT c.id, 'refine_ore_to_metal', 'Refine Ore to Metal', JSON_OBJECT('ore', 5), JSON_OBJECT('refined', JSON_OBJECT('M', 1)), 1

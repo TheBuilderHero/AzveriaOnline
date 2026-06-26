@@ -34,10 +34,10 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
-        DB::table('shop_categories')->updateOrInsert(['code' => 'refinement'], ['display_name' => 'Refinement']);
-        DB::table('shop_categories')->updateOrInsert(['code' => 'upgrades'], ['display_name' => 'Upgrades']);
-        DB::table('shop_categories')->updateOrInsert(['code' => 'recruitment'], ['display_name' => 'Recruitment']);
-        DB::table('shop_categories')->updateOrInsert(['code' => 'crafting'], ['display_name' => 'Crafting']);
+        DB::table('shop_categories')->updateOrInsert(['code' => 'craft'], ['display_name' => 'Craft']);
+        DB::table('shop_categories')->updateOrInsert(['code' => 'build'], ['display_name' => 'Build']);
+        DB::table('shop_categories')->updateOrInsert(['code' => 'recruit'], ['display_name' => 'Recruit']);
+        DB::table('shop_categories')->updateOrInsert(['code' => 'research'], ['display_name' => 'Research']);
 
         DB::table('map_layers')->updateOrInsert(
             ['layer_type' => 'main'],
@@ -169,7 +169,7 @@ class DatabaseSeeder extends Seeder
             );
         }
 
-        $recruitmentCategory = DB::table('shop_categories')->where('code', 'recruitment')->first();
+        $recruitmentCategory = DB::table('shop_categories')->where('code', 'recruit')->first();
         if ($recruitmentCategory) {
             DB::table('shop_items')->updateOrInsert(
                 ['code' => 'buy_light_infantry'],
@@ -183,17 +183,13 @@ class DatabaseSeeder extends Seeder
             );
         }
 
-        // Currency exchange category
-        DB::table('shop_categories')->updateOrInsert(
-            ['code' => 'currency_exchange'],
-            ['display_name' => 'Currency Exchange']
-        );
+        // Keep legacy items under the new craft category.
 
         // ── Crafting items ────────────────────────────────────────────────────────
         // cost_json keys: cow/wood/ore/food = base; advanced:X = advanced resource;
         //                 currencies:X = currency stored in extra_json.currencies
         // effect_json:    refined = {key:qty}, currency = {key:qty}, unit_code+qty
-        $craftCategory = DB::table('shop_categories')->where('code', 'refinement')->first();
+        $craftCategory = DB::table('shop_categories')->where('code', 'craft')->first();
         if ($craftCategory) {
             $allCraftItems = [
                 // Ore chain
@@ -371,9 +367,8 @@ class DatabaseSeeder extends Seeder
                 ['struct_saf_l10', 'SAF L10', ['cow' => 50], [], [], 'Requires SAF L9.'],
             ];
 
-            $structuresCategoryId = DB::table('shop_categories')->where('code', 'structures')->value('id')
-                ?? DB::table('shop_categories')->where('code', 'crafting')->value('id');
-            $upgradesCategoryId = DB::table('shop_categories')->where('code', 'upgrades')->value('id');
+            $structuresCategoryId = DB::table('shop_categories')->where('code', 'build')->value('id');
+            $upgradesCategoryId = DB::table('shop_categories')->where('code', 'build')->value('id');
 
             foreach ($structureItems as $structure) {
                 [$code, $name, $cost, $yearlyEffect, $maintenance, $description] = array_slice($structure, 0, 6);
@@ -425,7 +420,7 @@ class DatabaseSeeder extends Seeder
         }
 
         // ── Currency exchange items ───────────────────────────────────────────────
-        $currExchCategory = DB::table('shop_categories')->where('code', 'currency_exchange')->first();
+        $currExchCategory = DB::table('shop_categories')->where('code', 'craft')->first();
         if ($currExchCategory) {
             $currencyItems = [
                 ['exch_cow_to_gb',      'Convert Cow → Gobbo Bucks', ['cow' => 1],       ['currency' => ['GB'    => 2000]]],
@@ -474,7 +469,7 @@ class DatabaseSeeder extends Seeder
         }
 
         // ── New recruitment shop items ────────────────────────────────────────────
-        $recCat = DB::table('shop_categories')->where('code', 'recruitment')->first();
+        $recCat = DB::table('shop_categories')->where('code', 'recruit')->first();
         if ($recCat) {
             $newRecruits = [
                 ['recruit_spy',              'Recruit Spy',                   ['cow' => 3],                                        'spy'],

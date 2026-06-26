@@ -127,3 +127,105 @@ Admin can configure defaults applied at account registration:
 
 These defaults are stored and reused for all new player registrations.
 
+## 13) Combat (Battle Tab)
+
+The Combat tab is where you prepare unit information and submit battle orders for admin review.
+
+What you can see:
+- Your commanders list
+- Your units list
+- Each owned unit listed as its own instance card (not merged into one shared stat row)
+- Total Army Rating for your nation
+- Per-unit rating and stat details
+- Army Rating Breakdown panel on each unit
+- Your submitted orders and admin review notes/status
+
+What you can do:
+- Rename your units (custom names)
+- Submit new combat orders
+- Track order status: `pending`, `approved`, `denied`
+
+What admins can additionally do:
+- Edit unit class/status/race/terrain and stat overrides
+- Add private admin notes to each unit instance
+- Set explicit rating overrides
+- Adjust global rating formula equation
+- Approve/deny orders with review notes
+
+## 14) Army Rating Formula Explained (Player View)
+
+Your unit rating is based on either:
+- A formula calculation using unit stats, or
+- An admin override value (if one is set for that unit)
+
+You can see this in each unit's **Army Rating Breakdown** panel.
+
+### Formula Structure
+
+Army rating now uses an equation-style formula configured by admins.
+
+Default formula:
+
+```
+HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)
+```
+
+Final formula rating is rounded down:
+
+```
+formula_rating = floor(formula_result)
+final_rating = override_rating (if present) else formula_rating
+```
+
+### What Each Field Means
+- `ATK`: Attack factor in the equation
+- `DEF`: Defense factor in the equation
+- `DMG`: Damage factor in the equation
+- `HP`: Durability factor in the equation
+- `MVT`: Movement factor in the equation
+- `RNG`: Range factor in the equation
+- `ACT`: Action-economy factor in the equation
+
+Interpretation tips:
+- Multiplication pairs increase impact quickly.
+- Parentheses can create interaction effects between stats.
+- Final value is always rounded down before formula rating is stored.
+
+### Breakdown Panel Reading Guide
+In **Army Rating Breakdown**, you will see:
+- Inputs: stat values used for calculation
+- Formula expression used for that calculation
+- Evaluated expression string
+- Raw formula result
+- Formula Rating after floor rounding
+- Final Rating: rating actually used (formula or override)
+
+If final rating says override is applied, that unit is using an explicit rating value rather than formula output.
+
+### Worked Example
+
+If a unit has:
+- `ATK=12`, `DEF=8`, `DMG=10`, `HP=15`, `MVT=5`, `RNG=3`, `ACT=2`
+
+Using default formula:
+
+`HP*DEF + (ATK+DEF)(MVT+RNG) + ACT(ATK*DMG)`
+
+Then:
+- Raw result = `15*8 + (12+8)*(5+3) + 2*(12*10)`
+- Raw result = `120 + 160 + 240 = 520`
+- Formula rating = `floor(520) = 520`
+
+If no override exists, final rating is `10.6`.
+If override exists (example `12.0`), final rating becomes `12.0`.
+
+## 15) Combat Help Bubble
+
+The Combat tab includes a help bubble labeled:
+- **How Army Rating Is Calculated**
+
+Open it anytime to see:
+- What each formula field means
+- The exact calculation flow
+- Practical balancing interpretation guidance
+

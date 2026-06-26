@@ -16,6 +16,7 @@ class BuyShopItemRequest extends FormRequest
         return [
             'item_id' => ['required', 'integer', 'exists:shop_items,id'],
             'quantity' => ['nullable', 'integer', 'min:1', 'max:1000'],
+            'terrain_type' => ['nullable', 'string', 'max:50'],
         ];
     }
 }
