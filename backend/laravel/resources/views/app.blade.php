@@ -2931,7 +2931,7 @@ async function loadSection(name) {
       `;
     };
 
-    const levelEditorMarkup = (structureId, level, productionObj, maintenanceObj, terrainRule) => {
+    const levelEditorMarkup = (structureId, level, productionObj, maintenanceObj, terrainRule, buildYears) => {
       const productionEntries = Object.entries(productionObj || {});
       const productionRowsMarkup = productionEntries.length
         ? productionEntries.map(([k, v]) => productionRowMarkup(k, v)).join('')
@@ -2945,6 +2945,9 @@ async function loadSection(name) {
           <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px;">
             <strong style="font-size:13px;">Level ${level}</strong>
           </div>
+          <label style="font-size:12px;display:block;margin-bottom:8px;">Build Time (game years)
+            <input class="struct-build-years" data-structure-id="${structureId}" data-level="${level}" type="number" min="0" step="1" value="${Number.isFinite(Number(buildYears)) ? Number(buildYears) : 0}" style="margin-top:4px;max-width:160px;">
+          </label>
           <div class="row" style="justify-content:space-between;align-items:center;">
             <span class="muted" style="font-size:12px;">Production Per Game Year</span>
             <button type="button" class="primary struct-prod-add" data-structure-id="${structureId}" data-level="${level}" style="padding:4px 10px;">+ Add Production</button>
@@ -2964,13 +2967,14 @@ async function loadSection(name) {
       `;
     };
 
-    const levelEditorsMarkup = (structureId, maxLevel, productionMap, maintenanceMap, terrainRequirementMap) => {
+    const levelEditorsMarkup = (structureId, maxLevel, productionMap, maintenanceMap, terrainRequirementMap, buildTimeMap) => {
       const chunks = [];
       for (let level = 1; level <= maxLevel; level++) {
         const levelProductionMap = (productionMap && typeof productionMap === 'object') ? (productionMap[String(level)] || {}) : {};
         const levelMaintenanceMap = (maintenanceMap && typeof maintenanceMap === 'object') ? (maintenanceMap[String(level)] || {}) : {};
         const levelTerrainRule = (terrainRequirementMap && typeof terrainRequirementMap === 'object') ? (terrainRequirementMap[String(level)] || null) : null;
-        chunks.push(levelEditorMarkup(structureId, level, levelProductionMap, levelMaintenanceMap, levelTerrainRule));
+        const levelBuildYears = (buildTimeMap && typeof buildTimeMap === 'object') ? Number(buildTimeMap[String(level)] || 0) : 0;
+        chunks.push(levelEditorMarkup(structureId, level, levelProductionMap, levelMaintenanceMap, levelTerrainRule, levelBuildYears));
       }
       return chunks.join('');
     };
@@ -3007,6 +3011,9 @@ async function loadSection(name) {
       const terrainRequirement = (row.terrain_requirement_json && typeof row.terrain_requirement_json === 'object')
         ? row.terrain_requirement_json
         : {};
+      const buildTimes = (row.build_time_years_json && typeof row.build_time_years_json === 'object')
+        ? row.build_time_years_json
+        : {};
       const sameTerrainAllLevels = areTerrainRulesSameForAllLevels(terrainRequirement, maxLevel);
 
       return `
@@ -3031,7 +3038,7 @@ async function loadSection(name) {
               <span class="muted" style="font-size:12px;">Use this after changing Level Capacity so you can edit production and maintenance for added levels.</span>
             </div>
             <div id="struct-levels-${row.id}">
-              ${levelEditorsMarkup(row.id, maxLevel, production, maintenance, terrainRequirement)}
+              ${levelEditorsMarkup(row.id, maxLevel, production, maintenance, terrainRequirement, buildTimes)}
             </div>
           </details>
           <div class="row" style="margin-top:8px;">
@@ -3143,6 +3150,17 @@ async function loadSection(name) {
       return out;
     };
 
+    const collectBuildTimeMapFromEditor = (structureId) => {
+      const out = {};
+      panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"]`).forEach(levelEditor => {
+        const level = Math.max(1, Number(levelEditor.getAttribute('data-level') || 1));
+        const rawYears = Number(levelEditor.querySelector('.struct-build-years')?.value || 0);
+        if (!Number.isFinite(rawYears)) return;
+        out[String(level)] = Math.max(0, Math.round(rawYears));
+      });
+      return out;
+    };
+
     const syncSameTerrainInputsState = (structureId) => {
       const enabled = !!document.getElementById(`struct-same-terrain-${structureId}`)?.checked;
       panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"]`).forEach(levelEditor => {
@@ -3182,7 +3200,8 @@ async function loadSection(name) {
       const existingProduction = collectProductionMapFromEditor(structureId);
       const existingMaintenance = collectMaintenanceMapFromEditor(structureId);
       const existingTerrainRequirements = collectTerrainRequirementMapFromEditor(structureId);
-      container.innerHTML = levelEditorsMarkup(structureId, maxLevel, existingProduction, existingMaintenance, existingTerrainRequirements);
+      const existingBuildTimes = collectBuildTimeMapFromEditor(structureId);
+      container.innerHTML = levelEditorsMarkup(structureId, maxLevel, existingProduction, existingMaintenance, existingTerrainRequirements, existingBuildTimes);
       const filterInput = document.getElementById(`struct-resource-filter-${structureId}`);
       const filterValue = String(filterInput?.value || '');
       if (filterValue) {
@@ -3325,6 +3344,7 @@ async function loadSection(name) {
               yearly_production_json: {},
               yearly_maintenance_json: {},
               terrain_requirement_json: {},
+              build_time_years_json: {},
             }),
           });
 
@@ -3356,6 +3376,7 @@ async function loadSection(name) {
         const yearlyProduction = collectProductionMapFromEditor(id);
         const yearlyMaintenance = collectMaintenanceMapFromEditor(id);
         const terrainRequirements = collectTerrainRequirementMapFromEditor(id);
+        const buildTimeYears = collectBuildTimeMapFromEditor(id);
 
         if (!name) {
           if (msgEl) msgEl.textContent = 'Name is required.';
@@ -3373,6 +3394,7 @@ async function loadSection(name) {
             yearly_production_json: yearlyProduction,
             yearly_maintenance_json: yearlyMaintenance,
             terrain_requirement_json: terrainRequirements,
+            build_time_years_json: buildTimeYears,
           }),
         });
 
@@ -9521,6 +9543,10 @@ async function loadShop() {
         const terrainReq = (i.terrain_requirement_for_level && typeof i.terrain_requirement_for_level === 'object')
           ? i.terrain_requirement_for_level
           : null;
+        const buildTimeYearsForLevel = Math.max(0, Number(i.build_time_years_for_level || 0));
+        const buildTimeLabel = buildTimeYearsForLevel === 1
+          ? 'Build Time: 1 game year'
+          : `Build Time: ${buildTimeYearsForLevel} game years`;
         const terrainAllowed = Array.isArray(terrainReq?.allowed_terrain)
           ? terrainReq.allowed_terrain.map(v => String(v || '').toLowerCase().trim()).filter(Boolean)
           : [];
@@ -9546,6 +9572,7 @@ async function loadShop() {
             <div class="muted" style="font-size:12px;">${i.description_text || ''}</div>
             <div class="muted" style="font-size:13px;">Cost: ${formatCost(costObj)}</div>
             ${Object.keys(maintenanceObj).length ? `<div class="muted" style="font-size:12px;">Maintenance Per Game Year: ${formatCost(maintenanceObj)}</div>` : ''}
+            ${String(i.category_code || '') === 'build' ? `<div class="muted" style="font-size:12px;">${escapeHtml(buildTimeLabel)}</div>` : ''}
             ${terrainUi}
             ${(!isUpgradeAvailable && i.category_code === 'build') ? '<div class="muted" style="font-size:12px;margin-top:6px;">Need a lower-level structure to upgrade.</div>' : ''}
             <button class="primary buyItem" data-id="${i.id}" data-needs-terrain-selection="${needsTerrainSelection ? '1' : '0'}" ${(!isUpgradeAvailable && i.category_code === 'build') ? 'disabled style="margin-top:6px;opacity:0.45;cursor:not-allowed;"' : 'style="margin-top:6px;"'}>Buy</button>

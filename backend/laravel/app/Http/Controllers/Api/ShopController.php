@@ -60,6 +60,7 @@ class ShopController extends Controller
                 $item->category_name = ucfirst($code);
             }
             $item->terrain_requirement_for_level = $this->structureTerrainRequirementForShopItem($item);
+            $item->build_time_years_for_level = $this->structureBuildTimeYearsForShopItem($item);
             return $item;
         });
 
@@ -271,6 +272,23 @@ class ShopController extends Controller
             }
         }
 
+        $configuredBuildTimes = [];
+        if ($structureMeta && Schema::hasColumn('building_catalog', 'build_time_years_json')) {
+            $rawBuildTimes = DB::table('building_catalog')
+                ->where('code', (string) ($structureMeta['family'] ?? ''))
+                ->value('build_time_years_json');
+            $configuredBuildTimes = $this->normalizeStructureBuildTimeMap(
+                json_decode((string) ($rawBuildTimes ?? 'null'), true) ?: []
+            );
+        }
+        $configuredBuildYears = $structureMeta
+            ? $this->structureBuildYearsForLevel($configuredBuildTimes, (int) ($structureMeta['level'] ?? 1))
+            : 0;
+        $buildCompletesOnYear = null;
+        if ($structureMeta && Schema::hasColumn('nation_buildings', 'completes_on_game_year') && $configuredBuildYears > 0) {
+            $buildCompletesOnYear = $this->currentProcessedYears() + $configuredBuildYears;
+        }
+
         if (is_array($effects) && isset($effects['requires_building_code'])) {
             $requiredCode = (string) $effects['requires_building_code'];
             $requiredLevel = (int) ($effects['requires_building_level'] ?? 1);
@@ -464,16 +482,23 @@ class ShopController extends Controller
             $catalogId = $this->ensureBuildingCatalog($structureMeta['family']);
             $hasTerrainType = Schema::hasColumn('nation_buildings', 'terrain_type');
             $hasTerrainAllocated = Schema::hasColumn('nation_buildings', 'terrain_allocated_square_miles');
+            $hasCompletesOnGameYear = Schema::hasColumn('nation_buildings', 'completes_on_game_year');
+            $targetStatus = $configuredBuildYears > 0
+                ? ($structureMeta['level'] > 1 ? 'upgrading' : 'constructing')
+                : 'built';
             if ($structureMeta['level'] === 1) {
                 for ($i = 0; $i < $quantity; $i++) {
                     $insertPayload = [
                         'nation_id' => $nation->id,
                         'building_catalog_id' => $catalogId,
                         'level' => 1,
-                        'status' => 'built',
+                        'status' => $targetStatus,
                         'created_at' => now(),
                         'updated_at' => now(),
                     ];
+                    if ($hasCompletesOnGameYear) {
+                        $insertPayload['completes_on_game_year'] = $targetStatus === 'built' ? null : $buildCompletesOnYear;
+                    }
                     if ($hasTerrainType) {
                         $insertPayload['terrain_type'] = isset($plannedStructurePlacements[$i])
                             ? ($plannedStructurePlacements[$i]['terrain_type'] ?? null)
@@ -495,9 +520,12 @@ class ShopController extends Controller
                         }
                         $upgradePayload = [
                             'level' => $structureMeta['level'],
-                            'status' => 'built',
+                            'status' => $targetStatus,
                             'updated_at' => now(),
                         ];
+                        if ($hasCompletesOnGameYear) {
+                            $upgradePayload['completes_on_game_year'] = $targetStatus === 'built' ? null : $buildCompletesOnYear;
+                        }
                         if ($hasTerrainType) {
                             $upgradePayload['terrain_type'] = $upgradePlan['terrain_type'] ?? null;
                         }
@@ -539,11 +567,16 @@ class ShopController extends Controller
                         if (!$row) {
                             break;
                         }
-                        DB::table('nation_buildings')->where('id', $row->id)->update([
+                        $fallbackUpgradePayload = [
                             'level' => $structureMeta['level'],
-                            'status' => 'built',
+                            'status' => $targetStatus,
                             'updated_at' => now(),
-                        ]);
+                        ];
+                        if ($hasCompletesOnGameYear) {
+                            $fallbackUpgradePayload['completes_on_game_year'] = $targetStatus === 'built' ? null : $buildCompletesOnYear;
+                        }
+
+                        DB::table('nation_buildings')->where('id', $row->id)->update($fallbackUpgradePayload);
 
                         $lowerCode = 'struct_' . $structureMeta['family'] . '_l' . $requiredLevel;
                         $lowerItemId = DB::table('shop_items')->where('code', $lowerCode)->value('id');
@@ -680,9 +713,63 @@ class ShopController extends Controller
         ];
     }
 
+    private function structureBuildTimeYearsForShopItem($item): int
+    {
+        if (!Schema::hasColumn('building_catalog', 'build_time_years_json')) {
+            return 0;
+        }
+
+        $meta = $this->parseStructureCode((string) ($item->code ?? ''));
+        if (!$meta) {
+            return 0;
+        }
+
+        $raw = DB::table('building_catalog')
+            ->where('code', (string) ($meta['family'] ?? ''))
+            ->value('build_time_years_json');
+        if ($raw === null) {
+            return 0;
+        }
+
+        $map = $this->normalizeStructureBuildTimeMap(
+            json_decode((string) $raw, true) ?: []
+        );
+
+        return $this->structureBuildYearsForLevel($map, (int) ($meta['level'] ?? 1));
+    }
+
     private function terrainKeys(): array
     {
         return ['grassland', 'forest', 'mountain', 'desert', 'tundra', 'magic_grassland', 'water', 'freshwater', 'hills', 'seafront'];
+    }
+
+    private function normalizeStructureBuildTimeMap(array $buildTimes): array
+    {
+        $normalized = [];
+
+        foreach ($buildTimes as $levelKey => $yearsRaw) {
+            $level = max(1, (int) $levelKey);
+            $years = max(0, (int) round((float) $yearsRaw));
+            $normalized[(string) $level] = $years;
+        }
+
+        uksort($normalized, static fn ($a, $b) => (int) $a <=> (int) $b);
+
+        return $normalized;
+    }
+
+    private function structureBuildYearsForLevel(array $buildTimeMap, int $level): int
+    {
+        return max(0, (int) ($buildTimeMap[(string) max(1, $level)] ?? 0));
+    }
+
+    private function currentProcessedYears(): int
+    {
+        if (!Schema::hasTable('game_time')) {
+            return 0;
+        }
+
+        return (int) (DB::table('game_time')->where('id', 1)->value('processed_years') ?? 0);
     }
 
     private function normalizeStructureTerrainRequirementMap(array $requirements): array
