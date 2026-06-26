@@ -343,17 +343,17 @@ The admin shop editor supports all existing item types through JSON fields.
 
 Supported key formats in JSON:
 
-- Base resources: `cow`, `wood`, `ore`, `food`
-- Refined resources: `ref_M`, `ref_RM`, `ref_FS`, `ref_URM`, etc.
-- Currencies: `cur_G`, `cur_S`, `cur_GB`, etc.
+- Base resources: `base:<resource_name>`
+- Advanced resources: `advanced:<resource_name>`
+- Currencies: `currencies:<currency_name>`
 
 Recommended effect patterns:
 
 1. Refinement/product output:
-- `effect_json: {"refined":{"M":1}}`
+- `effect_json: {"advanced":{"M":1}}`
 
 2. Currency output:
-- `effect_json: {"currency":{"G":1}}`
+- `effect_json: {"currencies":{"G":1}}`
 
 3. Unit recruitment:
 - `effect_json: {"unit_code":"dak_light_infantry","qty":1}`
@@ -366,7 +366,6 @@ Recommended effect patterns:
 
 Notes:
 
-- Legacy `effect_json` using `gain` is still supported, but new entries should use `refined`/`currency`.
 - The admin UI "Description / Effects" field is editable and intended for human-readable rule text.
 - The purchase effect/product is controlled by `effect_json` and can be edited through admin item update APIs.
 
@@ -561,10 +560,12 @@ sudo ufw allow 18080/tcp
 - Resource definitions are stored in the new `resource_definitions` table (see migration file: `database/migrations/2026_05_18_000000_create_resource_definitions_table.php`).
 - Resources and groups are editable via the admin menu after deployment.
 
-### Compatibility Notes
-- Legacy keys (`ref_*`, `cur_*`, and legacy `refined` buckets) are still read for backward compatibility.
-- New writes should always use canonical keys and `advanced` as the primary advanced-resource bucket.
-- `refined` is now a compatibility alias derived from `advanced` for older clients/data.
+### Release Notes
+- Release-mode behavior is canonical-only for resource payloads and storage paths.
+- Use only `base:*`, `advanced:*`, and `currencies:*` keys in cost/effect/income payloads.
+- Shop categories are canonical-only: `craft`, `build`, `recruit`, `research`.
+- Map editor state is canonical-only: active/draft state files are used (`editor-state-active.json`, `editor-state-draft.json`) and legacy fallback files are not read.
+- Terrain stats payloads should use canonical keys (for example `seafront`; not alias variants).
 
 ### Migration Steps (Remote Docker Context)
 1. Ensure your Docker context is set to the correct remote:

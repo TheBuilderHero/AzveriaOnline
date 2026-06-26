@@ -19,7 +19,7 @@ class ShopController extends Controller
         return response()->json(
             DB::table('shop_categories')
                 ->whereIn('code', ['craft', 'build', 'recruit', 'research'])
-                ->orderByRaw("FIELD(code, 'craft', 'build', 'recruit', 'research')")
+                ->orderByRaw("CASE code WHEN 'craft' THEN 1 WHEN 'build' THEN 2 WHEN 'recruit' THEN 3 WHEN 'research' THEN 4 ELSE 99 END")
                 ->get()
         );
     }
@@ -32,6 +32,7 @@ class ShopController extends Controller
         $category = $this->normalizeCategoryCode((string) $request->query('category', ''));
         $user = $request->user();
         $isAdmin = $user && $user->role === 'admin';
+        $driver = DB::connection()->getDriverName();
 
         $query = DB::table('shop_items as si')
             ->join('shop_categories as sc', 'si.category_id', '=', 'sc.id')
@@ -39,15 +40,17 @@ class ShopController extends Controller
 
         if (!$isAdmin) {
             $query->where('si.is_active', 1);
-            $userId = $user->id;
-            $query->where(function ($q) use ($userId) {
-                $q->whereNull('si.visibility_json')
-                  ->orWhereRaw('JSON_CONTAINS(si.visibility_json, JSON_QUOTE(CAST(? AS CHAR)), \'$\')', [$userId]);
-            });
+            if ($driver !== 'sqlite') {
+                $userId = $user->id;
+                $query->where(function ($q) use ($userId) {
+                    $q->whereNull('si.visibility_json')
+                      ->orWhereRaw('JSON_CONTAINS(si.visibility_json, JSON_QUOTE(CAST(? AS CHAR)), \'$\')', [$userId]);
+                });
+            }
         }
 
         if ($category !== '') {
-            $query->whereIn('sc.code', $this->categoryAliases($category));
+            $query->where('sc.code', $category);
         }
 
         $rows = $query->orderBy('si.id')->get()->map(function ($item) {
@@ -59,6 +62,24 @@ class ShopController extends Controller
             $item->terrain_requirement_for_level = $this->structureTerrainRequirementForShopItem($item);
             return $item;
         });
+
+        if (!$isAdmin && $driver === 'sqlite') {
+            $viewerId = (int) $user->id;
+            $rows = $rows->filter(function ($item) use ($viewerId) {
+                $raw = $item->visibility_json ?? null;
+                if ($raw === null || trim((string) $raw) === '') {
+                    return true;
+                }
+
+                $ids = json_decode((string) $raw, true);
+                if (!is_array($ids)) {
+                    return false;
+                }
+
+                $normalized = array_map('intval', $ids);
+                return in_array($viewerId, $normalized, true);
+            })->values();
+        }
 
         if ($isAdmin) {
             return response()->json($rows);
@@ -282,14 +303,10 @@ class ShopController extends Controller
 
         $costs = json_decode($item->cost_json, true) ?: [];
         $extra = json_decode($resourceRow->extra_json ?? '{}', true) ?: [];
-        $base = $this->legacyCoreBaseResourceValues($resourceRow);
-        foreach ((is_array($extra['base'] ?? null) ? $extra['base'] : []) as $key => $value) {
-            $base[(string) $key] = (float) $value;
-        }
-        $advanced = is_array($extra['advanced'] ?? null)
-            ? $extra['advanced']
-            : (is_array($extra['refined'] ?? null) ? $extra['refined'] : []);
-        $currencies = is_array($extra['currencies'] ?? null) ? $extra['currencies'] : [];
+        $balances = $this->loadNationBalances($resourceRow);
+        $base = is_array($balances['base'] ?? null) ? $balances['base'] : [];
+        $advanced = is_array($balances['advanced'] ?? null) ? $balances['advanced'] : [];
+        $currencies = is_array($balances['currencies'] ?? null) ? $balances['currencies'] : [];
 
         // Validate all costs
         foreach ($costs as $resource => $cost) {
@@ -345,56 +362,13 @@ class ShopController extends Controller
                 $advanced[(string) $key] = (float) ($advanced[(string) $key] ?? 0) + ((float) $gain * $quantity);
             }
         }
-        if (isset($effects['refined']) && is_array($effects['refined'])) {
-            foreach ($effects['refined'] as $key => $gain) {
-                $advanced[(string) $key] = (float) ($advanced[(string) $key] ?? 0) + ((float) $gain * $quantity);
-            }
-        }
         if (isset($effects['currencies']) && is_array($effects['currencies'])) {
             foreach ($effects['currencies'] as $key => $gain) {
                 $currencies[(string) $key] = (float) ($currencies[(string) $key] ?? 0) + ((float) $gain * $quantity);
             }
         }
-        if (isset($effects['currency']) && is_array($effects['currency'])) {
-            foreach ($effects['currency'] as $key => $gain) {
-                $currencies[(string) $key] = (float) ($currencies[(string) $key] ?? 0) + ((float) $gain * $quantity);
-            }
-        }
 
-        // Legacy compatibility: support effect_json like {"gain":{"metal":1}}.
-        if (isset($effects['gain']) && is_array($effects['gain'])) {
-            foreach ($effects['gain'] as $key => $gain) {
-                $normalizedKey = $this->normalizeRefinedKey((string) $key);
-                if ($normalizedKey !== null) {
-                    $advanced[$normalizedKey] = (float) ($advanced[$normalizedKey] ?? 0) + ((float) $gain * $quantity);
-                }
-            }
-        }
-
-        // Backward-compatible effect handling: direct keys in effect_json
-        foreach ($effects as $effectKey => $effectValue) {
-            if (!is_numeric($effectValue)) {
-                continue;
-            }
-            $gain = (float) $effectValue * $quantity;
-            $token = $this->parseResourceToken((string) $effectKey);
-            if (!$token) {
-                continue;
-            }
-
-            if ($token['bucket'] === 'base') {
-                $base[$token['name']] = (float) ($base[$token['name']] ?? 0) + $gain;
-                continue;
-            }
-
-            if ($token['bucket'] === 'advanced') {
-                $advanced[$token['name']] = (float) ($advanced[$token['name']] ?? 0) + $gain;
-                continue;
-            }
-
-            $currencies[$token['name']] = (float) ($currencies[$token['name']] ?? 0) + $gain;
-        }
-
+        $baseColumns = ['cow', 'wood', 'ore', 'food'];
         $extraBase = [];
         foreach ($base as $key => $value) {
             if (in_array($key, $baseColumns, true)) {
@@ -405,7 +379,6 @@ class ShopController extends Controller
 
         $extra['base'] = $extraBase;
         $extra['advanced'] = $advanced;
-        $extra['refined'] = $advanced;
         $extra['currencies'] = $currencies;
         DB::table('nation_resources')->where('nation_id', $nation->id)->update([
             'cow' => (float) ($base['cow'] ?? 0),
@@ -623,8 +596,8 @@ class ShopController extends Controller
             'message' => 'Purchase successful',
             'remaining' => [
                 'base'       => $this->legacyCoreBaseResourceValues($updatedRow),
-                'advanced'   => $updatedExtra['advanced']   ?? ($updatedExtra['refined'] ?? []),
-                'refined'    => $updatedExtra['advanced']   ?? ($updatedExtra['refined'] ?? []),
+                'advanced'   => $updatedExtra['advanced']   ?? [],
+                'refined'    => $updatedExtra['advanced']   ?? [],
                 'currencies' => $updatedExtra['currencies'] ?? [],
             ],
         ]);
@@ -928,29 +901,6 @@ class ShopController extends Controller
         ]);
     }
 
-    private function normalizeRefinedKey(string $key): ?string
-    {
-        $trimmed = strtoupper(trim($key));
-        if ($trimmed === '') {
-            return null;
-        }
-
-        $aliases = [
-            'METAL' => 'M',
-            'M' => 'M',
-            'RADIOACTIVE_METAL' => 'RM',
-            'RADIOACTIVE METAL' => 'RM',
-            'RM' => 'RM',
-            'FOVIUM_STEEL' => 'FS',
-            'FOVIUM STEEL' => 'FS',
-            'FS' => 'FS',
-            'URANIUM' => 'URM',
-            'URM' => 'URM',
-        ];
-
-        return $aliases[$trimmed] ?? $trimmed;
-    }
-
     private function loadNationBuildingLevels(int $nationId): array
     {
         $rows = DB::table('nation_buildings as nb')
@@ -1007,12 +957,13 @@ class ShopController extends Controller
             $base[(string) $key] = (float) $value;
         }
 
+        $advanced = is_array($extra['advanced'] ?? null) ? $extra['advanced'] : [];
+        $currencies = is_array($extra['currencies'] ?? null) ? $extra['currencies'] : [];
+
         return [
             'base' => $base,
-            'advanced' => is_array($extra['advanced'] ?? null)
-                ? $extra['advanced']
-                : (is_array($extra['refined'] ?? null) ? $extra['refined'] : []),
-            'currencies' => is_array($extra['currencies'] ?? null) ? $extra['currencies'] : [],
+            'advanced' => $advanced,
+            'currencies' => $currencies,
         ];
     }
 
@@ -1138,22 +1089,11 @@ class ShopController extends Controller
         $value = strtolower(trim($code));
 
         return match ($value) {
-            'refinement', 'crafting', 'currency_exchange', 'craft' => 'craft',
-            'structures', 'upgrades', 'build' => 'build',
-            'recruitment', 'recruit' => 'recruit',
+            'craft' => 'craft',
+            'build' => 'build',
+            'recruit' => 'recruit',
             'research' => 'research',
             default => $value,
-        };
-    }
-
-    private function categoryAliases(string $normalized): array
-    {
-        return match ($normalized) {
-            'craft' => ['craft', 'refinement', 'crafting', 'currency_exchange'],
-            'build' => ['build', 'structures', 'upgrades'],
-            'recruit' => ['recruit', 'recruitment'],
-            'research' => ['research'],
-            default => [$normalized],
         };
     }
 }

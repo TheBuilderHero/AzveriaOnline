@@ -1095,6 +1095,19 @@
       border-radius: 10px;
       padding: 8px 10px;
     }
+    .map-controls-dock .map-bottom-center input[type="range"] {
+      width: 100%;
+      min-width: 220px;
+    }
+    .map-controls-dock.map-controls-editor-ui {
+      grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+    }
+    .map-controls-dock.map-controls-editor-ui .map-bottom-center {
+      grid-column: 1 / -1;
+    }
+    .map-controls-dock.map-controls-editor-ui .map-bottom-center input[type="range"] {
+      min-width: 340px;
+    }
     .map-controls-dock .map-bottom-right {
       justify-content: flex-end;
       align-items: stretch;
@@ -1626,14 +1639,13 @@ function normalizeTerrainSquareMiles(raw) {
   const parsed = safeJsonParse(raw, raw) || {};
   const asObject = typeof parsed === 'string' ? (safeJsonParse(parsed, {}) || {}) : parsed;
   const source = (asObject && typeof asObject === 'object') ? asObject : {};
-  const sea = source.seafront ?? source.sea_front ?? source.seaFront ?? 0;
   return {
     grassland: toFiniteNumber(source.grassland, 0),
     mountain: toFiniteNumber(source.mountain, 0),
     freshwater: toFiniteNumber(source.freshwater, 0),
     hills: toFiniteNumber(source.hills, 0),
     desert: toFiniteNumber(source.desert, 0),
-    seafront: toFiniteNumber(sea, 0),
+    seafront: toFiniteNumber(source.seafront, 0),
   };
 }
 
@@ -1879,8 +1891,12 @@ async function loadResources() {
 }
 
 // Keep label resolution dynamic via resource definitions; fallback is generic title-case.
-const LEGACY_RESOURCE_LABELS = {};
 let DYNAMIC_RESOURCE_LABELS = {};
+
+function isCurrencyGroupName(groupName) {
+  const normalized = String(groupName || '').trim().toLowerCase();
+  return normalized.includes('currenc') || normalized === 'common';
+}
 
 function toTitleCase(value) {
   const input = String(value || '').replace(/[_-]+/g, ' ').trim();
@@ -1935,7 +1951,6 @@ function buildNationResourceMaps(resources) {
 
   addEntries(base, extra.base, 'base');
   addEntries(advanced, extra.advanced, 'advanced');
-  addEntries(advanced, extra.refined, 'advanced');
   addEntries(currencies, extra.currencies, 'currencies');
   addEntries(base, row.base, 'base');
   addEntries(advanced, row.advanced, 'advanced');
@@ -1973,9 +1988,9 @@ function buildNationResourceMaps(resources) {
       return;
     }
 
-    const legacyKey = String(rawKey || '').trim();
-    if (!legacyKey) return;
-    base[legacyKey] = (toFiniteNumber(base[legacyKey], 0) + amount);
+    const safeKey = String(rawKey || '').trim();
+    if (!safeKey) return;
+    base[safeKey] = (toFiniteNumber(base[safeKey], 0) + amount);
   });
 
   return { extra, base, advanced, currencies };
@@ -1985,13 +2000,17 @@ function setDynamicResourceLabels(defs) {
   const labels = {};
   ['base', 'advanced'].forEach(type => {
     const groups = defs?.[type] || {};
-    Object.values(groups).forEach(arr => {
+    Object.entries(groups).forEach(([groupName, arr]) => {
+      const isCurrencyGroup = type === 'base' && isCurrencyGroupName(groupName);
       (arr || []).forEach(def => {
         const name = String(def?.name || '').trim();
         if (!name) return;
         const display = String(def?.display_name || name).trim() || name;
         const canonical = `${type}:${name}`;
         labels[canonical] = display;
+        if (isCurrencyGroup) {
+          labels[`currencies:${name}`] = display;
+        }
       });
     });
   });
@@ -2003,7 +2022,6 @@ function labelKey(k) {
   const canonical = canonicalResourceKey(raw);
   if (canonical && DYNAMIC_RESOURCE_LABELS[canonical]) return DYNAMIC_RESOURCE_LABELS[canonical];
   if (DYNAMIC_RESOURCE_LABELS[raw]) return DYNAMIC_RESOURCE_LABELS[raw];
-  if (LEGACY_RESOURCE_LABELS[raw]) return LEGACY_RESOURCE_LABELS[raw];
 
   if (canonical.startsWith('base:') || canonical.startsWith('advanced:') || canonical.startsWith('currencies:')) {
     return toTitleCase(canonical.split(':', 2)[1] || raw);
@@ -2383,19 +2401,7 @@ async function loadSection(name) {
       return out;
     };
 
-    const oldResources = defaults.resources || {};
-    const oldRefined = defaults.refined_resources || {};
-
-    const hasCanonicalStarting = Array.isArray(defaults.starting_resources);
-
-    const startRows = normalizeRows(
-      hasCanonicalStarting
-        ? defaults.starting_resources
-        : [
-            ...Object.entries(oldResources).map(([name, amount]) => ({ type: 'base', name, amount })),
-            ...Object.entries(oldRefined).map(([name, amount]) => ({ type: 'advanced', name, amount })),
-          ]
-    );
+    const startRows = normalizeRows(Array.isArray(defaults.starting_resources) ? defaults.starting_resources : []);
     // Only use canonical dynamic resources for income
     const incomeRows = normalizeRows(Array.isArray(defaults.income_resources) ? defaults.income_resources : []);
 
@@ -2812,7 +2818,7 @@ async function loadSection(name) {
         (defs || []).forEach(def => {
           const name = String(def?.name || '').trim();
           if (!name) return;
-          if (type === 'base' && String(groupName || '').toLowerCase().includes('currenc')) {
+          if (type === 'base' && isCurrencyGroupName(groupName)) {
             addResourceOption(`currencies:${name}`, `Currencies - ${groupName}`);
             return;
           }
@@ -3481,7 +3487,7 @@ async function loadPlayer() {
       if (!nonZeroRows) return '';
 
       const openDefault = (
-        (type === 'base' && (group === 'Currencies' || group === 'Common')) ||
+        (type === 'base' && isCurrencyGroupName(group)) ||
         (type === 'advanced' && (group === 'Uncommon' || group === 'Rare'))
       );
       return `<details style="margin-top:6px;"${openDefault ? ' open' : ''}>
@@ -3512,18 +3518,13 @@ async function loadPlayer() {
         const baseVals = (vals.base && typeof vals.base === 'object') ? vals.base : {};
         const advancedVals = (vals.advanced && typeof vals.advanced === 'object') ? vals.advanced : {};
         const currencyVals = (vals.currencies && typeof vals.currencies === 'object') ? vals.currencies : {};
-        const refinedVals = (vals.refined && typeof vals.refined === 'object') ? vals.refined : {};
 
         // Preferred dynamic structure
         Object.entries(baseVals).forEach(([k, v]) => entries.push([`base:${k}`, v]));
         Object.entries(advancedVals).forEach(([k, v]) => entries.push([`advanced:${k}`, v]));
         Object.entries(currencyVals).forEach(([k, v]) => entries.push([`currencies:${k}`, v]));
 
-        // Backward-compatible refined fallback when advanced bucket is absent.
-        if (Object.keys(advancedVals).length === 0) {
-          Object.entries(refinedVals).forEach(([k, v]) => entries.push([`advanced:${k}`, v]));
-        }
-        // REMOVE legacy flat structure fallback. Only render canonical dynamic resources.
+        // Only render canonical dynamic resources.
       }
 
       const nonZeroEntries = entries.filter(([_, v]) => toFiniteNumber(v, 0) !== 0);
@@ -4556,16 +4557,10 @@ async function loadMap() {
     });
     return out;
   };
-  const legacyTerrainColorOverrides = (activeEditorState.terrain_color_overrides && typeof activeEditorState.terrain_color_overrides === 'object')
-    ? normalizeTerrainColorOverridesClient(activeEditorState.terrain_color_overrides)
-    : {};
   let adminTerrainColorOverrides = normalizeTerrainColorOverridesClient(settings.map_terrain_color_overrides || {});
   let userTerrainColorOverrides = user.role === 'admin'
     ? {}
     : normalizeTerrainColorOverridesClient(settings.terrain_color_overrides || {});
-  if (Object.keys(adminTerrainColorOverrides).length === 0 && Object.keys(userTerrainColorOverrides).length === 0 && Object.keys(legacyTerrainColorOverrides).length > 0) {
-    adminTerrainColorOverrides = { ...legacyTerrainColorOverrides };
-  }
   let colorOverrides = { ...adminTerrainColorOverrides, ...userTerrainColorOverrides };
   let pendingAdminTerrainColorOverrides = null;
   let pendingUserTerrainColorOverrides = null;
@@ -5502,7 +5497,7 @@ async function loadMap() {
     const out = Object.fromEntries(TERRAIN_KEYS.map(k => [k, 0]));
     const hasForest = Object.prototype.hasOwnProperty.call(source, 'forest');
     const hasWater = Object.prototype.hasOwnProperty.call(source, 'water');
-    const legacySea = toFiniteNumber(source.seafront ?? source.sea_front ?? source.seaFront, 0);
+    const seafront = toFiniteNumber(source.seafront, 0);
 
     out.grassland = toFiniteNumber(source.grassland, 0);
     out.forest = hasForest ? toFiniteNumber(source.forest, 0) : toFiniteNumber(source.hills, 0);
@@ -5512,7 +5507,7 @@ async function loadMap() {
     out.magic_grassland = toFiniteNumber(source.magic_grassland, 0);
     out.water = hasWater
       ? toFiniteNumber(source.water, 0)
-      : toFiniteNumber(source.freshwater, 0) + legacySea;
+      : toFiniteNumber(source.freshwater, 0) + seafront;
 
     return out;
   };
@@ -6172,6 +6167,7 @@ async function loadMap() {
     const inEditorMode = (mode === 'terrain-editor' || mode === 'political-editor');
     if (mapControlsDock) {
       mapControlsDock.classList.toggle('mobile-map-ui', isMobileTools && inEditorMode);
+      mapControlsDock.classList.toggle('map-controls-editor-ui', !isMobileTools && inEditorMode);
     }
 
     mapBottomLeftTools.style.display = (mode === 'terrain-editor' || mode === 'political-editor') ? 'block' : 'none';
@@ -8967,7 +8963,7 @@ async function loadOtherNations() {
       }
 
       // Advanced Resources
-      const canViewAdvanced = !!(visibility.resources_advanced ?? visibility.resources_refined);
+      const canViewAdvanced = !!visibility.resources_advanced;
       if (canViewAdvanced && advanced) {
         const groups = resourceDefs.advanced || {};
         const html = Object.entries(groups).map(([group, defs]) => {
@@ -9205,7 +9201,7 @@ async function loadShop() {
         (arr || []).forEach(def => {
           const name = String(def?.name || '').trim();
           if (!name) return;
-          const key = (type === 'base' && String(groupName || '').toLowerCase().includes('currenc'))
+          const key = (type === 'base' && isCurrencyGroupName(groupName))
             ? `currencies:${name}`
             : `${type}:${name}`;
           if (seen.has(key)) return;
@@ -10095,17 +10091,7 @@ async function loadNewAccounts() {
     return out;
   };
 
-  const hasCanonicalStarting = Array.isArray(d.starting_resources);
-  const hasCanonicalIncome = Array.isArray(d.income_resources);
-
-  const startRows = normalizeRows(
-    hasCanonicalStarting
-      ? d.starting_resources
-      : [
-          ...Object.entries(d.resources || {}).map(([name, amount]) => ({ type: 'base', name, amount })),
-          ...Object.entries(d.refined_resources || {}).map(([name, amount]) => ({ type: 'advanced', name, amount })),
-        ]
-  );
+  const startRows = normalizeRows(Array.isArray(d.starting_resources) ? d.starting_resources : []);
   // Only use canonical dynamic resources for income
   const incomeRows = normalizeRows(Array.isArray(d.income_resources) ? d.income_resources : []);
 

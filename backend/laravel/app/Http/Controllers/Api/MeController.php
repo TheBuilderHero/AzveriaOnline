@@ -47,21 +47,17 @@ class MeController extends Controller
             ->get();
 
         $extra = json_decode($resources->extra_json ?? '{}', true) ?: [];
+        $resourceState = $this->readNationResourceState((object) $resources);
         $incomeMap = $this->normalizeIncomeMap($extra);
-        // Only use canonical dynamic resources for base resources
-        $baseResources = [];
-        foreach (($extra['base'] ?? []) as $key => $value) {
-            $baseResources[(string) $key] = (float) $value;
-        }
-        $advancedResources = is_array($extra['advanced'] ?? null)
-            ? $extra['advanced']
-            : (is_array($extra['refined'] ?? null) ? $extra['refined'] : []);
+        $baseResources = $resourceState['base'];
+        $advancedResources = $resourceState['advanced'];
+        $currencyResources = $resourceState['currencies'];
 
         $structuredResources = [
             'base' => $baseResources,
             'advanced' => $advancedResources,
             'refined' => $advancedResources,
-            'currencies' => $extra['currencies'] ?? [],
+            'currencies' => $currencyResources,
         ];
 
         $projection = [
@@ -281,18 +277,10 @@ class MeController extends Controller
         }
 
         $extra = json_decode($row->extra_json ?? '{}', true) ?: [];
-        $base = [];
-        foreach (($extra['base'] ?? []) as $key => $value) {
-            $base[(string) $key] = (float) $value;
-        }
-        foreach ($this->legacyCoreBaseResourceValues($row) as $key => $value) {
-            if (!array_key_exists($key, $base)) {
-                $base[$key] = (float) $value;
-            }
-        }
-        $advanced = is_array($extra['advanced'] ?? null)
-            ? $extra['advanced']
-            : (is_array($extra['refined'] ?? null) ? $extra['refined'] : []);
+        $resourceState = $this->readNationResourceState((object) $row);
+        $base = $resourceState['base'];
+        $advanced = $resourceState['advanced'];
+        $currencies = $resourceState['currencies'];
 
         $displayNames = $this->resourceDisplayNames();
         $selection = $this->resolveTopbarSelectionForUser((int) $request->user()->id, $displayNames);
@@ -342,7 +330,7 @@ class MeController extends Controller
             'base' => $base,
             'advanced' => $advanced,
             'refined' => $advanced,
-            'currencies' => $extra['currencies'] ?? [],
+            'currencies' => $currencies,
             'topbar_display' => $topbarDisplay,
         ]);
     }
@@ -568,9 +556,14 @@ class MeController extends Controller
     {
         $actorUserId = (int) $request->user()->id;
 
+        $driver = DB::connection()->getDriverName();
+        $actorUserFilterSql = $driver === 'sqlite'
+            ? 'CAST(json_extract(meta_json, "$.actor_user_id") AS INTEGER) = ?'
+            : 'CAST(JSON_UNQUOTE(JSON_EXTRACT(meta_json, "$.actor_user_id")) AS UNSIGNED) = ?';
+
         $rows = DB::table('admin_notifications')
             ->where('type', 'combat_order')
-            ->whereRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(meta_json, "$.actor_user_id")) AS UNSIGNED) = ?', [$actorUserId])
+            ->whereRaw($actorUserFilterSql, [$actorUserId])
             ->orderByDesc('created_at')
             ->limit(200)
             ->get();
@@ -656,7 +649,7 @@ class MeController extends Controller
             ->leftJoin('nations', 'nations.owner_user_id', '=', 'users.id')
             ->where('role', 'player')
             ->select('users.id', 'users.name', 'users.email', 'nations.id as nation_id', 'nations.name as nation_name')
-            ->orderBy('name')
+            ->orderBy('users.name')
             ->get();
         return response()->json($rows);
     }
@@ -1466,30 +1459,79 @@ class MeController extends Controller
 
     private function accumulateProjection(array &$bucket, string $key, float $value): void
     {
-        if (str_starts_with($key, 'base:')) {
-            $baseKey = substr($key, 5);
-            if ($baseKey !== '') {
-                $bucket['base'][$baseKey] = (float) ($bucket['base'][$baseKey] ?? 0) + $value;
-            }
+        $token = $this->parseResourceToken($key);
+        if (!$token) {
             return;
         }
 
-        if (str_starts_with($key, 'advanced:')) {
-            $advancedKey = substr($key, 9);
-            if ($advancedKey !== '') {
-                $bucket['advanced'][$advancedKey] = (float) ($bucket['advanced'][$advancedKey] ?? 0) + $value;
-                $bucket['refined'][$advancedKey] = (float) ($bucket['refined'][$advancedKey] ?? 0) + $value;
-            }
+        $name = $token['name'];
+        if ($token['bucket'] === 'base') {
+            $bucket['base'][$name] = (float) ($bucket['base'][$name] ?? 0) + $value;
             return;
         }
 
-        if (!str_contains($key, ':')) {
-            $name = trim($key);
-            if ($name !== '') {
-                $bucket['base'][$name] = (float) ($bucket['base'][$name] ?? 0) + $value;
-            }
+        if ($token['bucket'] === 'advanced') {
+            $bucket['advanced'][$name] = (float) ($bucket['advanced'][$name] ?? 0) + $value;
+            $bucket['refined'][$name] = (float) ($bucket['refined'][$name] ?? 0) + $value;
             return;
         }
+
+        $bucket['currencies'][$name] = (float) ($bucket['currencies'][$name] ?? 0) + $value;
+    }
+
+    private function parseResourceToken(string $rawKey): ?array
+    {
+        $key = trim($rawKey);
+        if ($key === '') {
+            return null;
+        }
+
+        if (str_contains($key, ':')) {
+            [$rawType, $rawName] = explode(':', $key, 2);
+            $type = strtolower(trim($rawType));
+            $name = trim($rawName);
+            if ($name === '') {
+                return null;
+            }
+
+            if ($type === 'base') {
+                return ['bucket' => 'base', 'name' => $name];
+            }
+            if ($type === 'advanced') {
+                return ['bucket' => 'advanced', 'name' => $name];
+            }
+            if ($type === 'currencies') {
+                return ['bucket' => 'currencies', 'name' => $name];
+            }
+
+            return null;
+        }
+
+        return ['bucket' => 'base', 'name' => $key];
+    }
+
+    private function readNationResourceState(object $row): array
+    {
+        $extra = json_decode((string) ($row->extra_json ?? '{}'), true) ?: [];
+        $base = [];
+        foreach ((is_array($extra['base'] ?? null) ? $extra['base'] : []) as $key => $value) {
+            $base[(string) $key] = (float) $value;
+        }
+
+        foreach ($this->legacyCoreBaseResourceValues($row) as $key => $value) {
+            if (!array_key_exists($key, $base)) {
+                $base[$key] = (float) $value;
+            }
+        }
+
+        $advanced = is_array($extra['advanced'] ?? null) ? $extra['advanced'] : [];
+        $currencies = is_array($extra['currencies'] ?? null) ? $extra['currencies'] : [];
+
+        return [
+            'base' => array_map(static fn ($v) => (float) $v, $base),
+            'advanced' => array_map(static fn ($v) => (float) $v, $advanced),
+            'currencies' => array_map(static fn ($v) => (float) $v, $currencies),
+        ];
     }
 
     private function normalizeIncomeMap(array $extra): array
@@ -1500,7 +1542,12 @@ class MeController extends Controller
                 if (!is_array($entry)) {
                     continue;
                 }
-                $type = ($entry['type'] ?? '') === 'advanced' ? 'advanced' : 'base';
+                $rawType = strtolower(trim((string) ($entry['type'] ?? 'base')));
+                $type = match ($rawType) {
+                    'advanced' => 'advanced',
+                    'currencies' => 'currencies',
+                    default => 'base',
+                };
                 $name = trim((string) ($entry['name'] ?? ''));
                 if ($name === '') {
                     continue;
@@ -1517,21 +1564,11 @@ class MeController extends Controller
 
         $out = [];
         foreach ($income as $key => $value) {
-            $rawKey = (string) $key;
-            if (str_contains($rawKey, ':')) {
-                [$type, $name] = explode(':', $rawKey, 2);
-                $type = trim(strtolower($type));
-                $name = trim($name);
-                if (($type === 'base' || $type === 'advanced') && $name !== '') {
-                    $out[$type . ':' . $name] = (float) $value;
-                }
+            $token = $this->parseResourceToken((string) $key);
+            if (!$token) {
                 continue;
             }
-
-            $name = trim($rawKey);
-            if ($name !== '') {
-                $out['base:' . $name] = (float) $value;
-            }
+            $out[$token['bucket'] . ':' . $token['name']] = (float) $value;
         }
 
         return $out;

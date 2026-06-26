@@ -133,10 +133,17 @@ class NationController extends Controller
                 if ($resources) {
                     $extra = json_decode($resources->extra_json ?? '{}', true) ?: [];
                     if (!$visibility['resources_base']) {
-                        $resources->cow = null;
-                        $resources->wood = null;
-                        $resources->ore = null;
-                        $resources->food = null;
+                        foreach (get_object_vars($resources) as $key => $value) {
+                            $name = (string) $key;
+                            if (in_array($name, ['nation_id', 'extra_json', 'updated_at', 'created_at'], true)) {
+                                continue;
+                            }
+                            if (!is_numeric($value)) {
+                                continue;
+                            }
+                            $resources->{$name} = null;
+                        }
+                        $extra['base'] = [];
                     }
                     $advancedVisible = ($visibility['resources_advanced'] ?? true) && ($visibility['resources_refined'] ?? true);
                     if (!$advancedVisible) {

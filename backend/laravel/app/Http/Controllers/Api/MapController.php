@@ -13,7 +13,6 @@ class MapController extends Controller
 {
     private const ACTIVE_EDITOR_STATE_PATH = 'maps/editor-state-active.json';
     private const DRAFT_EDITOR_STATE_PATH = 'maps/editor-state-draft.json';
-    private const LEGACY_EDITOR_STATE_PATH = 'maps/editor-state.json';
 
     public function __construct(private AccountService $accounts)
     {
@@ -260,7 +259,6 @@ class MapController extends Controller
             Storage::disk('public')->delete([
                 self::ACTIVE_EDITOR_STATE_PATH,
                 self::DRAFT_EDITOR_STATE_PATH,
-                self::LEGACY_EDITOR_STATE_PATH,
             ]);
         } catch (\Throwable $e) {
             return response()->json([
@@ -474,11 +472,6 @@ class MapController extends Controller
         $state = $this->readStateFromDisk(self::ACTIVE_EDITOR_STATE_PATH);
         if (is_array($state)) {
             return array_merge($this->defaultEditorState(), $state);
-        }
-
-        $legacyState = $this->readStateFromDisk(self::LEGACY_EDITOR_STATE_PATH);
-        if (is_array($legacyState)) {
-            return array_merge($this->defaultEditorState(), $legacyState);
         }
 
         return $this->defaultEditorState();

@@ -1411,9 +1411,14 @@ class AdminController extends Controller
             'user_id' => ['required', 'integer', 'exists:users,id'],
         ]);
 
+        $driver = DB::connection()->getDriverName();
+        $actorUserFilterSql = $driver === 'sqlite'
+            ? 'CAST(json_extract(meta_json, "$.actor_user_id") AS INTEGER) = ?'
+            : 'CAST(JSON_UNQUOTE(JSON_EXTRACT(meta_json, "$.actor_user_id")) AS UNSIGNED) = ?';
+
         $rows = DB::table('admin_notifications')
             ->where('type', 'combat_order')
-            ->whereRaw('CAST(JSON_UNQUOTE(JSON_EXTRACT(meta_json, "$.actor_user_id")) AS UNSIGNED) = ?', [(int) $data['user_id']])
+            ->whereRaw($actorUserFilterSql, [(int) $data['user_id']])
             ->orderByDesc('created_at')
             ->limit(300)
             ->get();
@@ -2277,8 +2282,9 @@ class AdminController extends Controller
         ]);
 
         $categoryCode = DB::table('shop_categories')->where('id', $data['category_id'])->value('code') ?? 'item';
-        $baseCode = $data['code']
-            ? Str::slug((string) $data['code'], '_')
+        $providedCode = trim((string) ($data['code'] ?? ''));
+        $baseCode = $providedCode !== ''
+            ? Str::slug($providedCode, '_')
             : Str::slug($categoryCode . '_' . $data['display_name'], '_');
         $baseCode = trim($baseCode, '_');
         if ($baseCode === '') {

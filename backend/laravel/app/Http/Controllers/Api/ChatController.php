@@ -592,12 +592,18 @@ class ChatController extends Controller
             if (!is_array($row)) {
                 continue;
             }
-            $type = (($row['type'] ?? '') === 'advanced') ? 'advanced' : 'base';
+            $rawType = strtolower(trim((string) ($row['type'] ?? 'base')));
+            $type = match ($rawType) {
+                'advanced' => 'advanced',
+                'currencies' => 'currencies',
+                default => 'base',
+            };
             $name = trim((string) ($row['name'] ?? ''));
             $amount = (float) ($row['amount'] ?? 0);
             if ($name === '' || $amount <= 0) {
                 continue;
             }
+
             $key = $type . ':' . $name;
             if (!isset($out[$key])) {
                 $out[$key] = ['type' => $type, 'name' => $name, 'amount' => 0.0];
@@ -614,7 +620,7 @@ class ChatController extends Controller
         $extra = json_decode((string) ($row->extra_json ?? '{}'), true);
         $extra = is_array($extra) ? $extra : [];
         $baseExtra = is_array($extra['base'] ?? null) ? $extra['base'] : [];
-        $advanced = is_array($extra['advanced'] ?? null) ? $extra['advanced'] : (is_array($extra['refined'] ?? null) ? $extra['refined'] : []);
+        $advanced = is_array($extra['advanced'] ?? null) ? $extra['advanced'] : [];
         $currencies = is_array($extra['currencies'] ?? null) ? $extra['currencies'] : [];
 
         $core = [];
