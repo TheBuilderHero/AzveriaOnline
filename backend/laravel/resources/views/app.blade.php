@@ -115,257 +115,721 @@
     .msg-sender { font-size:11px; margin-bottom:3px; font-weight:bold; }
     .msg-wrap.own  .msg-sender { color:var(--accent); }
     .msg-wrap.other .msg-sender { color:#3a72b5; }
+    .exchange-status-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .exchange-status-badge.pending {
+      color: #6a4d00;
+      background: #fff4d6;
+      border-color: #f0d38a;
+    }
+    .exchange-status-badge.accepted {
+      color: #165a34;
+      background: #dff6e8;
+      border-color: #8fcfa9;
+    }
+    .exchange-status-badge.refused {
+      color: #6b1f1f;
+      background: #fde7e7;
+      border-color: #e6aaaa;
+    }
+    .exchange-status-badge.cancelled {
+      color: #4a5563;
+      background: #edf1f5;
+      border-color: #c8d1db;
+    }
+    .chat-player-picker {
+      max-height: 200px;
+      overflow: auto;
+      border: 1px solid #bfc8d2;
+      border-radius: 8px;
+      padding: 6px;
+      margin-bottom: 6px;
+      background: var(--bg);
+    }
+    .chat-player-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+    }
+    .chat-player-option:hover {
+      background: var(--bg-alt);
+    }
+    .chat-player-option input {
+      width: auto;
+      margin: 0;
+      transform: translateY(-1px);
+    }
+    .chat-player-name {
+      font-weight: 600;
+      line-height: 1.2;
+    }
+    .chat-player-meta {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.2;
+      text-align: right;
+    }
+    .chat-exchange-panel {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--bg-alt) 40%, var(--panel));
+      padding: 8px;
+      margin-bottom: 10px;
+    }
+    .chat-exchange-toggle {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      padding: 8px 10px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .chat-exchange-toggle-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .chat-exchange-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 22px;
+      height: 22px;
+      padding: 0 7px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg-alt);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .chat-exchange-list {
+      min-height: 86px;
+      max-height: 220px;
+      margin-top: 8px;
+      background: var(--panel);
+    }
     .res-kv { display:flex; justify-content:space-between; align-items:center; padding:4px 8px; font-size:13px; gap:8px; min-height:26px; }
     .res-kv:nth-child(even) { background:var(--bg-alt); border-radius:6px; }
     .res-kv span:last-child { font-weight:600; white-space:nowrap; text-align:right; }
     body.font-fun { font-family: "Comic Sans MS", "Trebuchet MS", cursive; }
     body.font-cool-person { font-family: "Papyrus", "Brush Script MT", fantasy; letter-spacing: 0.02em; }
-    .announcement-card {
-      border: 1px solid #c9d1db;
-      border-radius: 12px;
-      padding: 10px;
-      margin-bottom: 10px;
-      background: linear-gradient(135deg, var(--panel), var(--bg-alt));
-    }
-    .announcement-author { font-weight: 700; font-size: 13px; }
-    .announcement-body { margin-top: 6px; white-space: pre-wrap; line-height: 1.5; }
-    .zoom-control {
-      position: absolute;
-      right: 10px;
-      top: 48px;
-      z-index: 2;
-      background: rgba(255,255,255,0.85);
-      border-radius: 8px;
-      padding: 6px;
-      border: 1px solid #bfc8d2;
-      width: 42px;
-      display: flex;
-      justify-content: center;
-    }
-    .zoom-control input { writing-mode: vertical-lr; direction: rtl; width: 24px; height: 160px; }
-    .notify-panel { border: 1px solid #c9d1db; border-radius: 10px; padding: 10px; background: linear-gradient(180deg, var(--panel), var(--bg-alt)); }
-    .notify-item { border: 1px solid #d7dee7; border-radius: 10px; padding: 10px; margin-bottom: 8px; background: var(--panel); }
-    .notify-head { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
-    .notify-type { font-size:11px; background:#314f72; color:#fff; border-radius:999px; padding:2px 8px; }
-    .setting-group { border: 1px solid #c9d1db; border-radius: 10px; padding: 10px; margin-top: 10px; }
-    .doc-toolbar {
-      display: grid;
-      grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
-      gap: 10px;
-      align-items: end;
-      padding: 10px;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: linear-gradient(180deg, var(--panel), var(--bg));
-    }
-    .doc-toolbar-actions { display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap; }
-    .doc-read {
-      margin-top: 10px;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--panel);
-      padding: 14px;
-      line-height: 1.6;
-      min-height: 280px;
-      max-height: 62vh;
-      overflow: auto;
-      white-space: break-spaces;
-      font-size: 14px;
-    }
-    .doc-editor {
-      margin-top: 10px;
-      min-height: 280px;
-      max-height: 62vh;
-      font-family: Consolas, 'Courier New', monospace;
-      resize: vertical;
-      background: var(--panel);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-      .combat-layout {
-        display: grid;
-        grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
-        gap: 12px;
-        align-items: start;
+      const [, chatsRes, playersRes, resourceDefsRes] = await Promise.all([
+        ensureWs(),
+        api('/api/chats'),
+        api('/api/players'),
+        api('/api/resources'),
+      ]);
+      if (!chatsRes?.ok) {
+        throw new Error(await readErrorMessage(chatsRes, 'The chat list could not be loaded.'));
       }
-      .combat-commanders {
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 10px;
-        background: linear-gradient(180deg, var(--panel), var(--bg));
-        margin-bottom: 10px;
+      if (!playersRes?.ok) {
+        throw new Error(await readErrorMessage(playersRes, 'The player list could not be loaded.'));
       }
-      .combat-unit-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
+      const chats = extractList(await parseJsonResponse(chatsRes, []));
+      const players = await parseJsonResponse(playersRes, []);
+      const chatResourceDefs = resourceDefsRes && resourceDefsRes.ok
+        ? await parseJsonResponse(resourceDefsRes, { base: {}, advanced: {} })
+        : { base: {}, advanced: {} };
+      setDynamicResourceLabels(chatResourceDefs);
+
+      const activeChats = chats.filter(chat => !chat.is_archived);
+      const archivedChats = chats.filter(chat => chat.is_archived);
+      const chatsById = new Map(chats.map(chat => [Number(chat.id), chat]));
+      const firstChat = chatsById.get(Number(preferredChatId)) || activeChats[0] || archivedChats[0] || null;
+
+      const ownPlayerRow = Array.isArray(players) ? players.find(p => Number(p?.id || 0) === Number(user.id)) : null;
+      const ownNationId = Number(ownPlayerRow?.nation_id || 0);
+
+      const buildTradeResourceOptions = () => {
+        const buildGroup = (type) => {
+          const groups = chatResourceDefs?.[type] || {};
+          return Object.entries(groups).map(([group, defs]) => {
+            const options = (defs || []).map(def => `<option value="${type}:${def.name}">${escapeHtml(def.display_name || def.name)} (${escapeHtml(group)})</option>`).join('');
+            if (!options) return '';
+            const label = type === 'advanced' ? `Advanced - ${group}` : `Base - ${group}`;
+            return `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
+          }).join('');
+        };
+        return `${buildGroup('base')}${buildGroup('advanced')}`;
+      };
+
+      const tradeResourceOptions = buildTradeResourceOptions();
+      const playerCheckboxes = players
+        .filter(player => player.id !== user.id)
+        .map(player => `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;"><input type="checkbox" class="memberCheck" value="${player.id}"> ${player.name}</label>`)
+        .join('');
+
+      view.innerHTML = `
+        <div class="card">
+          <div class="twocol">
+            <div>
+              <h2 id="chatHeader" style="margin-top:0;">Chat</h2>
+              <div id="chatView" class="list" style="min-height:220px;">Select a chat.</div>
+              <div class="row" style="margin-top:8px;"><input id="chatMsg" placeholder="Message..."><button class="primary" id="sendMsg">Send</button></div>
+
+              <div id="chatExchangeComposer" style="display:none;border:1px solid var(--border);border-radius:10px;padding:10px;margin-top:8px;">
+                <div class="muted" id="chatExchangeComposerTitle" style="font-size:12px;margin-bottom:6px;"></div>
+
+                <div class="row" style="gap:6px;align-items:flex-end;flex-wrap:wrap;">
+                  <div style="min-width:220px;flex:1;">
+                    <label style="font-size:12px;">Offer Resource</label>
+                    <select id="chatOfferSelect">${tradeResourceOptions}</select>
+                  </div>
+                  <div style="min-width:120px;">
+                    <label style="font-size:12px;">Amount</label>
+                    <input id="chatOfferAmount" type="number" min="0" value="0">
+                  </div>
+                  <button class="primary" type="button" id="chatAddOfferBtn">Add Offer</button>
+                </div>
+                <div id="chatOfferRows" style="margin-top:6px;display:grid;gap:6px;"></div>
+
+                <div class="row" style="gap:6px;align-items:flex-end;flex-wrap:wrap;margin-top:8px;">
+                  <div style="min-width:220px;flex:1;">
+                    <label style="font-size:12px;">Receive Resource</label>
+                    <select id="chatReceiveSelect">${tradeResourceOptions}</select>
+                  </div>
+                  <div style="min-width:120px;">
+                    <label style="font-size:12px;">Amount</label>
+                    <input id="chatReceiveAmount" type="number" min="0" value="0">
+                  </div>
+                  <button class="primary" type="button" id="chatAddReceiveBtn">Add Receive</button>
+                  <div id="chatDirectRecipientWrap" style="display:none;min-width:260px;flex:1;">
+                    <label style="font-size:12px;">Recipient Nation</label>
+                    <select id="chatExchangeRecipient">${(players || [])
+                      .filter(p => Number(p?.nation_id || 0) > 0 && Number(p?.id || 0) !== Number(user.id))
+                      .map(p => `<option value="${Number(p.nation_id)}">${escapeHtml(p.nation_name || ('Nation #' + p.nation_id))} (${escapeHtml(p.name || 'Player')})</option>`)
+                      .join('')}</select>
+                  </div>
+                </div>
+                <div id="chatReceiveRows" style="margin-top:6px;display:grid;gap:6px;"></div>
+                <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+                  <button class="primary" type="button" id="chatSubmitExchangeBtn">Submit Exchange Request</button>
+                  <button class="primary" type="button" id="chatCancelExchangeBtn" style="background:#4f5d6f;">Cancel</button>
+                  <span class="muted" id="chatExchangeMsg"></span>
+                </div>
+              </div>
+
+              <div class="row" style="margin-top:10px;flex-wrap:wrap;">
+                <span class="muted" id="chatUnreadStatus">No chat selected.</span>
+                <button class="primary" id="markChatReadBtn" style="background:#2f6a41;">Read</button>
+                <button class="primary" id="markChatUnreadBtn" style="background:#7a5b1f;">Unread</button>
+              </div>
+              <div class="row" style="margin-top:10px;flex-wrap:wrap;">
+                <button class="primary" id="archiveChatBtn" style="background:#314f72;">Archive</button>
+                <button class="primary" id="unarchiveChatBtn" style="display:none;background:#314f72;">Unarchive</button>
+                <button class="primary" id="deleteChatForMeBtn" style="background:#8a1a1a;">Delete</button>
+                <span class="muted" id="chatActionMsg"></span>
+              </div>
+            </div>
+            <div>
+              <div class="row"><input id="chatName" placeholder="New chat name"></div>
+              ${user.role === 'admin' ? '<label style="display:flex;align-items:center;gap:6px;margin-top:8px;"><input type="checkbox" id="chatAutoIncludeAll"> Auto include all current and future players</label>' : ''}
+              <label style="font-size:13px;margin-top:8px;display:block;">Add players:</label>
+              <div id="playerPickerList" style="max-height:160px;overflow:auto;border:1px solid #bfc8d2;border-radius:8px;padding:6px;margin-bottom:6px;">${playerCheckboxes || '<span class="muted">No other players</span>'}</div>
+              <div class="row"><button class="primary" id="newChat">Create Chat</button><span class="muted" id="chatCreateMsg"></span></div>
+              <div class="row" style="margin-top:6px;gap:6px;flex-wrap:wrap;">
+                <button class="primary" id="chatOpenExchangeBtn" style="background:#2f5c8f;">Exchange</button>
+                <button class="primary" id="chatOpenDirectExchangeBtn" style="background:#245f4f;">Direct Exchange</button>
+              </div>
+              <h3>Chats</h3>
+              <div class="list" id="chatList">${activeChats.map(chat => `<div><button class="primary selectChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" data-archived="0" style="width:100%; margin-bottom:8px;">${chat.name}${chat.type === 'global' ? ' 🌐' : ''}${Number(chat.unread_messages || 0) > 0 ? ` (${Number(chat.unread_messages)})` : ''}</button></div>`).join('') || '<div class="muted">No active chats</div>'}</div>
+              <div class="row" style="margin-top:12px;justify-content:space-between;align-items:center;">
+                <h3 style="margin:0;">Archived</h3>
+                <button class="primary" id="archivedChatToggle" style="background:#4a5a6d;">Show (${archivedChats.length})</button>
+              </div>
+              <div id="archivedChatSection" style="display:none;margin-top:8px;">
+                <div class="list" id="archivedChatList" style="max-height:180px;">${archivedChats.map(chat => `
+                  <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+                    <button class="primary selectChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" data-archived="1" style="flex:1; opacity:0.7;">${chat.name}</button>
+                    <button class="primary quickUnarchiveChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" style="background:#314f72;white-space:nowrap;">Unarchive</button>
+                  </div>
+                `).join('') || '<div class="muted">No archived chats</div>'}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      let activeChatId = firstChat ? Number(firstChat.id) : null;
+      let activeChatArchived = !!firstChat?.is_archived;
+      let archivedChatsExpanded = false;
+      let chatExchangeMode = null;
+      let chatOfferMap = {};
+      let chatReceiveMap = {};
+
+      const setArchivedChatVisibility = () => {
+        const archivedSection = document.getElementById('archivedChatSection');
+        const archivedToggle = document.getElementById('archivedChatToggle');
+        if (!archivedSection || !archivedToggle) return;
+        archivedSection.style.display = archivedChatsExpanded ? 'block' : 'none';
+        archivedToggle.textContent = `${archivedChatsExpanded ? 'Hide' : 'Show'} (${archivedChats.length})`;
+      };
+
+      const setChatActions = () => {
+        const activeChat = chatsById.get(Number(activeChatId)) || null;
+        const unreadMessages = Number(activeChat?.unread_messages || 0);
+        document.getElementById('chatUnreadStatus').textContent = activeChatId
+          ? `Unread messages: ${unreadMessages}`
+          : 'No chat selected.';
+        document.getElementById('markChatReadBtn').disabled = !activeChatId || unreadMessages === 0;
+        document.getElementById('markChatUnreadBtn').disabled = !activeChatId || unreadMessages > 0;
+        document.getElementById('archiveChatBtn').style.display = activeChatId && !activeChatArchived ? 'inline-block' : 'none';
+        document.getElementById('unarchiveChatBtn').style.display = activeChatId && activeChatArchived ? 'inline-block' : 'none';
+        document.getElementById('deleteChatForMeBtn').style.display = activeChatId ? 'inline-block' : 'none';
+      };
+
+      const asTradeEntries = (value) => {
+        if (Array.isArray(value)) {
+          return value
+            .map(entry => ({
+              type: entry?.type === 'advanced' ? 'advanced' : 'base',
+              name: String(entry?.name || '').trim(),
+              amount: toFiniteNumber(entry?.amount, 0),
+            }))
+            .filter(entry => entry.name && entry.amount > 0);
+        }
+        if (!value || typeof value !== 'object') return [];
+        return Object.entries(value)
+          .map(([rawKey, rawAmount]) => {
+            const canonical = canonicalResourceKey(rawKey);
+            if (!canonical || canonical.startsWith('currencies:')) return null;
+            const [type, name] = canonical.split(':', 2);
+            return {
+              type: type === 'advanced' ? 'advanced' : 'base',
+              name: String(name || '').trim(),
+              amount: toFiniteNumber(rawAmount, 0),
+            };
+          })
+          .filter(entry => entry && entry.name && entry.amount > 0);
+      };
+
+      const tradePreview = (entries, maxItems = 3) => {
+        const rows = asTradeEntries(entries).slice(0, maxItems);
+        const moreCount = Math.max(0, asTradeEntries(entries).length - rows.length);
+        const chips = rows.map(entry => `${escapeHtml(labelKey(`${entry.type}:${entry.name}`))}: ${fmtNum(entry.amount)}`).join(' | ');
+        return `${chips}${moreCount > 0 ? ` (+${moreCount} more)` : ''}` || 'None';
+      };
+
+      const renderTradeRows = (targetId, map, type) => {
+        const target = document.getElementById(targetId);
+        if (!target) return;
+        const entries = Object.entries(map || {});
+        if (!entries.length) {
+          target.innerHTML = '<div class="muted">No resources added.</div>';
+          return;
+        }
+        target.innerHTML = entries.map(([key, amount]) => {
+          const canonical = canonicalResourceKey(key);
+          if (!canonical) return '';
+          const [entryType, entryName] = canonical.split(':', 2);
+          return `<div class="row" style="border:1px solid var(--border);border-radius:8px;padding:6px;justify-content:space-between;align-items:center;gap:6px;">
+            <div>${escapeHtml(labelKey(canonical))} <span class="muted">(${escapeHtml(entryType)})</span></div>
+            <div style="display:flex;gap:8px;align-items:center;"><strong>${fmtNum(amount)}</strong><button class="primary chat-remove-trade-row" type="button" data-type="${type}" data-key="${escapeHtml(key)}" style="background:#8a1a1a;">Remove</button></div>
+          </div>`;
+        }).filter(Boolean).join('');
+
+        target.querySelectorAll('.chat-remove-trade-row').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const rowType = String(btn.dataset.type || 'offer');
+            const rowKey = String(btn.dataset.key || '');
+            if (!rowKey) return;
+            if (rowType === 'offer') {
+              delete chatOfferMap[rowKey];
+              renderTradeRows('chatOfferRows', chatOfferMap, 'offer');
+            } else {
+              delete chatReceiveMap[rowKey];
+              renderTradeRows('chatReceiveRows', chatReceiveMap, 'receive');
+            }
+          });
+        });
+      };
+
+      const openExchangeComposer = (mode) => {
+        chatExchangeMode = mode === 'direct_exchange' ? 'direct_exchange' : 'exchange';
+        chatOfferMap = {};
+        chatReceiveMap = {};
+        document.getElementById('chatExchangeComposer').style.display = 'block';
+        document.getElementById('chatExchangeComposerTitle').textContent = chatExchangeMode === 'direct_exchange'
+          ? 'Direct Exchange: configure offer/receive and choose recipient nation before sending.'
+          : 'Exchange: configure offer/receive and submit to this chat.';
+        document.getElementById('chatDirectRecipientWrap').style.display = chatExchangeMode === 'direct_exchange' ? 'block' : 'none';
+        document.getElementById('chatExchangeMsg').textContent = '';
+        renderTradeRows('chatOfferRows', chatOfferMap, 'offer');
+        renderTradeRows('chatReceiveRows', chatReceiveMap, 'receive');
+      };
+
+      const closeExchangeComposer = () => {
+        chatExchangeMode = null;
+        chatOfferMap = {};
+        chatReceiveMap = {};
+        document.getElementById('chatExchangeComposer').style.display = 'none';
+        document.getElementById('chatExchangeMsg').textContent = '';
+      };
+
+      const addTradeResource = (kind) => {
+        const isOffer = kind === 'offer';
+        const selectEl = document.getElementById(isOffer ? 'chatOfferSelect' : 'chatReceiveSelect');
+        const amountEl = document.getElementById(isOffer ? 'chatOfferAmount' : 'chatReceiveAmount');
+        const msgEl = document.getElementById('chatExchangeMsg');
+        const canonical = canonicalResourceKey(String(selectEl?.value || ''));
+        const amount = toFiniteNumber(amountEl?.value, 0);
+        if (!canonical || canonical.startsWith('currencies:')) {
+          msgEl.textContent = 'Select a valid base or advanced resource.';
+          return;
+        }
+        if (!(amount > 0)) {
+          msgEl.textContent = 'Amount must be greater than zero.';
+          return;
+        }
+        if (isOffer) {
+          chatOfferMap[canonical] = amount;
+          renderTradeRows('chatOfferRows', chatOfferMap, 'offer');
+        } else {
+          chatReceiveMap[canonical] = amount;
+          renderTradeRows('chatReceiveRows', chatReceiveMap, 'receive');
+        }
+        msgEl.textContent = '';
+      };
+
+      const submitExchangeRequest = async () => {
+        const msgEl = document.getElementById('chatExchangeMsg');
+        if (!activeChatId) {
+          msgEl.textContent = 'Select a chat first.';
+          return;
+        }
+        if (!chatExchangeMode) {
+          msgEl.textContent = 'Choose Exchange or Direct Exchange first.';
+          return;
+        }
+
+        const offerEntries = asTradeEntries(chatOfferMap);
+        const receiveEntries = asTradeEntries(chatReceiveMap);
+        if (!offerEntries.length || !receiveEntries.length) {
+          msgEl.textContent = 'Add at least one offer and one receive resource.';
+          return;
+        }
+
+        const payload = {
+          mode: chatExchangeMode,
+          message: String(document.getElementById('chatMsg').value || '').trim(),
+          offer: offerEntries,
+          receive: receiveEntries,
+        };
+        if (chatExchangeMode === 'direct_exchange') {
+          const recipientNationId = Number(document.getElementById('chatExchangeRecipient')?.value || 0);
+          if (!recipientNationId) {
+            msgEl.textContent = 'Select a recipient nation for direct exchange.';
+            return;
+          }
+          payload.recipient_nation_id = recipientNationId;
+        }
+
+        const res = await api(`/api/chats/${activeChatId}/exchange-requests`, { method: 'POST', body: JSON.stringify(payload) });
+        if (!res?.ok) {
+          msgEl.textContent = await readErrorMessage(res, 'The exchange request could not be created.');
+          return;
+        }
+        document.getElementById('chatMsg').value = '';
+        closeExchangeComposer();
+        const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+        await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
+        barkIfEnabled();
+      };
+
+      async function loadMessages(chatId, chatName, isArchived = false) {
+        if (!chatId) return;
+        activeChatId = Number(chatId);
+        activeChatArchived = !!isArchived;
+        setChatActions();
+        document.getElementById('chatActionMsg').textContent = '';
+        if (chatName) document.getElementById('chatHeader').textContent = chatName;
+        await subscribeChannel(`chat.${chatId}`);
+
+        const [messagesRes, exchangesRes] = await Promise.all([
+          api(`/api/chats/${chatId}/messages`),
+          api(`/api/chats/${chatId}/exchange-requests`),
+        ]);
+
+        if (!messagesRes?.ok) {
+          throw new Error(await readErrorMessage(messagesRes, 'The chat messages could not be loaded.'));
+        }
+        const messages = extractList(await parseJsonResponse(messagesRes, []));
+        const exchanges = exchangesRes && exchangesRes.ok ? extractList(await parseJsonResponse(exchangesRes, [])) : [];
+
+        const exchangeHtml = exchanges.map(exchange => {
+          const offerSummary = tradePreview(exchange.offer, 3);
+          const receiveSummary = tradePreview(exchange.receive, 3);
+          const status = String(exchange.status || 'pending');
+          const expandedId = `exchange-expanded-${exchange.id}`;
+          const closeId = `exchange-close-${exchange.id}`;
+
+          const canRemove = user.role === 'admin';
+          const isPending = status === 'pending';
+          const isDirect = Number(exchange.recipient_nation_id || 0) > 0;
+          const canRefuse = isPending && isDirect && (user.role === 'admin' || (ownNationId > 0 && ownNationId === Number(exchange.recipient_nation_id || 0)));
+
+          return `
+            <div class="exchange-notice" data-id="${exchange.id}" style="border:1px solid var(--border);border-radius:10px;padding:8px;margin-bottom:8px;cursor:pointer;">
+              <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start;">
+                <div style="font-size:12px;"><strong>${escapeHtml(exchange.sender_nation_name || 'Unknown Nation')}</strong> ${isDirect ? `to <strong>${escapeHtml(exchange.recipient_nation_name || 'Direct Recipient')}</strong>` : 'posted exchange request'}</div>
+                <div class="muted" style="font-size:11px;">${escapeHtml(status.toUpperCase())}</div>
+              </div>
+              <div class="row" style="gap:10px;align-items:flex-start;margin-top:4px;">
+                <div style="flex:1;min-width:0;"><div class="muted" style="font-size:11px;">Offer</div><div style="font-size:12px;">${offerSummary}</div></div>
+                <div style="flex:1;min-width:0;"><div class="muted" style="font-size:11px;">Receive</div><div style="font-size:12px;">${receiveSummary}</div></div>
+              </div>
+              <div id="${expandedId}" style="display:none;margin-top:8px;border-top:1px dashed var(--border);padding-top:8px;">
+                ${exchange.message ? `<div style="margin-bottom:6px;white-space:pre-wrap;">${escapeHtml(exchange.message)}</div>` : '<div class="muted" style="margin-bottom:6px;">No message included.</div>'}
+                <div class="row" style="gap:8px;flex-wrap:wrap;">
+                  <button class="primary chat-exchange-close" id="${closeId}" type="button" style="background:#4f5d6f;">Close</button>
+                  ${isPending ? `<button class="primary chat-exchange-accept" data-id="${exchange.id}" type="button" style="background:#2f6a41;">Accept</button>` : ''}
+                  ${canRefuse ? `<button class="primary chat-exchange-refuse" data-id="${exchange.id}" type="button" style="background:#7a5b1f;">Refuse</button>` : ''}
+                  ${canRemove ? `<button class="primary chat-exchange-remove" data-id="${exchange.id}" type="button" style="background:#8a1a1a;">Remove</button>` : ''}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        const messageHtml = messages.map(message => {
+          const isOwn = Number(message.sender_user_id) === Number(user.id);
+          return `<div class="msg-wrap ${isOwn ? 'own' : 'other'}">
+            <div class="msg-sender">${message.sender_name}</div>
+            <div class="msg-bubble">${escapeHtml(message.message)}</div>
+          </div>`;
+        }).join('');
+
+        document.getElementById('chatView').innerHTML = `${exchangeHtml}${messageHtml || '<div class="muted">No messages</div>'}`;
+
+        document.querySelectorAll('.exchange-notice').forEach(card => {
+          const id = String(card.dataset.id || '');
+          const expanded = document.getElementById(`exchange-expanded-${id}`);
+          if (!expanded) return;
+          card.addEventListener('click', (event) => {
+            const target = event.target;
+            if (target && target.closest && target.closest('button')) return;
+            expanded.style.display = expanded.style.display === 'none' ? 'block' : 'none';
+          });
+        });
+
+        document.querySelectorAll('.chat-exchange-close').forEach(btn => {
+          btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const wrapper = btn.closest('[id^="exchange-expanded-"]');
+            if (wrapper) wrapper.style.display = 'none';
+          });
+        });
+
+        document.querySelectorAll('.chat-exchange-accept').forEach(btn => {
+          btn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const exchangeId = Number(btn.dataset.id || 0);
+            if (!exchangeId || !activeChatId) return;
+            const res = await api(`/api/chats/${activeChatId}/exchange-requests/${exchangeId}/accept`, { method: 'POST' });
+            document.getElementById('chatActionMsg').textContent = res?.ok ? 'Exchange accepted.' : await readErrorMessage(res, 'The exchange could not be accepted.');
+            if (res?.ok) {
+              const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+              await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
+            }
+          });
+        });
+
+        document.querySelectorAll('.chat-exchange-refuse').forEach(btn => {
+          btn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const exchangeId = Number(btn.dataset.id || 0);
+            if (!exchangeId || !activeChatId) return;
+            const res = await api(`/api/chats/${activeChatId}/exchange-requests/${exchangeId}/refuse`, { method: 'POST' });
+            document.getElementById('chatActionMsg').textContent = res?.ok ? 'Exchange refused.' : await readErrorMessage(res, 'The exchange could not be refused.');
+            if (res?.ok) {
+              const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+              await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
+            }
+          });
+        });
+
+        document.querySelectorAll('.chat-exchange-remove').forEach(btn => {
+          btn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const exchangeId = Number(btn.dataset.id || 0);
+            if (!exchangeId || !activeChatId) return;
+            const res = await api(`/api/chats/${activeChatId}/exchange-requests/${exchangeId}`, { method: 'DELETE' });
+            document.getElementById('chatActionMsg').textContent = res?.ok ? 'Exchange request removed.' : await readErrorMessage(res, 'The exchange request could not be removed.');
+            if (res?.ok) {
+              const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+              await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
+            }
+          });
+        });
+
+        const chatView = document.getElementById('chatView');
+        chatView.scrollTop = chatView.scrollHeight;
+        setChatActions();
       }
-      .combat-unit-card {
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        background: var(--panel);
-        padding: 8px;
+
+      document.getElementById('archivedChatToggle').onclick = () => {
+        archivedChatsExpanded = !archivedChatsExpanded;
+        setArchivedChatVisibility();
+      };
+      setArchivedChatVisibility();
+
+      document.querySelectorAll('.selectChat').forEach(btn => {
+        btn.onclick = () => loadMessages(btn.dataset.id, btn.dataset.name, btn.dataset.archived === '1');
+      });
+      document.querySelectorAll('.quickUnarchiveChat').forEach(btn => {
+        btn.onclick = async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const chatId = Number(btn.dataset.id || 0);
+          if (!chatId) return;
+          const res = await api(`/api/chats/${chatId}/unarchive`, { method: 'PATCH' });
+          document.getElementById('chatActionMsg').textContent = res?.ok
+            ? `${btn.dataset.name || 'Chat'} restored.`
+            : await readErrorMessage(res, 'The chat could not be restored.');
+          if (res?.ok) {
+            await loadChat(chatId);
+            refreshChatBadge();
+          }
+        };
+      });
+
+      document.getElementById('chatOpenExchangeBtn').onclick = () => openExchangeComposer('exchange');
+      document.getElementById('chatOpenDirectExchangeBtn').onclick = () => openExchangeComposer('direct_exchange');
+      document.getElementById('chatCancelExchangeBtn').onclick = () => closeExchangeComposer();
+      document.getElementById('chatAddOfferBtn').onclick = () => addTradeResource('offer');
+      document.getElementById('chatAddReceiveBtn').onclick = () => addTradeResource('receive');
+      document.getElementById('chatSubmitExchangeBtn').onclick = async () => submitExchangeRequest();
+
+      if (firstChat) {
+        await loadMessages(firstChat.id, firstChat.name, firstChat.is_archived);
+      } else {
+        setChatActions();
       }
-      .combat-unit-card summary {
-        cursor: pointer;
-        display: flex;
-        justify-content: space-between;
-        gap: 8px;
-        align-items: center;
-        font-weight: 600;
-      }
-      .combat-orders {
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 10px;
-        background: var(--panel);
-        min-width: 0;
-      }
-      .combat-formula-panel {
-        min-width: 0;
-        overflow: hidden;
-      }
-      .combat-formula-panel .res-kv {
-        align-items: flex-start;
-      }
-      .combat-formula-panel .res-kv span:first-child {
-        flex: 0 0 auto;
-      }
-      .combat-formula-panel .res-kv span:last-child {
-        white-space: normal;
-        overflow-wrap: anywhere;
-        word-break: break-word;
-        min-width: 0;
-      }
-      .combat-formula-panel textarea,
-      .combat-formula-panel input,
-      .combat-formula-panel select {
-        max-width: 100%;
-      }
-      .combat-formula-preview-stats {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
-        gap: 6px;
-      }
-      .combat-formula-preview-stats label {
-        min-width: 0;
-      }
-      .combat-order-item {
-        border: 1px solid #d7dee7;
-        border-radius: 8px;
-        padding: 8px;
-        margin-top: 8px;
-        background: var(--bg);
-      }
-    .admin-picker {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 8px;
-      background: var(--bg);
-      margin-top: 8px;
-    }
-    .admin-picker-list {
-      width: 100%;
-      min-height: 170px;
-      max-height: 220px;
-      overflow: auto;
-      font-size: 13px;
-    }
-    .admin-asset-row {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 8px;
-      align-items: center;
-      padding: 6px 8px;
-      border-bottom: 1px solid #d7dee7;
-    }
-    .admin-asset-row:last-child { border-bottom: 0; }
-    .admin-asset-remove { background:#8a1a1a; }
-    .topbar-admin-shell {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px;
-      background: linear-gradient(180deg, var(--panel), var(--bg));
-    }
-    .topbar-admin-grid { display:grid; grid-template-columns:1fr; gap:10px; }
-    .topbar-admin-block {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 10px;
-      background: var(--panel);
-    }
-    .topbar-admin-block-head {
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:8px;
-      margin-bottom:8px;
-      flex-wrap:wrap;
-    }
-    .topbar-admin-count {
-      font-size:11px;
-      font-weight:700;
-      letter-spacing:0.02em;
-      border:1px solid var(--border);
-      border-radius:999px;
-      padding:2px 8px;
-      background:var(--bg-alt);
-      color:var(--text);
-    }
-    .topbar-admin-groups {
-      display:grid;
-      gap:10px;
-      grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
-      max-height:260px;
-      overflow:auto;
-      border:1px solid var(--border);
-      border-radius:8px;
-      padding:8px;
-      background:var(--bg);
-    }
-    .topbar-admin-group {
-      border:1px solid var(--border);
-      border-radius:8px;
-      padding:8px;
-      background:var(--panel);
-    }
-    .topbar-admin-group-title { font-size:12px; font-weight:700; margin:0 0 6px 0; color:var(--text); }
-    .topbar-admin-items { display:grid; gap:6px; }
-    .topbar-admin-item {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      padding:6px 8px;
-      border:1px solid #d7dee7;
-      border-radius:7px;
-      background:var(--bg);
-      font-size:12px;
-      line-height:1.2;
-    }
-    .topbar-admin-item input[type="checkbox"] {
-      width:16px;
-      height:16px;
-      margin:0;
-      flex:0 0 auto;
-    }
-    .topbar-admin-type {
-      font-size:10px;
-      font-weight:700;
-      border-radius:999px;
-      padding:2px 6px;
-      color:#fff;
-      background:#314f72;
-      flex:0 0 auto;
-    }
-    .topbar-admin-item.advanced .topbar-admin-type { background:#8c4a22; }
-    .topbar-admin-name { flex:1; min-width:0; }
-    .defaults-admin-shell {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px;
-      background: linear-gradient(180deg, var(--panel), var(--bg));
-    }
-    .defaults-admin-grid { display:grid; grid-template-columns:1fr; gap:10px; }
+
+      document.getElementById('sendMsg').onclick = async () => {
+        if (!activeChatId) return;
+        const message = document.getElementById('chatMsg').value.trim();
+        if (!message) return;
+        const res = await api(`/api/chats/${activeChatId}/messages`, { method: 'POST', body: JSON.stringify({ message }) });
+        if (!res?.ok) {
+          document.getElementById('chatActionMsg').textContent = await readErrorMessage(res, 'The message could not be sent.');
+          return;
+        }
+        document.getElementById('chatMsg').value = '';
+        const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+        await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
+        refreshChatBadge();
+        barkIfEnabled();
+      };
+
+      document.getElementById('chatMsg').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault();
+          document.getElementById('sendMsg').click();
+        }
+      });
+
+      document.getElementById('markChatReadBtn').onclick = async () => {
+        if (!activeChatId) return;
+        const res = await api(`/api/chats/${activeChatId}/read`, { method: 'PATCH' });
+        document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat marked as read.' : await readErrorMessage(res, 'The chat could not be marked as read.');
+        if (res?.ok) {
+          await loadChat(activeChatId);
+          refreshChatBadge();
+        }
+      };
+
+      document.getElementById('markChatUnreadBtn').onclick = async () => {
+        if (!activeChatId) return;
+        const res = await api(`/api/chats/${activeChatId}/unread`, { method: 'PATCH' });
+        document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat marked as unread.' : await readErrorMessage(res, 'The chat could not be marked as unread.');
+        if (res?.ok) {
+          await loadChat(activeChatId);
+          refreshChatBadge();
+        }
+      };
+
+      document.getElementById('archiveChatBtn').onclick = async () => {
+        if (!activeChatId) return;
+        const res = await api(`/api/chats/${activeChatId}/archive`, { method: 'PATCH' });
+        document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat archived.' : await readErrorMessage(res, 'The chat could not be archived.');
+        if (res?.ok) await loadChat(activeChatId);
+      };
+
+      document.getElementById('unarchiveChatBtn').onclick = async () => {
+        if (!activeChatId) return;
+        const res = await api(`/api/chats/${activeChatId}/unarchive`, { method: 'PATCH' });
+        document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat restored.' : await readErrorMessage(res, 'The chat could not be restored.');
+        if (res?.ok) await loadChat(activeChatId);
+      };
+
+      document.getElementById('deleteChatForMeBtn').onclick = async () => {
+        if (!activeChatId) return;
+        const chatButton = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+        const chatName = chatButton?.dataset.name || 'this chat';
+        if (!window.confirm(`Remove ${chatName} from your list? This cannot be undone from the UI.`)) {
+          return;
+        }
+        const res = await api(`/api/chats/${activeChatId}`, { method: 'DELETE' });
+        document.getElementById('chatActionMsg').textContent = res?.ok ? 'Chat deleted from your list.' : await readErrorMessage(res, 'The chat could not be deleted.');
+        if (res?.ok) await loadChat();
+      };
+
+      document.getElementById('newChat').onclick = async () => {
+        const name = document.getElementById('chatName').value.trim();
+        const memberIds = Array.from(document.querySelectorAll('.memberCheck:checked')).map(el => Number(el.value));
+        const autoIncludeAll = user.role === 'admin' && document.getElementById('chatAutoIncludeAll')?.checked;
+
+        if (!name) {
+          document.getElementById('chatCreateMsg').textContent = 'Enter a chat name before creating the chat.';
+          return;
+        }
+        if (!autoIncludeAll && memberIds.length === 0) {
+          document.getElementById('chatCreateMsg').textContent = 'Select at least one player for a normal group chat.';
+          return;
+        }
+
+        const res = await api('/api/chats', {
+          method: 'POST',
+          body: JSON.stringify({ name, type: autoIncludeAll ? 'global' : 'group', member_ids: memberIds })
+        });
+        document.getElementById('chatCreateMsg').textContent = res?.ok
+          ? (autoIncludeAll ? 'Everyone chat created.' : 'Chat created.')
+          : await readErrorMessage(res, 'The chat could not be created.');
+        if (res?.ok) {
+          await loadChat();
+          refreshChatBadge();
+          barkIfEnabled();
+        }
+      };
+
+      refreshChatBadge();
     .defaults-admin-block {
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -714,6 +1178,51 @@
     }
     @keyframes map-spin {
       to { transform: rotate(360deg); }
+    }
+    .map-stage-loading-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(62, 117, 176, 0.18), transparent 38%),
+        radial-gradient(circle at 78% 78%, rgba(47, 106, 65, 0.16), transparent 42%),
+        linear-gradient(180deg, rgba(12, 20, 32, 0.78), rgba(6, 10, 18, 0.82));
+      backdrop-filter: blur(1.2px);
+      pointer-events: all;
+    }
+    .map-stage-loading-overlay.hidden {
+      display: none;
+    }
+    .map-stage-loading-card {
+      min-width: 240px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 18px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      background: rgba(12, 18, 30, 0.84);
+      color: #f2f7ff;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
+    }
+    .map-stage-loading-spinner {
+      width: 30px;
+      height: 30px;
+      border: 3px solid rgba(235, 243, 255, 0.28);
+      border-top-color: #9ed3ff;
+      border-radius: 50%;
+      animation: map-spin 0.85s linear infinite;
+    }
+    .map-stage-loading-text {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-align: center;
+      opacity: 0.95;
     }
     @media (max-width: 1100px) {
       .map-shell { grid-template-columns: 1fr; }
@@ -1160,7 +1669,15 @@ function labelTerrainKey(key) {
 }
 
 function renderLoadingState(title) {
-  view.innerHTML = `<div class="card"><h2>${title}</h2><p class="muted">Loading…</p></div>`;
+  view.innerHTML = `
+    <div class="card">
+      <h2>${title}</h2>
+      <div class="row" style="gap:8px;align-items:center;">
+        <span class="map-spinner" aria-hidden="true"></span>
+        <p class="muted" style="margin:0;">Loading…</p>
+      </div>
+    </div>
+  `;
 }
 
 function renderSectionError(title, error) {
@@ -1387,6 +1904,81 @@ function canonicalResourceKey(rawKey) {
   }
 
   return `base:${key}`;
+}
+
+function buildNationResourceMaps(resources) {
+  const row = (resources && typeof resources === 'object') ? resources : {};
+  const extra = safeJsonParse(row.extra_json, {}) || {};
+  const base = {};
+  const advanced = {};
+  const currencies = {};
+
+  const addEntries = (target, source, expectedType) => {
+    if (!source || typeof source !== 'object') return;
+    Object.entries(source).forEach(([rawKey, rawValue]) => {
+      const amount = toFiniteNumber(rawValue, Number.NaN);
+      if (!Number.isFinite(amount)) return;
+
+      let type = expectedType;
+      let name = String(rawKey || '').trim();
+      const canonical = canonicalResourceKey(name);
+      if (canonical) {
+        const [canonicalType, canonicalName] = canonical.split(':', 2);
+        type = canonicalType;
+        name = String(canonicalName || '').trim();
+      }
+
+      if (!name || type !== expectedType) return;
+      target[name] = (toFiniteNumber(target[name], 0) + amount);
+    });
+  };
+
+  addEntries(base, extra.base, 'base');
+  addEntries(advanced, extra.advanced, 'advanced');
+  addEntries(advanced, extra.refined, 'advanced');
+  addEntries(currencies, extra.currencies, 'currencies');
+  addEntries(base, row.base, 'base');
+  addEntries(advanced, row.advanced, 'advanced');
+
+  const reservedKeys = new Set([
+    'nation_id',
+    'extra_json',
+    'updated_at',
+    'created_at',
+    'base',
+    'advanced',
+    'refined',
+    'income',
+  ]);
+
+  Object.entries(row).forEach(([rawKey, rawValue]) => {
+    if (reservedKeys.has(rawKey)) return;
+
+    const amount = toFiniteNumber(rawValue, Number.NaN);
+    if (!Number.isFinite(amount)) return;
+
+    const canonical = canonicalResourceKey(rawKey);
+    if (canonical) {
+      const [type, name] = canonical.split(':', 2);
+      const safeName = String(name || '').trim();
+      if (!safeName) return;
+
+      if (type === 'base') {
+        base[safeName] = (toFiniteNumber(base[safeName], 0) + amount);
+      } else if (type === 'advanced') {
+        advanced[safeName] = (toFiniteNumber(advanced[safeName], 0) + amount);
+      } else if (type === 'currencies') {
+        currencies[safeName] = (toFiniteNumber(currencies[safeName], 0) + amount);
+      }
+      return;
+    }
+
+    const legacyKey = String(rawKey || '').trim();
+    if (!legacyKey) return;
+    base[legacyKey] = (toFiniteNumber(base[legacyKey], 0) + amount);
+  });
+
+  return { extra, base, advanced, currencies };
 }
 
 function setDynamicResourceLabels(defs) {
@@ -3804,6 +4396,12 @@ async function loadMap() {
         <div>
           <div class="map-editor-header" id="mapTopControls"></div>
           <div class="map-stage-wrap" id="mapStageWrap">
+            <div class="map-stage-loading-overlay" id="mapStageLoadingOverlay" role="status" aria-live="polite" aria-label="Loading map">
+              <div class="map-stage-loading-card">
+                <span class="map-stage-loading-spinner" aria-hidden="true"></span>
+                <div class="map-stage-loading-text" id="mapStageLoadingText">Loading map...</div>
+              </div>
+            </div>
             <canvas id="mapCanvas" class="map-canvas"></canvas>
             <button class="primary map-floating" id="mapFullscreenBtn" style="right:10px;top:10px;">Fullscreen</button>
             <div class="map-floating map-info-box" id="mapNationInfo" style="display:none;"></div>
@@ -3853,6 +4451,8 @@ async function loadMap() {
   const mapBusyText = document.getElementById('mapBusyText');
   const mapPayloadSizeIndicator = document.getElementById('mapPayloadSizeIndicator');
   const mapStatusMsg = document.getElementById('mapStatusMsg');
+  const mapStageLoadingOverlay = document.getElementById('mapStageLoadingOverlay');
+  const mapStageLoadingText = document.getElementById('mapStageLoadingText');
   const MAP_STATUS_INFO_MS = 15000;
   const MAP_STATUS_WARN_MS = 30000;
   let mapStatusMsgClearTimer = null;
@@ -3901,6 +4501,16 @@ async function loadMap() {
       mapBusyIndicator.style.display = 'none';
     }
   };
+
+  const setMapStageLoading = (isLoading, message = 'Loading map...') => {
+    if (!mapStageLoadingOverlay) return;
+    if (mapStageLoadingText) {
+      mapStageLoadingText.textContent = String(message || 'Loading map...');
+    }
+    mapStageLoadingOverlay.classList.toggle('hidden', !isLoading);
+  };
+
+  setMapStageLoading(true, 'Loading map...');
 
   let mode = 'view';
   const minZoomPct = -25;
@@ -4384,7 +4994,17 @@ async function loadMap() {
   const idx = (x, y) => (y * mapWidth) + x;
   const inBounds = (x, y) => x >= 0 && y >= 0 && x < mapWidth && y < mapHeight;
   const pointDistance = (a, b) => Math.hypot((a?.x || 0) - (b?.x || 0), (a?.y || 0) - (b?.y || 0));
-  const brushRadiusFromSize = (size) => clamp(Math.ceil(toFiniteNumber(size, 1) / 2), 1, 200);
+  const normalizeBrushSizeInput = (value, fallback = 1) => {
+    const parsed = Math.round(toFiniteNumber(value, fallback));
+    return clamp(parsed, 1, 200);
+  };
+  // Size 1 must paint exactly one pixel (radius 0). Larger sizes scale smoothly.
+  const brushRadiusFromSize = (size) => clamp(Math.floor((normalizeBrushSizeInput(size, 1) - 1) / 2), 0, 200);
+  const formatBrushSizeLabel = (size) => {
+    const diameter = normalizeBrushSizeInput(size, 1);
+    const radius = brushRadiusFromSize(diameter);
+    return `D: ${diameter}px | R: ${radius}px`;
+  };
   const brushOffsetCache = new Map();
   const getBrushOffsets = (radius) => {
     const r = clamp(Math.floor(radius), 1, 200);
@@ -4412,8 +5032,16 @@ async function loadMap() {
   let waterLayerDirty = true;
   let politicalLayerDirty = true;
   let politicalNeedsFullRebuild = false;
+  let terrainNeedsPostPaintWaterRebuild = false;
+  let seaWaterMaskCache = null;
+  let seaWaterMaskDirty = true;
   let lastPaletteSignature = '';
   let lastPoliticalVisualKey = '';
+
+  const invalidateSeaWaterMask = () => {
+    seaWaterMaskDirty = true;
+    seaWaterMaskCache = null;
+  };
 
   const resizeLayerCanvases = () => {
     terrainLayerCanvas.width = mapWidth;
@@ -4425,6 +5053,7 @@ async function loadMap() {
     terrainLayerDirty = true;
     waterLayerDirty = true;
     politicalLayerDirty = true;
+    invalidateSeaWaterMask();
   };
 
   const parseColorToRgb = (color) => {
@@ -4588,6 +5217,8 @@ async function loadMap() {
     terrainStrokes.forEach(op => applyTerrainOperationToGrid(op, terrainGrid));
     terrainLayerDirty = true;
     waterLayerDirty = true;
+    invalidateSeaWaterMask();
+    terrainNeedsPostPaintWaterRebuild = false;
   };
 
   const applyPoliticalOperationToGrid = (op, targetGrid = ownerGrid) => {
@@ -4753,6 +5384,10 @@ async function loadMap() {
   // Sea water is any water tile connected (4-neighbor) to the map border.
   // Border-disconnected water bodies are treated as freshwater.
   const computeSeaConnectedWaterMask = () => {
+    if (!seaWaterMaskDirty && seaWaterMaskCache && seaWaterMaskCache.length === (mapWidth * mapHeight)) {
+      return seaWaterMaskCache;
+    }
+
     const waterCode = TERRAIN_CODES.water;
     const seaMask = new Uint8Array(mapWidth * mapHeight);
     const queue = [];
@@ -4800,6 +5435,8 @@ async function loadMap() {
       }
     }
 
+    seaWaterMaskCache = seaMask;
+    seaWaterMaskDirty = false;
     return seaMask;
   };
 
@@ -5293,7 +5930,7 @@ async function loadMap() {
     ctx.restore();
 
     const showNationLabels = !!settings.map_show_nation_names;
-    if (showNationLabels && (mapType === 'political' || mapType === 'alliance' || mode === 'political-editor')) {
+    if (showNationLabels && mode === 'view' && (mapType === 'political' || mapType === 'alliance')) {
       drawPoliticalLabels(viewW, viewH);
     }
 
@@ -5471,6 +6108,7 @@ async function loadMap() {
       terrainLayerDirty = true;
       waterLayerDirty = true;
       politicalLayerDirty = true;
+      invalidateSeaWaterMask();
       labelCache = [];
       unsavedChanges = true;
       lastOutlinePoint = null;
@@ -5550,8 +6188,8 @@ async function loadMap() {
             <label class="map-small-label">Tool</label>
             <select id="mapToolSelect"><option value="move">Move</option><option value="brush">Brush</option><option value="fill">Bucket</option><option value="outline">Outline</option></select>
             <label class="map-small-label">Size</label>
-            <input id="mapBrushSize" type="range" min="1" max="200" value="${brushSize}">
-            <span class="map-small-label" id="mapBrushSizeLabel">${brushSize}px</span>
+            <input id="mapBrushSize" type="range" min="1" max="200" step="1" value="${Math.round(brushSize)}">
+            <span class="map-small-label" id="mapBrushSizeLabel">${formatBrushSizeLabel(brushSize)}</span>
             <label class="map-small-label" for="mapZoomPercentMobile">Zoom</label>
             <input id="mapZoomPercentMobile" type="range" min="-25" max="100" step="1" value="${Math.round(zoomTargetPct)}">
             <label class="map-small-label" for="terrainOpacityMobile">Terrain Opacity</label>
@@ -5583,8 +6221,8 @@ async function loadMap() {
         render();
       };
       document.getElementById('mapBrushSize').oninput = (e) => {
-        brushSize = clamp(toFiniteNumber(e.target.value, brushSize), 1, 200);
-        document.getElementById('mapBrushSizeLabel').textContent = `${brushSize}px`;
+        brushSize = normalizeBrushSizeInput(e.target.value, brushSize);
+        document.getElementById('mapBrushSizeLabel').textContent = formatBrushSizeLabel(brushSize);
       };
       document.getElementById('mapZoomPercentMobile').oninput = (e) => {
         zoomTargetPct = clamp(toFiniteNumber(e.target.value, 0), minZoomPct, maxZoomPct);
@@ -5628,8 +6266,8 @@ async function loadMap() {
         <label class="map-small-label">Tool</label>
         <select id="mapToolSelect" style="width:115px;"><option value="move">Move</option><option value="brush">Brush</option><option value="fill">Bucket</option><option value="outline">Outline</option></select>
         <label class="map-small-label">Size</label>
-        <input id="mapBrushSize" type="range" min="1" max="200" value="${brushSize}">
-        <span class="map-small-label" id="mapBrushSizeLabel">${brushSize}px</span>
+        <input id="mapBrushSize" type="range" min="1" max="200" step="1" value="${Math.round(brushSize)}">
+        <span class="map-small-label" id="mapBrushSizeLabel">${formatBrushSizeLabel(brushSize)}</span>
         <button class="primary mapSaveTrigger" type="button">Save Draft</button>
       </div>
     `;
@@ -5645,8 +6283,8 @@ async function loadMap() {
       render();
     };
     document.getElementById('mapBrushSize').oninput = (e) => {
-      brushSize = clamp(toFiniteNumber(e.target.value, brushSize), 1, 200);
-      document.getElementById('mapBrushSizeLabel').textContent = `${brushSize}px`;
+      brushSize = normalizeBrushSizeInput(e.target.value, brushSize);
+      document.getElementById('mapBrushSizeLabel').textContent = formatBrushSizeLabel(brushSize);
     };
 
     if (mode === 'terrain-editor') {
@@ -5818,12 +6456,11 @@ async function loadMap() {
   };
 
   const buildEditorStatePayload = () => {
-    const nationPayload = buildPoliticalNationPayload(buildNationTerrainStatsMap()).map(n => ({
-      id: n.id,
-      name: n.name,
+    const nationPayload = politicalNationsArray().map(n => ({
+      id: Number(n.id || 0),
+      name: n.name || `Nation ${Number(n.id || 0)}`,
       alliance_name: n.alliance_name || '',
-      races: n.races || [],
-      pixels: n.pixels,
+      races: Array.isArray(n.races) ? n.races : [],
     }));
 
     return {
@@ -5920,6 +6557,7 @@ async function loadMap() {
 
   const updateMapPayloadIndicator = (force = false) => {
     if (!mapPayloadSizeIndicator) return;
+    if (!force && (mode === 'terrain-editor' || mode === 'political-editor')) return;
     const now = Date.now();
     if (!force && now - mapPayloadIndicatorLastStamp < 1200) return;
     mapPayloadIndicatorLastStamp = now;
@@ -6045,6 +6683,7 @@ async function loadMap() {
     terrainLayerDirty = true;
     waterLayerDirty = true;
     politicalLayerDirty = true;
+    invalidateSeaWaterMask();
     politicalNeedsFullRebuild = false;
     politicalNeedsPostPaintBorderUpdate = false;
     unsavedChanges = !!markUnsaved;
@@ -6670,6 +7309,7 @@ async function loadMap() {
     syncBrushPaletteCache();
     const cx = Math.floor(op.x);
     const cy = Math.floor(op.y);
+    const paintCode = TERRAIN_CODES[op.terrain] ?? TERRAIN_CODES.grassland;
     const r = brushRadiusFromSize(op.size);
     const bx = Math.max(0, cx - r);
     const by = Math.max(0, cy - r);
@@ -6677,9 +7317,10 @@ async function loadMap() {
     const bh = Math.min(mapHeight, cy + r + 1) - by;
     if (bw <= 0 || bh <= 0) return;
     const offsets = getBrushOffsets(r);
-    const seaWaterMask = computeSeaConnectedWaterMask();
     const tImg = terrainLayerCtx.getImageData(bx, by, bw, bh);
     const wImg = waterLayerCtx.getImageData(bx, by, bw, bh);
+    const terrainRgb = paintCode === TERRAIN_CODES.water ? null : brushTerrainRgbByCode[paintCode];
+    const waterRgb = brushSeaWaterRgb;
     for (let i = 0; i < offsets.length; i += 2) {
       const gx = cx + offsets[i];
       const gy = cy + offsets[i + 1];
@@ -6687,16 +7328,12 @@ async function loadMap() {
       const col = gx - bx;
       const row = gy - by;
       if (col < 0 || row < 0 || col >= bw || row >= bh) continue;
-      const gi = gy * mapWidth + gx;
-      const code = terrainGrid[gi];
       const p = (row * bw + col) * 4;
-      if (code === TERRAIN_CODES.water) {
+      if (paintCode === TERRAIN_CODES.water) {
         tImg.data[p + 3] = 0;
-        const wrgb = seaWaterMask[gi] ? brushSeaWaterRgb : brushFreshWaterRgb;
-        wImg.data[p] = wrgb.r; wImg.data[p + 1] = wrgb.g; wImg.data[p + 2] = wrgb.b; wImg.data[p + 3] = 255;
+        wImg.data[p] = waterRgb.r; wImg.data[p + 1] = waterRgb.g; wImg.data[p + 2] = waterRgb.b; wImg.data[p + 3] = 255;
       } else {
-        const rgb = brushTerrainRgbByCode[code];
-        tImg.data[p] = rgb.r; tImg.data[p + 1] = rgb.g; tImg.data[p + 2] = rgb.b; tImg.data[p + 3] = 255;
+        tImg.data[p] = terrainRgb.r; tImg.data[p + 1] = terrainRgb.g; tImg.data[p + 2] = terrainRgb.b; tImg.data[p + 3] = 255;
         wImg.data[p + 3] = 0;
       }
     }
@@ -6758,11 +7395,16 @@ async function loadMap() {
     if (mode === 'terrain-editor') {
       terrainStrokes.push(op);
       applyTerrainOperationToGrid(op, terrainGrid);
+      invalidateSeaWaterMask();
       if (op.tool === 'brush') {
         applyBrushToTerrainCanvas(op);
+        if ((TERRAIN_CODES[op.terrain] ?? TERRAIN_CODES.grassland) === TERRAIN_CODES.water && settings.map_split_water_colors) {
+          terrainNeedsPostPaintWaterRebuild = true;
+        }
       } else {
         terrainLayerDirty = true;
         waterLayerDirty = true;
+        terrainNeedsPostPaintWaterRebuild = false;
       }
       politicalNeedsFullRebuild = true;
     } else if (mode === 'political-editor') {
@@ -7051,6 +7693,11 @@ async function loadMap() {
     if (politicalNeedsPostPaintBorderUpdate) {
       politicalLayerDirty = true;
       politicalNeedsPostPaintBorderUpdate = false;
+      scheduleRender();
+    }
+    if (terrainNeedsPostPaintWaterRebuild) {
+      waterLayerDirty = true;
+      terrainNeedsPostPaintWaterRebuild = false;
       scheduleRender();
     }
     if (mode === 'political-editor' && territoryEditing && selectedTool === 'outline' && outlinePoints.length >= 3) {
@@ -7526,6 +8173,11 @@ async function loadMap() {
   renderBottomTools();
   resizeCanvas();
   render();
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      setMapStageLoading(false);
+    });
+  });
   window.addEventListener('resize', () => {
     renderBottomTools();
     resizeCanvas();
@@ -7534,10 +8186,11 @@ async function loadMap() {
 }
 
 async function loadChat(preferredChatId = null) {
-  const [, chatsRes, playersRes] = await Promise.all([
+  const [, chatsRes, playersRes, resourceDefsRes] = await Promise.all([
     ensureWs(),
     api('/api/chats'),
     api('/api/players'),
+    api('/api/resources'),
   ]);
   if (!chatsRes?.ok) {
     throw new Error(await readErrorMessage(chatsRes, 'The chat list could not be loaded.'));
@@ -7547,14 +8200,40 @@ async function loadChat(preferredChatId = null) {
   }
   const chats = extractList(await parseJsonResponse(chatsRes, []));
   const players = await parseJsonResponse(playersRes, []);
+  const chatResourceDefs = resourceDefsRes && resourceDefsRes.ok
+    ? await parseJsonResponse(resourceDefsRes, { base: {}, advanced: {} })
+    : { base: {}, advanced: {} };
+  setDynamicResourceLabels(chatResourceDefs);
   const activeChats = chats.filter(chat => !chat.is_archived);
   const archivedChats = chats.filter(chat => chat.is_archived);
   const chatsById = new Map(chats.map(chat => [Number(chat.id), chat]));
   const firstChat = chatsById.get(Number(preferredChatId)) || activeChats[0] || archivedChats[0] || null;
+  const ownPlayerRow = Array.isArray(players) ? players.find(p => Number(p?.id || 0) === Number(user.id)) : null;
+  const ownNationId = Number(ownPlayerRow?.nation_id || 0);
+
+  const buildTradeResourceOptions = () => {
+    const buildGroup = (type) => {
+      const groups = chatResourceDefs?.[type] || {};
+      return Object.entries(groups).map(([group, defs]) => {
+        const options = (defs || []).map(def => `<option value="${type}:${def.name}">${escapeHtml(def.display_name || def.name)} (${escapeHtml(group)})</option>`).join('');
+        if (!options) return '';
+        const label = type === 'advanced' ? `Advanced - ${group}` : `Base - ${group}`;
+        return `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
+      }).join('');
+    };
+    return `${buildGroup('base')}${buildGroup('advanced')}`;
+  };
+  const tradeResourceOptions = buildTradeResourceOptions();
 
   const playerCheckboxes = players
     .filter(player => player.id !== user.id)
-    .map(player => `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;"><input type="checkbox" class="memberCheck" value="${player.id}"> ${player.name}</label>`)
+    .map(player => {
+      const playerName = String(player?.name || 'Player').trim() || 'Player';
+      const nationName = String(player?.nation_name || '').trim();
+      const nationMeta = nationName || `Nation #${Number(player?.nation_id || 0) || 'Unassigned'}`;
+      const searchBlob = `${playerName} ${nationName} ${nationMeta}`.toLowerCase();
+      return `<label class="chat-player-option" data-search="${escapeHtml(searchBlob)}"><input type="checkbox" class="memberCheck" value="${player.id}"><span class="chat-player-name">${escapeHtml(playerName)}</span><span class="chat-player-meta">${escapeHtml(nationMeta)}</span></label>`;
+    })
     .join('');
 
   view.innerHTML = `
@@ -7562,8 +8241,56 @@ async function loadChat(preferredChatId = null) {
       <div class="twocol">
         <div>
           <h2 id="chatHeader" style="margin-top:0;">Chat</h2>
+          <div class="chat-exchange-panel">
+            <button id="chatExchangeToggle" class="chat-exchange-toggle" type="button" aria-expanded="false">
+              <span class="chat-exchange-toggle-left">Exchange Requests <span id="chatExchangeCount" class="chat-exchange-count">0</span></span>
+              <span id="chatExchangeToggleLabel" class="muted" style="font-weight:600;">Show</span>
+            </button>
+            ${user.role === 'admin' ? '<div class="row" style="margin-top:8px;"><button class="primary" id="chatExchangeArchivedToggle" type="button" style="background:#4a5a6d;">Show Archived</button></div>' : ''}
+            <div id="chatExchangeView" class="list chat-exchange-list" style="display:none;">No exchange requests.</div>
+          </div>
           <div id="chatView" class="list" style="min-height:220px;">Select a chat.</div>
           <div class="row" style="margin-top:8px;"><input id="chatMsg" placeholder="Message…"><button class="primary" id="sendMsg">Send</button></div>
+          <div id="chatExchangeComposer" style="display:none;border:1px solid var(--border);border-radius:10px;padding:10px;margin-top:8px;">
+            <div class="muted" id="chatExchangeComposerTitle" style="font-size:12px;margin-bottom:6px;"></div>
+            <div class="row" style="gap:6px;align-items:flex-end;flex-wrap:wrap;">
+              <div style="min-width:220px;flex:1;">
+                <label style="font-size:12px;">Offer Resource</label>
+                <select id="chatOfferSelect">${tradeResourceOptions}</select>
+              </div>
+              <div style="min-width:120px;">
+                <label style="font-size:12px;">Amount</label>
+                <input id="chatOfferAmount" type="number" min="0" value="0">
+              </div>
+              <button class="primary" type="button" id="chatAddOfferBtn">Add Offer</button>
+            </div>
+            <div id="chatOfferRows" style="margin-top:6px;display:grid;gap:6px;"></div>
+
+            <div class="row" style="gap:6px;align-items:flex-end;flex-wrap:wrap;margin-top:8px;">
+              <div style="min-width:220px;flex:1;">
+                <label style="font-size:12px;">Receive Resource</label>
+                <select id="chatReceiveSelect">${tradeResourceOptions}</select>
+              </div>
+              <div style="min-width:120px;">
+                <label style="font-size:12px;">Amount</label>
+                <input id="chatReceiveAmount" type="number" min="0" value="0">
+              </div>
+              <button class="primary" type="button" id="chatAddReceiveBtn">Add Receive</button>
+              <div id="chatDirectRecipientWrap" style="display:none;min-width:260px;flex:1;">
+                <label style="font-size:12px;">Recipient Nation</label>
+                <select id="chatExchangeRecipient">${(players || [])
+                  .filter(p => Number(p?.nation_id || 0) > 0 && Number(p?.id || 0) !== Number(user.id))
+                  .map(p => `<option value="${Number(p.nation_id)}">${escapeHtml(p.nation_name || ('Nation #' + p.nation_id))} (${escapeHtml(p.name || 'Player')})</option>`)
+                  .join('')}</select>
+              </div>
+            </div>
+            <div id="chatReceiveRows" style="margin-top:6px;display:grid;gap:6px;"></div>
+            <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+              <button class="primary" type="button" id="chatSubmitExchangeBtn">Submit Exchange Request</button>
+              <button class="primary" type="button" id="chatCancelExchangeBtn" style="background:#4f5d6f;">Cancel</button>
+              <span class="muted" id="chatExchangeMsg"></span>
+            </div>
+          </div>
           <div class="row" style="margin-top:10px;flex-wrap:wrap;">
             <span class="muted" id="chatUnreadStatus">No chat selected.</span>
             <button class="primary" id="markChatReadBtn" style="background:#2f6a41;">Read</button>
@@ -7580,8 +8307,18 @@ async function loadChat(preferredChatId = null) {
           <div class="row"><input id="chatName" placeholder="New chat name"></div>
           ${user.role === 'admin' ? '<label style="display:flex;align-items:center;gap:6px;margin-top:8px;"><input type="checkbox" id="chatAutoIncludeAll"> Auto include all current and future players</label>' : ''}
           <label style="font-size:13px;margin-top:8px;display:block;">Add players:</label>
-          <div id="playerPickerList" style="max-height:160px;overflow:auto;border:1px solid #bfc8d2;border-radius:8px;padding:6px;margin-bottom:6px;">${playerCheckboxes || '<span class="muted">No other players</span>'}</div>
+          <div class="row" style="margin-top:6px;gap:6px;align-items:center;flex-wrap:wrap;">
+            <input id="playerPickerSearch" placeholder="Filter players by name or nation" style="min-width:220px;flex:1;">
+            <button class="primary" id="playerPickerSelectAll" type="button" style="background:#2f6a41;">All</button>
+            <button class="primary" id="playerPickerSelectNone" type="button" style="background:#4f5d6f;">None</button>
+            <span class="muted" id="playerPickerCount"></span>
+          </div>
+          <div id="playerPickerList" class="chat-player-picker">${playerCheckboxes || '<span class="muted">No other players</span>'}</div>
           <div class="row"><button class="primary" id="newChat">Create Chat</button><span class="muted" id="chatCreateMsg"></span></div>
+          <div class="row" style="margin-top:6px;gap:6px;flex-wrap:wrap;">
+            <button class="primary" id="chatOpenExchangeBtn" style="background:#2f5c8f;">Exchange</button>
+            <button class="primary" id="chatOpenDirectExchangeBtn" style="background:#245f4f;">Direct Exchange</button>
+          </div>
           <h3>Chats</h3>
           <div class="list" id="chatList">${activeChats.map(chat => `<div><button class="primary selectChat" data-id="${chat.id}" data-name="${chat.name.replace(/"/g, '&quot;')}" data-archived="0" style="width:100%; margin-bottom:8px;">${chat.name}${chat.type === 'global' ? ' 🌐' : ''}${Number(chat.unread_messages || 0) > 0 ? ` (${Number(chat.unread_messages)})` : ''}</button></div>`).join('') || '<div class="muted">No active chats</div>'}</div>
           <div class="row" style="margin-top:12px;justify-content:space-between;align-items:center;">
@@ -7604,6 +8341,21 @@ async function loadChat(preferredChatId = null) {
   let activeChatId = firstChat ? Number(firstChat.id) : null;
   let activeChatArchived = !!firstChat?.is_archived;
   let archivedChatsExpanded = false;
+  let chatExchangeMode = null;
+  let chatOfferMap = {};
+  let chatReceiveMap = {};
+  let exchangeListExpanded = false;
+  let showArchivedExchangeRequests = false;
+
+  const setExchangeListVisibility = () => {
+    const exchangeView = document.getElementById('chatExchangeView');
+    const exchangeToggle = document.getElementById('chatExchangeToggle');
+    const toggleLabel = document.getElementById('chatExchangeToggleLabel');
+    if (!exchangeView || !exchangeToggle || !toggleLabel) return;
+    exchangeView.style.display = exchangeListExpanded ? 'block' : 'none';
+    exchangeToggle.setAttribute('aria-expanded', exchangeListExpanded ? 'true' : 'false');
+    toggleLabel.textContent = exchangeListExpanded ? 'Hide' : 'Show';
+  };
 
   const setArchivedChatVisibility = () => {
     const archivedSection = document.getElementById('archivedChatSection');
@@ -7618,6 +8370,58 @@ async function loadChat(preferredChatId = null) {
     setArchivedChatVisibility();
   };
   setArchivedChatVisibility();
+  document.getElementById('chatExchangeToggle')?.addEventListener('click', () => {
+    exchangeListExpanded = !exchangeListExpanded;
+    setExchangeListVisibility();
+  });
+  document.getElementById('chatExchangeArchivedToggle')?.addEventListener('click', async () => {
+    showArchivedExchangeRequests = !showArchivedExchangeRequests;
+    const archivedToggle = document.getElementById('chatExchangeArchivedToggle');
+    if (archivedToggle) {
+      archivedToggle.textContent = showArchivedExchangeRequests ? 'Hide Archived' : 'Show Archived';
+    }
+    if (!activeChatId) return;
+    const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+    await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
+  });
+  setExchangeListVisibility();
+
+  const updatePlayerPickerCount = () => {
+    const allChecks = Array.from(document.querySelectorAll('#playerPickerList .memberCheck'));
+    const selected = allChecks.filter(check => check.checked).length;
+    const countEl = document.getElementById('playerPickerCount');
+    if (countEl) {
+      countEl.textContent = allChecks.length ? `${selected}/${allChecks.length} selected` : '0 selected';
+    }
+  };
+
+  const applyPlayerPickerFilter = () => {
+    const term = String(document.getElementById('playerPickerSearch')?.value || '').trim().toLowerCase();
+    document.querySelectorAll('#playerPickerList .chat-player-option').forEach(row => {
+      const haystack = String(row.getAttribute('data-search') || '');
+      row.style.display = !term || haystack.includes(term) ? 'flex' : 'none';
+    });
+  };
+
+  document.querySelectorAll('#playerPickerList .memberCheck').forEach(check => {
+    check.addEventListener('change', updatePlayerPickerCount);
+  });
+  document.getElementById('playerPickerSearch')?.addEventListener('input', applyPlayerPickerFilter);
+  document.getElementById('playerPickerSelectAll')?.addEventListener('click', () => {
+    document.querySelectorAll('#playerPickerList .chat-player-option').forEach(row => {
+      if (row.style.display === 'none') return;
+      const check = row.querySelector('.memberCheck');
+      if (check) check.checked = true;
+    });
+    updatePlayerPickerCount();
+  });
+  document.getElementById('playerPickerSelectNone')?.addEventListener('click', () => {
+    document.querySelectorAll('#playerPickerList .memberCheck').forEach(check => {
+      check.checked = false;
+    });
+    updatePlayerPickerCount();
+  });
+  updatePlayerPickerCount();
 
   const setChatActions = () => {
     const activeChat = chatsById.get(Number(activeChatId)) || null;
@@ -7632,6 +8436,165 @@ async function loadChat(preferredChatId = null) {
     document.getElementById('deleteChatForMeBtn').style.display = activeChatId ? 'inline-block' : 'none';
   };
 
+  const asTradeEntries = (value) => {
+    if (Array.isArray(value)) {
+      return value
+        .map(entry => ({
+          type: entry?.type === 'advanced' ? 'advanced' : 'base',
+          name: String(entry?.name || '').trim(),
+          amount: toFiniteNumber(entry?.amount, 0),
+        }))
+        .filter(entry => entry.name && entry.amount > 0);
+    }
+    if (!value || typeof value !== 'object') return [];
+    return Object.entries(value)
+      .map(([rawKey, rawAmount]) => {
+        const canonical = canonicalResourceKey(rawKey);
+        if (!canonical || canonical.startsWith('currencies:')) return null;
+        const [type, name] = canonical.split(':', 2);
+        return {
+          type: type === 'advanced' ? 'advanced' : 'base',
+          name: String(name || '').trim(),
+          amount: toFiniteNumber(rawAmount, 0),
+        };
+      })
+      .filter(entry => entry && entry.name && entry.amount > 0);
+  };
+
+  const tradePreview = (entries, maxItems = 3) => {
+    const all = asTradeEntries(entries);
+    const rows = all.slice(0, maxItems);
+    const moreCount = Math.max(0, all.length - rows.length);
+    const chips = rows.map(entry => `${escapeHtml(labelKey(`${entry.type}:${entry.name}`))}: ${fmtNum(entry.amount)}`).join(' | ');
+    return `${chips}${moreCount > 0 ? ` (+${moreCount} more)` : ''}` || 'None';
+  };
+
+  const renderTradeRows = (targetId, map, type) => {
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    const entries = Object.entries(map || {});
+    if (!entries.length) {
+      target.innerHTML = '<div class="muted">No resources added.</div>';
+      return;
+    }
+    target.innerHTML = entries.map(([key, amount]) => {
+      const canonical = canonicalResourceKey(key);
+      if (!canonical) return '';
+      const [entryType] = canonical.split(':', 2);
+      return `<div class="row" style="border:1px solid var(--border);border-radius:8px;padding:6px;justify-content:space-between;align-items:center;gap:6px;">
+        <div>${escapeHtml(labelKey(canonical))} <span class="muted">(${escapeHtml(entryType)})</span></div>
+        <div style="display:flex;gap:8px;align-items:center;"><strong>${fmtNum(amount)}</strong><button class="primary chat-remove-trade-row" type="button" data-type="${type}" data-key="${escapeHtml(key)}" style="background:#8a1a1a;">Remove</button></div>
+      </div>`;
+    }).filter(Boolean).join('');
+
+    target.querySelectorAll('.chat-remove-trade-row').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const rowType = String(btn.dataset.type || 'offer');
+        const rowKey = String(btn.dataset.key || '');
+        if (!rowKey) return;
+        if (rowType === 'offer') {
+          delete chatOfferMap[rowKey];
+          renderTradeRows('chatOfferRows', chatOfferMap, 'offer');
+        } else {
+          delete chatReceiveMap[rowKey];
+          renderTradeRows('chatReceiveRows', chatReceiveMap, 'receive');
+        }
+      });
+    });
+  };
+
+  const openExchangeComposer = (mode) => {
+    chatExchangeMode = mode === 'direct_exchange' ? 'direct_exchange' : 'exchange';
+    chatOfferMap = {};
+    chatReceiveMap = {};
+    document.getElementById('chatExchangeComposer').style.display = 'block';
+    document.getElementById('chatExchangeComposerTitle').textContent = chatExchangeMode === 'direct_exchange'
+      ? 'Direct Exchange: configure offer/receive and choose recipient nation before sending.'
+      : 'Exchange: configure offer/receive and submit to this chat.';
+    document.getElementById('chatDirectRecipientWrap').style.display = chatExchangeMode === 'direct_exchange' ? 'block' : 'none';
+    document.getElementById('chatExchangeMsg').textContent = '';
+    renderTradeRows('chatOfferRows', chatOfferMap, 'offer');
+    renderTradeRows('chatReceiveRows', chatReceiveMap, 'receive');
+  };
+
+  const closeExchangeComposer = () => {
+    chatExchangeMode = null;
+    chatOfferMap = {};
+    chatReceiveMap = {};
+    document.getElementById('chatExchangeComposer').style.display = 'none';
+    document.getElementById('chatExchangeMsg').textContent = '';
+  };
+
+  const addTradeResource = (kind) => {
+    const isOffer = kind === 'offer';
+    const selectEl = document.getElementById(isOffer ? 'chatOfferSelect' : 'chatReceiveSelect');
+    const amountEl = document.getElementById(isOffer ? 'chatOfferAmount' : 'chatReceiveAmount');
+    const msgEl = document.getElementById('chatExchangeMsg');
+    const canonical = canonicalResourceKey(String(selectEl?.value || ''));
+    const amount = toFiniteNumber(amountEl?.value, 0);
+    if (!canonical || canonical.startsWith('currencies:')) {
+      msgEl.textContent = 'Select a valid base or advanced resource.';
+      return;
+    }
+    if (!(amount > 0)) {
+      msgEl.textContent = 'Amount must be greater than zero.';
+      return;
+    }
+    if (isOffer) {
+      chatOfferMap[canonical] = amount;
+      renderTradeRows('chatOfferRows', chatOfferMap, 'offer');
+    } else {
+      chatReceiveMap[canonical] = amount;
+      renderTradeRows('chatReceiveRows', chatReceiveMap, 'receive');
+    }
+    msgEl.textContent = '';
+  };
+
+  const submitExchangeRequest = async () => {
+    const msgEl = document.getElementById('chatExchangeMsg');
+    if (!activeChatId) {
+      msgEl.textContent = 'Select a chat first.';
+      return;
+    }
+    if (!chatExchangeMode) {
+      msgEl.textContent = 'Choose Exchange or Direct Exchange first.';
+      return;
+    }
+
+    const offerEntries = asTradeEntries(chatOfferMap);
+    const receiveEntries = asTradeEntries(chatReceiveMap);
+    if (!offerEntries.length || !receiveEntries.length) {
+      msgEl.textContent = 'Add at least one offer and one receive resource.';
+      return;
+    }
+
+    const payload = {
+      mode: chatExchangeMode,
+      message: String(document.getElementById('chatMsg').value || '').trim(),
+      offer: offerEntries,
+      receive: receiveEntries,
+    };
+    if (chatExchangeMode === 'direct_exchange') {
+      const recipientNationId = Number(document.getElementById('chatExchangeRecipient')?.value || 0);
+      if (!recipientNationId) {
+        msgEl.textContent = 'Select a recipient nation for direct exchange.';
+        return;
+      }
+      payload.recipient_nation_id = recipientNationId;
+    }
+
+    const res = await api(`/api/chats/${activeChatId}/exchange-requests`, { method: 'POST', body: JSON.stringify(payload) });
+    if (!res?.ok) {
+      msgEl.textContent = await readErrorMessage(res, 'The exchange request could not be created.');
+      return;
+    }
+    document.getElementById('chatMsg').value = '';
+    closeExchangeComposer();
+    const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+    await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
+    barkIfEnabled();
+  };
+
   async function loadMessages(chatId, chatName, isArchived = false) {
     if (!chatId) return;
     activeChatId = Number(chatId);
@@ -7640,18 +8603,151 @@ async function loadChat(preferredChatId = null) {
     document.getElementById('chatActionMsg').textContent = '';
     if (chatName) document.getElementById('chatHeader').textContent = chatName;
     await subscribeChannel(`chat.${chatId}`);
-    const res = await api(`/api/chats/${chatId}/messages`);
-    if (!res?.ok) {
-      throw new Error(await readErrorMessage(res, 'The chat messages could not be loaded.'));
+    const exchangeQuery = (user.role === 'admin' && showArchivedExchangeRequests) ? '?include_archived=1' : '';
+    const [messagesRes, exchangesRes] = await Promise.all([
+      api(`/api/chats/${chatId}/messages`),
+      api(`/api/chats/${chatId}/exchange-requests${exchangeQuery}`),
+    ]);
+    if (!messagesRes?.ok) {
+      throw new Error(await readErrorMessage(messagesRes, 'The chat messages could not be loaded.'));
     }
-    const messages = extractList(await parseJsonResponse(res, []));
-    document.getElementById('chatView').innerHTML = messages.map(message => {
+    const messages = extractList(await parseJsonResponse(messagesRes, []));
+    if (exchangesRes && !exchangesRes.ok) {
+      document.getElementById('chatActionMsg').textContent = await readErrorMessage(exchangesRes, 'Exchange requests could not be loaded.');
+    }
+    const exchanges = exchangesRes && exchangesRes.ok ? extractList(await parseJsonResponse(exchangesRes, [])) : [];
+    const exchangeCountEl = document.getElementById('chatExchangeCount');
+    if (exchangeCountEl) {
+      exchangeCountEl.textContent = String(exchanges.length);
+    }
+
+    const exchangeHtml = exchanges.map(exchange => {
+      const offerPayload = Array.isArray(exchange.offer)
+        ? exchange.offer
+        : (safeJsonParse(exchange.offer_json, []) || []);
+      const receivePayload = Array.isArray(exchange.receive)
+        ? exchange.receive
+        : (safeJsonParse(exchange.receive_json, []) || []);
+      const offerSummary = tradePreview(offerPayload, 3);
+      const receiveSummary = tradePreview(receivePayload, 3);
+      const status = String(exchange.status || 'pending');
+      const isCancelled = !!exchange.removed_at;
+      const expandedId = `exchange-expanded-${exchange.id}`;
+      const isPending = status === 'pending' && !isCancelled;
+      const isDirect = Number(exchange.recipient_nation_id || 0) > 0;
+      const canAccept = isPending && (user.role === 'admin' || (ownNationId > 0 && ownNationId !== Number(exchange.sender_nation_id || 0) && (!isDirect || ownNationId === Number(exchange.recipient_nation_id || 0))));
+      const canRefuse = isPending && isDirect && (user.role === 'admin' || (ownNationId > 0 && ownNationId === Number(exchange.recipient_nation_id || 0)));
+      const canRemove = user.role === 'admin';
+
+      const badgeClass = isCancelled
+        ? 'cancelled'
+        : (status === 'accepted' ? 'accepted' : (status === 'refused' ? 'refused' : 'pending'));
+      const statusLabel = isCancelled
+        ? 'cancelled'
+        : (status === 'pending' ? 'open' : (status === 'accepted' ? 'accepted' : (status === 'refused' ? 'refused' : status)));
+
+      return `
+        <div class="exchange-notice" data-id="${exchange.id}" style="border:1px solid var(--border);border-radius:10px;padding:8px;margin-bottom:8px;cursor:pointer;">
+          <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start;">
+            <div style="font-size:12px;"><strong>${escapeHtml(exchange.sender_nation_name || 'Unknown Nation')}</strong> ${isDirect ? `to <strong>${escapeHtml(exchange.recipient_nation_name || 'Direct Recipient')}</strong>` : 'posted exchange request'}</div>
+            <div class="exchange-status-badge ${badgeClass}">${escapeHtml(statusLabel)}</div>
+          </div>
+          <div class="row" style="gap:10px;align-items:flex-start;margin-top:4px;">
+            <div style="flex:1;min-width:0;"><div class="muted" style="font-size:11px;">Offer</div><div style="font-size:12px;">${offerSummary}</div></div>
+            <div style="flex:1;min-width:0;"><div class="muted" style="font-size:11px;">Receive</div><div style="font-size:12px;">${receiveSummary}</div></div>
+          </div>
+          <div id="${expandedId}" style="display:none;margin-top:8px;border-top:1px dashed var(--border);padding-top:8px;">
+            ${(exchange.message && String(exchange.message).trim()) ? `<div style="margin-bottom:6px;white-space:pre-wrap;">${escapeHtml(exchange.message)}</div>` : '<div class="muted" style="margin-bottom:6px;">No message included.</div>'}
+            <div class="row" style="gap:8px;flex-wrap:wrap;">
+              <button class="primary chat-exchange-close" type="button" style="background:#4f5d6f;">Close</button>
+              ${canAccept ? `<button class="primary chat-exchange-accept" data-id="${exchange.id}" type="button" style="background:#2f6a41;">Accept</button>` : ''}
+              ${canRefuse ? `<button class="primary chat-exchange-refuse" data-id="${exchange.id}" type="button" style="background:#7a5b1f;">Refuse</button>` : ''}
+              ${canRemove ? `<button class="primary chat-exchange-remove" data-id="${exchange.id}" type="button" style="background:#8a1a1a;">Remove</button>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const messageHtml = messages.map(message => {
       const isOwn = Number(message.sender_user_id) === Number(user.id);
       return `<div class="msg-wrap ${isOwn ? 'own' : 'other'}">
         <div class="msg-sender">${message.sender_name}</div>
         <div class="msg-bubble">${escapeHtml(message.message)}</div>
       </div>`;
-    }).join('') || '<div class="muted">No messages</div>';
+    }).join('');
+
+    const exchangePane = document.getElementById('chatExchangeView');
+    if (exchangePane) {
+      exchangePane.innerHTML = exchangeHtml || '<div class="muted">No exchange requests in this chat.</div>';
+    }
+    setExchangeListVisibility();
+    document.getElementById('chatView').innerHTML = `${messageHtml || '<div class="muted">No messages</div>'}`;
+
+    document.querySelectorAll('.exchange-notice').forEach(card => {
+      const id = String(card.dataset.id || '');
+      const expanded = document.getElementById(`exchange-expanded-${id}`);
+      if (!expanded) return;
+      card.addEventListener('click', (event) => {
+        const target = event.target;
+        if (target && target.closest && target.closest('button')) return;
+        expanded.style.display = expanded.style.display === 'none' ? 'block' : 'none';
+      });
+    });
+
+    document.querySelectorAll('.chat-exchange-close').forEach(btn => {
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const wrapper = btn.closest('[id^="exchange-expanded-"]');
+        if (wrapper) wrapper.style.display = 'none';
+      });
+    });
+
+    document.querySelectorAll('.chat-exchange-accept').forEach(btn => {
+      btn.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const exchangeId = Number(btn.dataset.id || 0);
+        if (!exchangeId || !activeChatId) return;
+        const res = await api(`/api/chats/${activeChatId}/exchange-requests/${exchangeId}/accept`, { method: 'POST' });
+        document.getElementById('chatActionMsg').textContent = res?.ok ? 'Exchange accepted.' : await readErrorMessage(res, 'The exchange could not be accepted.');
+        if (res?.ok) {
+          const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+          await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
+        }
+      });
+    });
+
+    document.querySelectorAll('.chat-exchange-refuse').forEach(btn => {
+      btn.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const exchangeId = Number(btn.dataset.id || 0);
+        if (!exchangeId || !activeChatId) return;
+        const res = await api(`/api/chats/${activeChatId}/exchange-requests/${exchangeId}/refuse`, { method: 'POST' });
+        document.getElementById('chatActionMsg').textContent = res?.ok ? 'Exchange refused.' : await readErrorMessage(res, 'The exchange could not be refused.');
+        if (res?.ok) {
+          const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+          await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
+        }
+      });
+    });
+
+    document.querySelectorAll('.chat-exchange-remove').forEach(btn => {
+      btn.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const exchangeId = Number(btn.dataset.id || 0);
+        if (!exchangeId || !activeChatId) return;
+        const res = await api(`/api/chats/${activeChatId}/exchange-requests/${exchangeId}`, { method: 'DELETE' });
+        document.getElementById('chatActionMsg').textContent = res?.ok ? 'Exchange request removed.' : await readErrorMessage(res, 'The exchange request could not be removed.');
+        if (res?.ok) {
+          const activeBtn = document.querySelector(`.selectChat[data-id="${activeChatId}"]`);
+          await loadMessages(activeChatId, activeBtn ? activeBtn.dataset.name : null, activeChatArchived);
+        }
+      });
+    });
     const chatView = document.getElementById('chatView');
     chatView.scrollTop = chatView.scrollHeight;
     setChatActions();
@@ -7676,6 +8772,13 @@ async function loadChat(preferredChatId = null) {
       }
     };
   });
+
+  document.getElementById('chatOpenExchangeBtn').onclick = () => openExchangeComposer('exchange');
+  document.getElementById('chatOpenDirectExchangeBtn').onclick = () => openExchangeComposer('direct_exchange');
+  document.getElementById('chatCancelExchangeBtn').onclick = () => closeExchangeComposer();
+  document.getElementById('chatAddOfferBtn').onclick = () => addTradeResource('offer');
+  document.getElementById('chatAddReceiveBtn').onclick = () => addTradeResource('receive');
+  document.getElementById('chatSubmitExchangeBtn').onclick = async () => submitExchangeRequest();
   if (firstChat) {
     await loadMessages(firstChat.id, firstChat.name, firstChat.is_archived);
   } else {
@@ -7814,22 +8917,7 @@ async function loadOtherNations() {
       const resourceDefs = resourceDefsRes && resourceDefsRes.ok ? await resourceDefsRes.json() : { base: {}, advanced: {} };
       setDynamicResourceLabels(resourceDefs);
       const resources = d.resources || {};
-      const extra = safeJsonParse(resources.extra_json, {}) || {};
-      const advanced = resources.advanced || extra.advanced || extra.refined || {};
-      const base = {
-        ...(extra.base || {}),
-        ...(resources.base || {}),
-      };
-      Object.values(resourceDefs.base || {}).forEach(defs => {
-        (defs || []).forEach(def => {
-          const key = String(def?.name || '').trim();
-          if (!key || Object.prototype.hasOwnProperty.call(base, key)) return;
-          if (resources[key] !== undefined && resources[key] !== null) {
-            base[key] = Number(resources[key] || 0);
-          }
-        });
-      });
-      const currencies = extra.currencies || {};
+      const { base, advanced, currencies } = buildNationResourceMaps(resources);
       const terrainSqMiles = normalizeTerrainSquareMiles(d.terrain?.square_miles_json || {});
       const terrainTotal = Math.max(1, Object.values(terrainSqMiles).reduce((sum, value) => sum + toFiniteNumber(value, 0), 0));
       const sections = [];
@@ -9690,22 +10778,7 @@ async function loadAllNations() {
     const resourceDefsRes = await api('/api/resources');
     const resourceDefs = resourceDefsRes && resourceDefsRes.ok ? await resourceDefsRes.json() : { base: {}, advanced: {} };
     setDynamicResourceLabels(resourceDefs);
-    const extra = safeJsonParse(d.resources?.extra_json, {}) || {};
-    const baseRes = {
-      ...(extra.base || {}),
-      ...(d.resources?.base || {}),
-    };
-    Object.values(resourceDefs.base || {}).forEach(defs => {
-      (defs || []).forEach(def => {
-        const key = String(def?.name || '').trim();
-        if (!key || Object.prototype.hasOwnProperty.call(baseRes, key)) return;
-        if (d.resources?.[key] !== undefined && d.resources?.[key] !== null) {
-          baseRes[key] = Number(d.resources[key] || 0);
-        }
-      });
-    });
-    const advancedRes = d.resources?.advanced || extra.advanced || extra.refined || {};
-    const currencyRes = (extra.currencies && typeof extra.currencies === 'object') ? extra.currencies : {};
+    const { extra, base: baseRes, advanced: advancedRes, currencies: currencyRes } = buildNationResourceMaps(d.resources || {});
 
     const makeReadOnlyResourceRows = (values, type) => {
       return Object.entries(values || {})
@@ -9777,14 +10850,43 @@ async function loadAllNations() {
     // Render grouped resource inputs
     function makeResourceInputs(type, values) {
       const groups = resourceDefs[type] || {};
-      return Object.entries(groups).map(([group, defs]) => `
+      const renderedKeys = new Set();
+      const groupedHtml = Object.entries(groups).map(([group, defs]) => {
+        (defs || []).forEach(def => {
+          const key = String(def?.name || '').trim();
+          if (key) renderedKeys.add(key);
+        });
+        return `
         <details style="margin:6px 0;">
           <summary style="font-size:13px;">${group}</summary>
           <div class="nation-editor-grid" style="margin-top:6px;">
             ${defs.map(def => `<label style="font-size:12px;">${escapeHtml(def.display_name)}<input id="${type}-res-${def.name}" type="number" value="${values[def.name] || 0}" style="margin-top:4px;"></label>`).join('')}
           </div>
         </details>
-      `).join('');
+      `;
+      }).join('');
+
+      const uncategorized = Object.entries(values || {})
+        .map(([name, raw]) => {
+          const key = String(name || '').trim();
+          if (!key || renderedKeys.has(key)) return '';
+          return `<label style="font-size:12px;">${escapeHtml(labelKey(`${type}:${key}`))} <span class="muted">(${escapeHtml(key)})</span><input id="${type}-res-${key}" type="number" value="${toFiniteNumber(raw, 0)}" style="margin-top:4px;"></label>`;
+        })
+        .filter(Boolean)
+        .join('');
+
+      const uncategorizedHtml = uncategorized
+        ? `
+          <details style="margin:6px 0;">
+            <summary style="font-size:13px;">Uncategorized</summary>
+            <div class="nation-editor-grid" style="margin-top:6px;">
+              ${uncategorized}
+            </div>
+          </details>
+        `
+        : '';
+
+      return `${groupedHtml}${uncategorizedHtml}`;
     }
 
     function buildIncomeResourceOptions() {

@@ -64,6 +64,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/chats/{chatId}/read', [ChatController::class, 'markRead']);
     Route::patch('/chats/{chatId}/unread', [ChatController::class, 'markUnread']);
     Route::post('/chats/{chatId}/messages', [ChatController::class, 'send']);
+    Route::get('/chats/{chatId}/exchange-requests', [ChatController::class, 'exchangeRequests']);
+    Route::post('/chats/{chatId}/exchange-requests', [ChatController::class, 'storeExchangeRequest']);
+    Route::post('/chats/{chatId}/exchange-requests/{requestId}/accept', [ChatController::class, 'acceptExchangeRequest']);
+    Route::post('/chats/{chatId}/exchange-requests/{requestId}/refuse', [ChatController::class, 'refuseExchangeRequest']);
+    Route::delete('/chats/{chatId}/exchange-requests/{requestId}', [ChatController::class, 'deleteExchangeRequest']);
     Route::patch('/chats/{chatId}/archive', [ChatController::class, 'archive']);
     Route::patch('/chats/{chatId}/unarchive', [ChatController::class, 'unarchive']);
     Route::delete('/chats/{chatId}', [ChatController::class, 'removeForUser']);
