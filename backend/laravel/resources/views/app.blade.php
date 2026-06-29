@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Azveria App</title>
+  <link rel="stylesheet" href="{{ asset('app-tabs.css') }}">
   <style>
     :root {
       --bg: #f6f1e5;
@@ -2930,7 +2931,7 @@ async function loadSection(name) {
       `;
     };
 
-    const levelEditorMarkup = (structureId, level, productionObj, maintenanceObj, terrainRule) => {
+    const levelEditorMarkup = (structureId, level, productionObj, maintenanceObj, terrainRule, buildYears) => {
       const productionEntries = Object.entries(productionObj || {});
       const productionRowsMarkup = productionEntries.length
         ? productionEntries.map(([k, v]) => productionRowMarkup(k, v)).join('')
@@ -2944,6 +2945,9 @@ async function loadSection(name) {
           <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px;">
             <strong style="font-size:13px;">Level ${level}</strong>
           </div>
+          <label style="font-size:12px;display:block;margin-bottom:8px;">Build Time (game years)
+            <input class="struct-build-years" data-structure-id="${structureId}" data-level="${level}" type="number" min="0" step="1" value="${Number.isFinite(Number(buildYears)) ? Number(buildYears) : 0}" style="margin-top:4px;max-width:160px;">
+          </label>
           <div class="row" style="justify-content:space-between;align-items:center;">
             <span class="muted" style="font-size:12px;">Production Per Game Year</span>
             <button type="button" class="primary struct-prod-add" data-structure-id="${structureId}" data-level="${level}" style="padding:4px 10px;">+ Add Production</button>
@@ -2963,13 +2967,14 @@ async function loadSection(name) {
       `;
     };
 
-    const levelEditorsMarkup = (structureId, maxLevel, productionMap, maintenanceMap, terrainRequirementMap) => {
+    const levelEditorsMarkup = (structureId, maxLevel, productionMap, maintenanceMap, terrainRequirementMap, buildTimeMap) => {
       const chunks = [];
       for (let level = 1; level <= maxLevel; level++) {
         const levelProductionMap = (productionMap && typeof productionMap === 'object') ? (productionMap[String(level)] || {}) : {};
         const levelMaintenanceMap = (maintenanceMap && typeof maintenanceMap === 'object') ? (maintenanceMap[String(level)] || {}) : {};
         const levelTerrainRule = (terrainRequirementMap && typeof terrainRequirementMap === 'object') ? (terrainRequirementMap[String(level)] || null) : null;
-        chunks.push(levelEditorMarkup(structureId, level, levelProductionMap, levelMaintenanceMap, levelTerrainRule));
+        const levelBuildYears = (buildTimeMap && typeof buildTimeMap === 'object') ? Number(buildTimeMap[String(level)] || 0) : 0;
+        chunks.push(levelEditorMarkup(structureId, level, levelProductionMap, levelMaintenanceMap, levelTerrainRule, levelBuildYears));
       }
       return chunks.join('');
     };
@@ -3006,6 +3011,9 @@ async function loadSection(name) {
       const terrainRequirement = (row.terrain_requirement_json && typeof row.terrain_requirement_json === 'object')
         ? row.terrain_requirement_json
         : {};
+      const buildTimes = (row.build_time_years_json && typeof row.build_time_years_json === 'object')
+        ? row.build_time_years_json
+        : {};
       const sameTerrainAllLevels = areTerrainRulesSameForAllLevels(terrainRequirement, maxLevel);
 
       return `
@@ -3030,7 +3038,7 @@ async function loadSection(name) {
               <span class="muted" style="font-size:12px;">Use this after changing Level Capacity so you can edit production and maintenance for added levels.</span>
             </div>
             <div id="struct-levels-${row.id}">
-              ${levelEditorsMarkup(row.id, maxLevel, production, maintenance, terrainRequirement)}
+              ${levelEditorsMarkup(row.id, maxLevel, production, maintenance, terrainRequirement, buildTimes)}
             </div>
           </details>
           <div class="row" style="margin-top:8px;">
@@ -3142,6 +3150,17 @@ async function loadSection(name) {
       return out;
     };
 
+    const collectBuildTimeMapFromEditor = (structureId) => {
+      const out = {};
+      panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"]`).forEach(levelEditor => {
+        const level = Math.max(1, Number(levelEditor.getAttribute('data-level') || 1));
+        const rawYears = Number(levelEditor.querySelector('.struct-build-years')?.value || 0);
+        if (!Number.isFinite(rawYears)) return;
+        out[String(level)] = Math.max(0, Math.round(rawYears));
+      });
+      return out;
+    };
+
     const syncSameTerrainInputsState = (structureId) => {
       const enabled = !!document.getElementById(`struct-same-terrain-${structureId}`)?.checked;
       panel.querySelectorAll(`.struct-level-editor[data-structure-id="${structureId}"]`).forEach(levelEditor => {
@@ -3181,7 +3200,8 @@ async function loadSection(name) {
       const existingProduction = collectProductionMapFromEditor(structureId);
       const existingMaintenance = collectMaintenanceMapFromEditor(structureId);
       const existingTerrainRequirements = collectTerrainRequirementMapFromEditor(structureId);
-      container.innerHTML = levelEditorsMarkup(structureId, maxLevel, existingProduction, existingMaintenance, existingTerrainRequirements);
+      const existingBuildTimes = collectBuildTimeMapFromEditor(structureId);
+      container.innerHTML = levelEditorsMarkup(structureId, maxLevel, existingProduction, existingMaintenance, existingTerrainRequirements, existingBuildTimes);
       const filterInput = document.getElementById(`struct-resource-filter-${structureId}`);
       const filterValue = String(filterInput?.value || '');
       if (filterValue) {
@@ -3324,6 +3344,7 @@ async function loadSection(name) {
               yearly_production_json: {},
               yearly_maintenance_json: {},
               terrain_requirement_json: {},
+              build_time_years_json: {},
             }),
           });
 
@@ -3355,6 +3376,7 @@ async function loadSection(name) {
         const yearlyProduction = collectProductionMapFromEditor(id);
         const yearlyMaintenance = collectMaintenanceMapFromEditor(id);
         const terrainRequirements = collectTerrainRequirementMapFromEditor(id);
+        const buildTimeYears = collectBuildTimeMapFromEditor(id);
 
         if (!name) {
           if (msgEl) msgEl.textContent = 'Name is required.';
@@ -3372,6 +3394,7 @@ async function loadSection(name) {
             yearly_production_json: yearlyProduction,
             yearly_maintenance_json: yearlyMaintenance,
             terrain_requirement_json: terrainRequirements,
+            build_time_years_json: buildTimeYears,
           }),
         });
 
@@ -3700,6 +3723,7 @@ async function loadCombat() {
       const displayName = String(u.custom_name || u.display_name || 'Unit');
       const baseName = String(u.display_name || 'Unit');
       const instanceIndex = Number(u.instance_index || 1);
+      const unitDomId = `combat_unit_${Number(u.id)}_${instanceIndex}`;
       const sourceQty = Number(u.source_qty || 1);
       const rating = Number(u.rating || 0);
       const effectiveClass = String(u.effective_class_name || u.class_name || '');
@@ -3709,40 +3733,40 @@ async function loadCombat() {
       const adminNote = String(u.admin_note || '');
       const nameEditor = options.allowNameEdit ? `
         <div class="row" style="margin-top:8px;">
-          <label style="min-width:90px;">Unit Name</label>
-          <input class="combatUnitNameInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" value="${escapeHtml(String(u.custom_name || ''))}" placeholder="Set custom unit name">
+          <label for="${unitDomId}_name" style="min-width:90px;">Unit Name</label>
+          <input id="${unitDomId}_name" class="combatUnitNameInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" value="${escapeHtml(String(u.custom_name || ''))}" placeholder="Set custom unit name" aria-label="Unit name for ${escapeHtml(displayName)}">
           ${options.allowStatEdit
-            ? `<button class="primary combatUnitEditSave" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" style="background:#2f6a41;">Save Unit</button>`
-            : `<button class="primary combatUnitNameSave" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" style="background:#314f72;">Save Name</button>`}
+            ? `<button class="primary combatUnitEditSave" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" style="background:#2f6a41;" aria-label="Save full unit changes for ${escapeHtml(displayName)}">Save Unit</button>`
+            : `<button class="primary combatUnitNameSave" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" style="background:#314f72;" aria-label="Save unit name for ${escapeHtml(displayName)}">Save Name</button>`}
         </div>
       ` : '';
 
       const statsEditor = options.allowStatEdit ? `
         <div class="row" style="margin-top:8px;">
-          <label style="min-width:90px;">Class</label>
-          <input class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="class_name" value="${escapeHtml(effectiveClass)}" placeholder="Class">
-          <label style="min-width:75px;">Status</label>
-          <input class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="status" value="${escapeHtml(effectiveStatus)}" placeholder="Status">
+          <label for="${unitDomId}_class" style="min-width:90px;">Class</label>
+          <input id="${unitDomId}_class" class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="class_name" value="${escapeHtml(effectiveClass)}" placeholder="Class" aria-label="Class for ${escapeHtml(displayName)}">
+          <label for="${unitDomId}_status" style="min-width:75px;">Status</label>
+          <input id="${unitDomId}_status" class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="status" value="${escapeHtml(effectiveStatus)}" placeholder="Status" aria-label="Status for ${escapeHtml(displayName)}">
         </div>
         <div class="row" style="margin-top:8px;">
-          <label style="min-width:90px;">Race</label>
-          <input class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="race" value="${escapeHtml(effectiveRace)}" placeholder="Race">
-          <label style="min-width:75px;">Terrain</label>
-          <input class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="terrain" value="${escapeHtml(effectiveTerrain)}" placeholder="Terrain">
+          <label for="${unitDomId}_race" style="min-width:90px;">Race</label>
+          <input id="${unitDomId}_race" class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="race" value="${escapeHtml(effectiveRace)}" placeholder="Race" aria-label="Race for ${escapeHtml(displayName)}">
+          <label for="${unitDomId}_terrain" style="min-width:75px;">Terrain</label>
+          <input id="${unitDomId}_terrain" class="combatUnitMetaInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-field="terrain" value="${escapeHtml(effectiveTerrain)}" placeholder="Terrain" aria-label="Terrain for ${escapeHtml(displayName)}">
         </div>
         <div class="res-panel" style="margin-top:8px;">
-          <div class="res-kv"><span>ATK</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="ATK" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.ATK ?? ''))}"></span></div>
-          <div class="res-kv"><span>DEF</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="DEF" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.DEF ?? ''))}"></span></div>
-          <div class="res-kv"><span>DMG</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="DMG" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.DMG ?? ''))}"></span></div>
-          <div class="res-kv"><span>HP</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="HP" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.HP ?? ''))}"></span></div>
-          <div class="res-kv"><span>MVT</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="MVT" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.MVT ?? ''))}"></span></div>
-          <div class="res-kv"><span>RNG</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="RNG" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.RNG ?? ''))}"></span></div>
-          <div class="res-kv"><span>ACT</span><span><input class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="ACT" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.ACT ?? ''))}"></span></div>
-          <div class="res-kv"><span>Rating</span><span><input class="combatUnitRatingInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" type="number" step="0.01" value="${escapeHtml(String(u.stats_override?.rating ?? u.effective_stats?.rating ?? ''))}"></span></div>
+          <div class="res-kv"><span>ATK</span><span><input id="${unitDomId}_stat_ATK" class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="ATK" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.ATK ?? ''))}" aria-label="ATK stat for ${escapeHtml(displayName)}"></span></div>
+          <div class="res-kv"><span>DEF</span><span><input id="${unitDomId}_stat_DEF" class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="DEF" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.DEF ?? ''))}" aria-label="DEF stat for ${escapeHtml(displayName)}"></span></div>
+          <div class="res-kv"><span>DMG</span><span><input id="${unitDomId}_stat_DMG" class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="DMG" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.DMG ?? ''))}" aria-label="DMG stat for ${escapeHtml(displayName)}"></span></div>
+          <div class="res-kv"><span>HP</span><span><input id="${unitDomId}_stat_HP" class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="HP" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.HP ?? ''))}" aria-label="HP stat for ${escapeHtml(displayName)}"></span></div>
+          <div class="res-kv"><span>MVT</span><span><input id="${unitDomId}_stat_MVT" class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="MVT" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.MVT ?? ''))}" aria-label="MVT stat for ${escapeHtml(displayName)}"></span></div>
+          <div class="res-kv"><span>RNG</span><span><input id="${unitDomId}_stat_RNG" class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="RNG" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.RNG ?? ''))}" aria-label="RNG stat for ${escapeHtml(displayName)}"></span></div>
+          <div class="res-kv"><span>ACT</span><span><input id="${unitDomId}_stat_ACT" class="combatUnitStatInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" data-stat="ACT" type="number" step="0.01" value="${escapeHtml(String(u.effective_stats?.ACT ?? ''))}" aria-label="ACT stat for ${escapeHtml(displayName)}"></span></div>
+          <div class="res-kv"><span>Rating</span><span><input id="${unitDomId}_rating" class="combatUnitRatingInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" type="number" step="0.01" value="${escapeHtml(String(u.stats_override?.rating ?? u.effective_stats?.rating ?? ''))}" aria-label="Rating override for ${escapeHtml(displayName)}"></span></div>
         </div>
         <div style="margin-top:8px;">
-          <label style="font-size:12px;display:block;">Admin Note</label>
-          <textarea class="combatUnitNoteInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" rows="3" placeholder="Private admin notes for this specific unit instance...">${escapeHtml(adminNote)}</textarea>
+          <label for="${unitDomId}_admin_note" style="font-size:12px;display:block;">Admin Note</label>
+          <textarea id="${unitDomId}_admin_note" class="combatUnitNoteInput" data-unit-id="${u.id}" data-instance-index="${instanceIndex}" rows="3" placeholder="Private admin notes for this specific unit instance..." aria-label="Admin note for ${escapeHtml(displayName)}">${escapeHtml(adminNote)}</textarea>
         </div>
       ` : '';
 
@@ -3790,13 +3814,13 @@ async function loadCombat() {
         ${o.review_note ? `<div style="white-space:break-spaces;margin-top:6px;"><strong>Review Note:</strong> ${escapeHtml(String(o.review_note || ''))}</div>` : ''}
         ${isAdmin ? `
           <div class="row" style="margin-top:8px;align-items:flex-start;">
-            <select class="combatOrderStatusSelect" data-order-id="${o.id}">
+            <select class="combatOrderStatusSelect" data-order-id="${o.id}" aria-label="Combat order status for order ${o.id}">
               <option value="pending" ${normalizeOrderStatus(o.order_status) === 'pending' ? 'selected' : ''}>pending</option>
               <option value="approved" ${normalizeOrderStatus(o.order_status) === 'approved' ? 'selected' : ''}>approved</option>
               <option value="denied" ${normalizeOrderStatus(o.order_status) === 'denied' ? 'selected' : ''}>denied</option>
             </select>
-            <input class="combatOrderReviewNote" data-order-id="${o.id}" value="${escapeHtml(String(o.review_note || ''))}" placeholder="Optional review note">
-            <button class="primary combatOrderStatusSave" data-order-id="${o.id}" style="background:#314f72;">Update</button>
+            <input class="combatOrderReviewNote" data-order-id="${o.id}" value="${escapeHtml(String(o.review_note || ''))}" placeholder="Optional review note" aria-label="Review note for order ${o.id}">
+            <button class="primary combatOrderStatusSave" data-order-id="${o.id}" style="background:#314f72;" aria-label="Update status for order ${o.id}">Update</button>
           </div>
         ` : ''}
       </div>
@@ -3870,7 +3894,7 @@ async function loadCombat() {
               <h3 style="margin-top:0;">Rating Formula</h3>
               <div class="res-panel combat-formula-panel" style="margin-bottom:8px;">
                 ${renderRatingHelpBubble(effectiveRatingConfig, { isAdmin: true })}
-                <label style="font-size:12px;display:block;margin-top:6px;">Editable Formula Equation</label>
+                <label for="combatRatingFormulaInput" style="font-size:12px;display:block;margin-top:6px;">Editable Formula Equation</label>
                 <textarea id="combatRatingFormulaInput" rows="3" style="font-family:Consolas, monospace;">${escapeHtml(currentFormula)}</textarea>
                 <div class="muted" style="font-size:12px;margin-top:6px;">Variables: ${escapeHtml(ratingVars.join(', '))}</div>
                 <div class="muted" style="font-size:12px;">Operators: ${escapeHtml(ratingOps.join(' '))}</div>
@@ -3879,7 +3903,7 @@ async function loadCombat() {
                 <details style="margin-top:8px;">
                   <summary>Preview Formula</summary>
                   <div style="margin-top:8px;display:grid;gap:8px;">
-                    <label style="font-size:12px;">Preview from existing unit instance</label>
+                    <label for="combatRatingPreviewUnitSelect" style="font-size:12px;">Preview from existing unit instance</label>
                     <select id="combatRatingPreviewUnitSelect">
                       <option value="">Select unit instance...</option>
                       ${allPreviewUnits.map(u => `<option value="${u.id}|${u.instance_index}">${escapeHtml(String(u.custom_name || u.display_name || 'Unit'))} (#${Number(u.instance_index || 1)}) - ${escapeHtml(String(u.status || 'owned'))}</option>`).join('')}
@@ -9519,6 +9543,10 @@ async function loadShop() {
         const terrainReq = (i.terrain_requirement_for_level && typeof i.terrain_requirement_for_level === 'object')
           ? i.terrain_requirement_for_level
           : null;
+        const buildTimeYearsForLevel = Math.max(0, Number(i.build_time_years_for_level || 0));
+        const buildTimeLabel = buildTimeYearsForLevel === 1
+          ? 'Build Time: 1 game year'
+          : `Build Time: ${buildTimeYearsForLevel} game years`;
         const terrainAllowed = Array.isArray(terrainReq?.allowed_terrain)
           ? terrainReq.allowed_terrain.map(v => String(v || '').toLowerCase().trim()).filter(Boolean)
           : [];
@@ -9544,6 +9572,7 @@ async function loadShop() {
             <div class="muted" style="font-size:12px;">${i.description_text || ''}</div>
             <div class="muted" style="font-size:13px;">Cost: ${formatCost(costObj)}</div>
             ${Object.keys(maintenanceObj).length ? `<div class="muted" style="font-size:12px;">Maintenance Per Game Year: ${formatCost(maintenanceObj)}</div>` : ''}
+            ${String(i.category_code || '') === 'build' ? `<div class="muted" style="font-size:12px;">${escapeHtml(buildTimeLabel)}</div>` : ''}
             ${terrainUi}
             ${(!isUpgradeAvailable && i.category_code === 'build') ? '<div class="muted" style="font-size:12px;margin-top:6px;">Need a lower-level structure to upgrade.</div>' : ''}
             <button class="primary buyItem" data-id="${i.id}" data-needs-terrain-selection="${needsTerrainSelection ? '1' : '0'}" ${(!isUpgradeAvailable && i.category_code === 'build') ? 'disabled style="margin-top:6px;opacity:0.45;cursor:not-allowed;"' : 'style="margin-top:6px;"'}>Buy</button>
@@ -11941,6 +11970,16 @@ async function loadGameInformationRules() {
   const msg = document.getElementById('gameDocMsg');
   const hint = document.getElementById('gameDocHint');
   const loading = document.getElementById('gameDocLoading');
+
+  // Preserve literal tab characters in the editor so indentation is authored exactly as intended.
+  text.addEventListener('keydown', (event) => {
+    if (event.key !== 'Tab' || text.readOnly) return;
+    event.preventDefault();
+    const start = text.selectionStart;
+    const end = text.selectionEnd;
+    text.value = text.value.slice(0, start) + '\t' + text.value.slice(end);
+    text.selectionStart = text.selectionEnd = start + 1;
+  });
 
   if (isAdmin) {
     const controls = document.getElementById('docVisibilityControls');

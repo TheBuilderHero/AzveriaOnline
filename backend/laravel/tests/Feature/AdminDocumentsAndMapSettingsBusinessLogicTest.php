@@ -596,6 +596,47 @@ class AdminDocumentsAndMapSettingsBusinessLogicTest extends TestCase
         $doc->assertJsonPath('content_text', 'Custom doctrine body.');
     }
 
+    public function test_game_document_update_preserves_exact_whitespace_tabs_and_line_breaks(): void
+    {
+        $admin = $this->createUser('admin.docs.formatting@example.test', 'admin');
+        $player = $this->createUser('player.docs.formatting@example.test', 'player');
+        Sanctum::actingAs($admin);
+
+        $create = $this->postJson('/api/admin/game-documents', [
+            'title' => 'Formatting Spec',
+            'code' => 'formatting_spec',
+            'content_text' => 'initial',
+        ]);
+        $create->assertStatus(201);
+
+        $this->putJson('/api/admin/game-documents/formatting_spec/visibility', [
+            'visibility_type' => 'all',
+        ])->assertOk();
+
+        $formatted = "Rule 1:\n\t- Keep tabs\n  - Keep double spaces\n\nBlock:\n\tColumnA\tColumnB\nTrailing line keeps two spaces  ";
+
+        $update = $this->putJson('/api/admin/game-documents/formatting_spec', [
+            'title' => 'Formatting Spec',
+            'content_text' => $formatted,
+        ]);
+        $update->assertOk();
+
+        $expectedStored = rtrim($formatted);
+
+        $adminRead = $this->getJson('/api/admin/game-documents/formatting_spec');
+        $adminRead->assertOk();
+        $adminContent = (string) ($adminRead->json('content_text') ?? '');
+        $this->assertSame($expectedStored, $adminContent);
+        $this->assertStringContainsString("\n\t- Keep tabs\n", $adminContent);
+        $this->assertStringContainsString('Keep double spaces', $adminContent);
+        $this->assertStringContainsString("\tColumnA\tColumnB", $adminContent);
+
+        Sanctum::actingAs($player);
+        $playerRead = $this->getJson('/api/game-documents/formatting_spec');
+        $playerRead->assertOk();
+        $this->assertSame($expectedStored, (string) ($playerRead->json('content_text') ?? ''));
+    }
+
     public function test_update_combat_rating_config_requires_exact_confirmation_phrase(): void
     {
         $admin = $this->createUser('admin.combat.confirm@example.test', 'admin');

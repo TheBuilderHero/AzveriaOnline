@@ -392,7 +392,19 @@ class AdminController extends Controller
 
         $hasTerrainType = Schema::hasColumn('nation_buildings', 'terrain_type');
         $hasTerrainAllocated = Schema::hasColumn('nation_buildings', 'terrain_allocated_square_miles');
+        $hasCompletesOnGameYear = Schema::hasColumn('nation_buildings', 'completes_on_game_year');
         $hasTerrainRequirement = Schema::hasColumn('building_catalog', 'terrain_requirement_json');
+        $hasBuildTimeMap = Schema::hasColumn('building_catalog', 'build_time_years_json');
+        $configuredBuildTimes = $hasBuildTimeMap
+            ? $this->normalizeStructureBuildTimeMap(
+                json_decode((string) ($buildingCatalog->build_time_years_json ?? 'null'), true) ?: []
+            )
+            : [];
+        $buildYearsForLevel = $this->structureBuildYearsForLevel($configuredBuildTimes, $level);
+        $completesOnGameYear = null;
+        if ($status !== 'built' && $hasCompletesOnGameYear) {
+            $completesOnGameYear = $this->currentProcessedYears() + max(1, $buildYearsForLevel);
+        }
 
         $terrainAllocations = [];
         if ($hasTerrainType && $hasTerrainAllocated && $hasTerrainRequirement) {
@@ -446,6 +458,9 @@ class AdminController extends Controller
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
+            if ($hasCompletesOnGameYear) {
+                $rowPayload['completes_on_game_year'] = $status === 'built' ? null : $completesOnGameYear;
+            }
             if ($hasTerrainType) {
                 $rowPayload['terrain_type'] = isset($terrainAllocations[$i])
                     ? ($terrainAllocations[$i]['terrain_type'] ?? null)
@@ -497,12 +512,16 @@ class AdminController extends Controller
     {
         $hasListOrder = Schema::hasColumn('building_catalog', 'list_order');
         $hasTerrainRequirement = Schema::hasColumn('building_catalog', 'terrain_requirement_json');
+        $hasBuildTimeMap = Schema::hasColumn('building_catalog', 'build_time_years_json');
 
         $query = DB::table('building_catalog')
             ->select('id', 'code', 'display_name', 'max_level');
 
         if ($hasTerrainRequirement) {
             $query->addSelect('terrain_requirement_json');
+        }
+        if ($hasBuildTimeMap) {
+            $query->addSelect('build_time_years_json');
         }
 
         if ($hasListOrder) {
@@ -511,7 +530,7 @@ class AdminController extends Controller
             $query->selectRaw('0 as list_order');
         }
 
-        $rows = $query->orderBy('display_name')->get()->map(function ($row) use ($hasTerrainRequirement) {
+        $rows = $query->orderBy('display_name')->get()->map(function ($row) use ($hasTerrainRequirement, $hasBuildTimeMap) {
             if ($hasTerrainRequirement) {
                 $row->terrain_requirement_json = $this->normalizeStructureTerrainRequirementMap(
                     json_decode((string) ($row->terrain_requirement_json ?? 'null'), true) ?: []
@@ -519,6 +538,11 @@ class AdminController extends Controller
             } else {
                 $row->terrain_requirement_json = [];
             }
+            $row->build_time_years_json = $hasBuildTimeMap
+                ? $this->normalizeStructureBuildTimeMap(
+                    json_decode((string) ($row->build_time_years_json ?? 'null'), true) ?: []
+                )
+                : [];
             return $row;
         });
 
@@ -534,16 +558,20 @@ class AdminController extends Controller
         }
 
         $hasTerrainRequirement = Schema::hasColumn('building_catalog', 'terrain_requirement_json');
+        $hasBuildTimeMap = Schema::hasColumn('building_catalog', 'build_time_years_json');
 
         $rows = DB::table('building_catalog')
             ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json', 'yearly_maintenance_json')
             ->when($hasTerrainRequirement, function ($q) {
                 $q->addSelect('terrain_requirement_json');
             })
+            ->when($hasBuildTimeMap, function ($q) {
+                $q->addSelect('build_time_years_json');
+            })
             ->orderBy('list_order')
             ->orderBy('display_name')
             ->get()
-            ->map(function ($row) use ($hasTerrainRequirement) {
+            ->map(function ($row) use ($hasTerrainRequirement, $hasBuildTimeMap) {
                 $row->yearly_production_json = $this->normalizeStructureProductionMap(
                     json_decode((string) ($row->yearly_production_json ?? 'null'), true) ?: []
                 );
@@ -553,6 +581,11 @@ class AdminController extends Controller
                 $row->terrain_requirement_json = $hasTerrainRequirement
                     ? $this->normalizeStructureTerrainRequirementMap(
                         json_decode((string) ($row->terrain_requirement_json ?? 'null'), true) ?: []
+                    )
+                    : [];
+                $row->build_time_years_json = $hasBuildTimeMap
+                    ? $this->normalizeStructureBuildTimeMap(
+                        json_decode((string) ($row->build_time_years_json ?? 'null'), true) ?: []
                     )
                     : [];
                 return $row;
@@ -577,9 +610,11 @@ class AdminController extends Controller
             'yearly_production_json' => ['sometimes', 'array'],
             'yearly_maintenance_json' => ['sometimes', 'array'],
             'terrain_requirement_json' => ['sometimes', 'array'],
+            'build_time_years_json' => ['sometimes', 'array'],
         ]);
 
         $hasTerrainRequirement = Schema::hasColumn('building_catalog', 'terrain_requirement_json');
+        $hasBuildTimeMap = Schema::hasColumn('building_catalog', 'build_time_years_json');
 
         $code = trim(Str::slug((string) ($data['code'] ?? ''), '_'), '_');
         if ($code === '') {
@@ -592,6 +627,7 @@ class AdminController extends Controller
         $normalizedProduction = $this->normalizeStructureProductionMap($data['yearly_production_json'] ?? []);
         $normalizedMaintenance = $this->normalizeStructureMaintenanceMap($data['yearly_maintenance_json'] ?? []);
         $normalizedTerrainRequirement = $this->normalizeStructureTerrainRequirementMap($data['terrain_requirement_json'] ?? []);
+        $normalizedBuildTime = $this->normalizeStructureBuildTimeMap($data['build_time_years_json'] ?? []);
         $now = now();
 
         $insertPayload = [
@@ -607,6 +643,9 @@ class AdminController extends Controller
         if ($hasTerrainRequirement) {
             $insertPayload['terrain_requirement_json'] = json_encode($normalizedTerrainRequirement);
         }
+        if ($hasBuildTimeMap) {
+            $insertPayload['build_time_years_json'] = json_encode($normalizedBuildTime);
+        }
 
         $structureId = DB::table('building_catalog')->insertGetId($insertPayload);
 
@@ -615,13 +654,17 @@ class AdminController extends Controller
             trim((string) $data['display_name']),
             (int) $data['max_level'],
             $normalizedProduction,
-            $normalizedMaintenance
+            $normalizedMaintenance,
+            $normalizedBuildTime
         );
 
         $fresh = DB::table('building_catalog')
             ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json', 'yearly_maintenance_json')
             ->when($hasTerrainRequirement, function ($q) {
                 $q->addSelect('terrain_requirement_json');
+            })
+            ->when($hasBuildTimeMap, function ($q) {
+                $q->addSelect('build_time_years_json');
             })
             ->where('id', $structureId)
             ->first();
@@ -634,6 +677,11 @@ class AdminController extends Controller
         $fresh->terrain_requirement_json = $hasTerrainRequirement
             ? $this->normalizeStructureTerrainRequirementMap(
                 json_decode((string) ($fresh->terrain_requirement_json ?? 'null'), true) ?: []
+            )
+            : [];
+        $fresh->build_time_years_json = $hasBuildTimeMap
+            ? $this->normalizeStructureBuildTimeMap(
+                json_decode((string) ($fresh->build_time_years_json ?? 'null'), true) ?: []
             )
             : [];
 
@@ -664,13 +712,16 @@ class AdminController extends Controller
             'yearly_production_json' => ['sometimes', 'array'],
             'yearly_maintenance_json' => ['sometimes', 'array'],
             'terrain_requirement_json' => ['sometimes', 'array'],
+            'build_time_years_json' => ['sometimes', 'array'],
         ]);
 
         $hasTerrainRequirement = Schema::hasColumn('building_catalog', 'terrain_requirement_json');
+        $hasBuildTimeMap = Schema::hasColumn('building_catalog', 'build_time_years_json');
 
         $normalizedProduction = $this->normalizeStructureProductionMap($data['yearly_production_json'] ?? []);
         $normalizedMaintenance = $this->normalizeStructureMaintenanceMap($data['yearly_maintenance_json'] ?? []);
         $normalizedTerrainRequirement = $this->normalizeStructureTerrainRequirementMap($data['terrain_requirement_json'] ?? []);
+        $normalizedBuildTime = $this->normalizeStructureBuildTimeMap($data['build_time_years_json'] ?? []);
 
         $updatePayload = [
             'display_name' => trim((string) $data['display_name']),
@@ -683,6 +734,9 @@ class AdminController extends Controller
         if ($hasTerrainRequirement) {
             $updatePayload['terrain_requirement_json'] = json_encode($normalizedTerrainRequirement);
         }
+        if ($hasBuildTimeMap) {
+            $updatePayload['build_time_years_json'] = json_encode($normalizedBuildTime);
+        }
 
         DB::table('building_catalog')->where('id', $structureId)->update($updatePayload);
 
@@ -692,13 +746,17 @@ class AdminController extends Controller
             trim((string) $data['display_name']),
             (int) $data['max_level'],
             $normalizedProduction,
-            $normalizedMaintenance
+            $normalizedMaintenance,
+            $normalizedBuildTime
         );
 
         $fresh = DB::table('building_catalog')
             ->select('id', 'code', 'display_name', 'max_level', 'list_order', 'yearly_production_json', 'yearly_maintenance_json')
             ->when($hasTerrainRequirement, function ($q) {
                 $q->addSelect('terrain_requirement_json');
+            })
+            ->when($hasBuildTimeMap, function ($q) {
+                $q->addSelect('build_time_years_json');
             })
             ->where('id', $structureId)
             ->first();
@@ -711,6 +769,11 @@ class AdminController extends Controller
         $fresh->terrain_requirement_json = $hasTerrainRequirement
             ? $this->normalizeStructureTerrainRequirementMap(
                 json_decode((string) ($fresh->terrain_requirement_json ?? 'null'), true) ?: []
+            )
+            : [];
+        $fresh->build_time_years_json = $hasBuildTimeMap
+            ? $this->normalizeStructureBuildTimeMap(
+                json_decode((string) ($fresh->build_time_years_json ?? 'null'), true) ?: []
             )
             : [];
 
@@ -3632,6 +3695,8 @@ class AdminController extends Controller
                 }
             }
 
+            $this->completeFinishedNationBuildingsForYear($yearNumber);
+
             $authorId = DB::table('users')->where('role', 'admin')->value('id');
             if ($authorId) {
                 DB::table('announcements')->insert([
@@ -3826,6 +3891,26 @@ class AdminController extends Controller
     private function normalizeStructureMaintenanceMap(array $maintenance): array
     {
         return $this->normalizeStructureProductionMap($maintenance);
+    }
+
+    private function normalizeStructureBuildTimeMap(array $buildTimes): array
+    {
+        $normalized = [];
+
+        foreach ($buildTimes as $levelKey => $yearsRaw) {
+            $level = max(1, (int) $levelKey);
+            $years = max(0, (int) round((float) $yearsRaw));
+            $normalized[(string) $level] = $years;
+        }
+
+        uksort($normalized, static fn ($a, $b) => (int) $a <=> (int) $b);
+
+        return $normalized;
+    }
+
+    private function structureBuildYearsForLevel(array $buildTimeMap, int $level): int
+    {
+        return max(0, (int) ($buildTimeMap[(string) max(1, $level)] ?? 0));
     }
 
     private function terrainKeys(): array
@@ -4039,7 +4124,7 @@ class AdminController extends Controller
         ];
     }
 
-    private function syncStructureShopLevels(string $familyCode, string $displayName, int $maxLevel, array $normalizedProduction, array $normalizedMaintenance): int
+    private function syncStructureShopLevels(string $familyCode, string $displayName, int $maxLevel, array $normalizedProduction, array $normalizedMaintenance, array $normalizedBuildTimes): int
     {
         $buildCategoryId = DB::table('shop_categories')->where('code', 'build')->value('id');
         if (!$buildCategoryId) {
@@ -4060,6 +4145,10 @@ class AdminController extends Controller
             $shopCode = 'struct_' . $familyCode . '_l' . $level;
             $yearly = json_encode($normalizedProduction[(string) $level] ?? new \stdClass());
             $maintenance = json_encode($normalizedMaintenance[(string) $level] ?? new \stdClass());
+            $buildYears = $this->structureBuildYearsForLevel($normalizedBuildTimes, $level);
+            $buildTimeText = $buildYears === 1
+                ? 'Build time: 1 game year.'
+                : ('Build time: ' . $buildYears . ' game years.');
 
             $existing = DB::table('shop_items')->where('code', $shopCode)->first();
             if ($existing) {
@@ -4071,6 +4160,12 @@ class AdminController extends Controller
                 }
                 if ($shopHasMaintenanceJson) {
                     $updatePayload['maintenance_json'] = $maintenance;
+                }
+                if ($shopHasDescriptionText) {
+                    $baseDescription = $level === 1
+                        ? 'Adds one level 1 ' . $displayName . ' structure.'
+                        : 'Upgrades one ' . $displayName . ' structure to level ' . $level . '.';
+                    $updatePayload['description_text'] = $baseDescription . ' ' . $buildTimeText;
                 }
                 if ($shopHasUpdatedAt) {
                     $updatePayload['updated_at'] = $now;
@@ -4091,8 +4186,8 @@ class AdminController extends Controller
             ];
             if ($shopHasDescriptionText) {
                 $insertPayload['description_text'] = $level === 1
-                    ? 'Adds one level 1 ' . $displayName . ' structure.'
-                    : 'Upgrades one ' . $displayName . ' structure to level ' . $level . '.';
+                    ? ('Adds one level 1 ' . $displayName . ' structure. ' . $buildTimeText)
+                    : ('Upgrades one ' . $displayName . ' structure to level ' . $level . '. ' . $buildTimeText);
             }
             if ($shopHasMaintenanceJson) {
                 $insertPayload['maintenance_json'] = $maintenance;
@@ -4118,6 +4213,32 @@ class AdminController extends Controller
         }
 
         return $syncedLevels;
+    }
+
+    private function currentProcessedYears(): int
+    {
+        if (!Schema::hasTable('game_time')) {
+            return 0;
+        }
+
+        return (int) (DB::table('game_time')->where('id', 1)->value('processed_years') ?? 0);
+    }
+
+    private function completeFinishedNationBuildingsForYear(int $processedYearNumber): void
+    {
+        if (!Schema::hasColumn('nation_buildings', 'completes_on_game_year')) {
+            return;
+        }
+
+        DB::table('nation_buildings')
+            ->whereIn('status', ['constructing', 'upgrading'])
+            ->whereNotNull('completes_on_game_year')
+            ->where('completes_on_game_year', '<=', $processedYearNumber)
+            ->update([
+                'status' => 'built',
+                'completes_on_game_year' => null,
+                'updated_at' => now(),
+            ]);
     }
 
     private function canonicalResourceToken(string $key): string
